@@ -1,0 +1,14 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question, idea or show-and-tell
+    url: https://github.com/etabli-dev/etabli-recueil/discussions
+    about: Anything that is not a specific bug or a concrete feature request — usage questions, half-formed ideas, plugins you have written. Start here if you are unsure.
+  - name: Security vulnerability
+    url: https://github.com/etabli-dev/etabli-recueil/security/advisories/new
+    about: Report privately through GitHub's security advisories. Never in a public issue.
+  - name: Concept, roadmap and architecture decisions
+    url: https://github.com/etabli-dev/etabli-recueil/blob/main/CONCEPT.md
+    about: What Recueil is, what it deliberately is not, and the phase order. Read before proposing scope.
+  - name: Contributing guide
+    url: https://github.com/etabli-dev/etabli-recueil/blob/main/CONTRIBUTING.md
+    about: Setup, the ADR process, commit conventions, DCO sign-off, and how to propose a plugin.

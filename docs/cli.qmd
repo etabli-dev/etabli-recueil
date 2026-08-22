@@ -1,0 +1,101 @@
+---
+title: "CLI"
+subtitle: "`recueil` — the API with a shell in front of it"
+---
+
+::: {.callout-important}
+Not yet implemented. The `recueil` binary arrives in Phase 1; subcommands follow the features they
+drive. This page is the intended command surface.
+:::
+
+The CLI is a client of the [REST API](api.qmd) like everything else, with one exception: `recueil
+serve` starts the server. It mirrors the API rather than reimplementing it, which means anything you
+can do here you can also do from a script, and anything the CLI cannot do the API cannot do either.
+
+Machine-readable output on every command via `--json`, so `jq` is the intended companion.
+
+## Commands
+
+| Command | Does | Phase |
+|---|---|---|
+| `recueil serve` | Start the server | 0 |
+| `recueil import` | Zotero, Paperless-ngx, BibTeX, RIS, EndNote XML, CSL-JSON, JabRef, CSV | 1 |
+| `recueil export` | BibTeX, BibLaTeX, CSL-JSON, RIS, JSON-LD, CSV, Parquet | 1 |
+| `recueil check` | Run the verification engine over a scope, or over a pasted reference list | 3 |
+| `recueil dedup` | File and record deduplication, dry run by default | 3 |
+| `recueil ingest` | Push files in, manage sources, work the review queue | 2 |
+| `recueil graph` | Build edges, run a deep dive, export a network | 5 |
+| `recueil sr` | Systematic review: search runs, screening, extraction, PRISMA counts | 7 |
+| `recueil backup` / `restore` | Consistent snapshot and recovery | 1 |
+| `recueil token` | Create, list and revoke scoped API tokens | 1 |
+| `recueil plugin` | Install, enable, disable, configure, list | 3 |
+| `recueil job` | List, follow, retry and cancel jobs | 1 |
+
+## Connecting
+
+| Variable | Purpose |
+|---|---|
+| `RECUEIL_URL` | Server base URL. Defaults to `http://localhost:8080` |
+| `RECUEIL_TOKEN` | Scoped API token |
+| `RECUEIL_PROFILE` | Named profile from `~/.config/recueil/config.toml`, for more than one instance |
+
+Global flags: `--json`, `--quiet`, `--verbose`, `--no-colour`, `--yes` (skip confirmations),
+`--dry-run` where the command supports it.
+
+## Examples
+
+Import a Zotero library and get a verification report:
+
+```sh
+recueil import zotero --data-dir ~/Zotero --report import-report.md
+```
+
+Audit a reference list that is not in your library — the peer-review deliverable:
+
+```sh
+recueil check bibliography --file submitted-references.txt --format markdown > audit.md
+```
+
+Parse the list, resolve what can be resolved, and report on what cannot: malformed identifiers, DOIs
+that do not resolve, metadata that disagrees with the record, retractions and expressions of
+concern, preprints with a published version, and references with no identifier and no match in
+Crossref, OpenAlex, PubMed or Semantic Scholar — which is the polite way of saying possibly
+fabricated.
+
+Look at what a dedup run would do before it does it:
+
+```sh
+recueil dedup records --scope collection:phd --dry-run --json | jq '.merges | length'
+```
+
+Refresh a bibliography for a manuscript:
+
+```sh
+recueil export --format biblatex --saved-search "thesis chapter 3" > chapter3.bib
+```
+
+Snowball from a seed with a budget:
+
+```sh
+recueil graph deep-dive --seed collection:phd --direction both --depth 2 --max-nodes 500
+```
+
+Follow a long job:
+
+```sh
+recueil job follow --last
+```
+
+## Exit codes
+
+| Code | Meaning |
+|---|---|
+| `0` | Success |
+| `1` | Command or usage error |
+| `2` | Authentication or authorisation failure |
+| `3` | Server unreachable |
+| `4` | Job completed with items routed to the review queue — not a failure, but not unattended success either |
+| `5` | Job failed |
+
+Code `4` exists because "flag, never guess" needs a way to say so to a shell script. A cron job that
+treats it as success is ignoring the queue it is filling.

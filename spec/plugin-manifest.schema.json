@@ -1,0 +1,975 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://etabli.github.io/recueil/schema/plugin-manifest-v1.json",
+  "title": "Recueil plugin manifest",
+  "description": "Schema for `recueil.plugin.json`, the manifest that every Recueil server or UI plugin ships at the root of its package. The manifest is the plugin contract: it declares identity, the plugin-API range the plugin was written against, the permissions it needs, the hooks it implements, the lifecycle events it subscribes to, the JSON Schema for its own settings, and the UI contribution points it fills. It is validated at install time and again at every activation; a manifest that does not validate is never loaded. See spec/hooks.md for the hook catalogue and spec/plugin-api.md for the versioning, loading and settings model. Plugins load in-process and are trusted in v1 (ADR-0012, ADR-0018): the permissions below are recorded and shown to the operator at install time, and checked against actual capability use by the compatibility test suite, but they are not enforced by isolation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "name",
+    "version",
+    "description",
+    "author",
+    "licence",
+    "recueilApi"
+  ],
+  "anyOf": [
+    { "required": ["main"] },
+    { "required": ["ui"] }
+  ],
+  "dependentRequired": {
+    "hooks": ["main"],
+    "events": ["main"],
+    "contributes": ["ui"]
+  },
+  "properties": {
+    "$schema": {
+      "description": "Optional pointer to this schema, so editors offer completion and validation while the manifest is being written. Ignored by the host.",
+      "type": "string",
+      "format": "uri"
+    },
+    "name": {
+      "description": "The plugin's identity and its npm package name. Lower-case, npm-valid, stable for the life of the plugin: it is the primary key in the `plugins` table, the prefix of the plugin's settings environment variables, and the value recorded in the audit log as `actor_plugin_id`. Renaming a plugin is publishing a new plugin. First-party plugins use the `@recueil/` scope; community plugins are encouraged, but not required, to use the `recueil-plugin-` prefix so they are findable on npm.",
+      "$ref": "#/$defs/packageName"
+    },
+    "displayName": {
+      "description": "Human-readable name shown in the plugin list, the install dialogue and the registry. Defaults to `name` when absent. Written in British English, sentence case, no trailing full stop.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "version": {
+      "description": "The plugin's own version, semver 2.0.0, independent of both the Recueil application version and the plugin-API version. Bumped on every published release; the host refuses to activate two builds carrying the same version but different content hashes.",
+      "$ref": "#/$defs/semver"
+    },
+    "description": {
+      "description": "One sentence saying what the plugin does, shown in the plugin list and the registry index. British English, no marketing.",
+      "type": "string",
+      "minLength": 10,
+      "maxLength": 300
+    },
+    "author": {
+      "description": "The person or organisation responsible for the plugin. Displayed verbatim in the install dialogue, because in a trusted-plugin host the operator's decision to install rests on who wrote it.",
+      "$ref": "#/$defs/person"
+    },
+    "licence": {
+      "description": "SPDX licence expression for the plugin's own source. Note the British spelling: this key is `licence`, not npm's `license`, and the two are independent — a plugin's `package.json` keeps its `license` field for npm. A plugin that links the Recueil server in-process is a derivative work of an AGPL-3.0-or-later program, so `AGPL-3.0-or-later` is the expected value; other values are permitted by this schema and audited by the registry, not by the host.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "examples": ["AGPL-3.0-or-later", "AGPL-3.0-only", "GPL-3.0-or-later"]
+    },
+    "homepage": {
+      "description": "URL of the plugin's documentation or landing page, linked from the plugin list.",
+      "type": "string",
+      "format": "uri"
+    },
+    "repository": {
+      "description": "URL of the source repository. Required by the plugin registry (Phase 9) so an operator can read the code before installing it; optional here so local and unpublished plugins validate.",
+      "type": "string",
+      "format": "uri"
+    },
+    "keywords": {
+      "description": "Free-text keywords used by registry search. Lower-case, no duplicates.",
+      "type": "array",
+      "maxItems": 20,
+      "uniqueItems": true,
+      "items": {
+        "description": "A single search keyword.",
+        "type": "string",
+        "minLength": 2,
+        "maxLength": 40,
+        "pattern": "^[a-z0-9][a-z0-9-]*$"
+      }
+    },
+    "icon": {
+      "description": "Package-relative path to an SVG or PNG icon, at least 128x128 for raster, shown in the plugin list and the registry.",
+      "$ref": "#/$defs/relativeAssetPath"
+    },
+    "recueilApi": {
+      "description": "The range of plugin-API versions this plugin is compatible with, as a semver range (node-semver syntax). Checked at install and again at every activation; a plugin outside the running host's plugin-API version is recorded as incompatible and not activated. The plugin API is versioned independently of the application (see spec/plugin-api.md), so this is not an application-version constraint. Prefer a caret range over an exact pin.",
+      "$ref": "#/$defs/semverRange"
+    },
+    "main": {
+      "description": "Package-relative path to the server-side entry module, an ES module whose default export is the plugin object (`activate` / `deactivate`) and whose named exports supply the hook and event implementations named in `hooks[].export` and `events[].export`. Required whenever `hooks` or `events` are declared. The module may import `@recueil/plugin-sdk` and third-party packages, but never Recueil server internals — an import lint in the compatibility test suite enforces this, because it is what makes the eventual move to a worker or WASM host a change of host rather than a change of contract (ADR-0018).",
+      "$ref": "#/$defs/relativeModulePath"
+    },
+    "ui": {
+      "description": "Package-relative path to the browser-side entry module, a separate bundle loaded by the web UI, whose named exports supply the components named in `contributes[*][].entry`. Required whenever `contributes` is declared. The UI bundle runs in the SPA and must not assume a Node environment.",
+      "$ref": "#/$defs/relativeModulePath"
+    },
+    "permissions": {
+      "description": "The host capabilities the plugin needs, drawn from a closed enumeration. Recorded in the `plugins` table, shown to the operator at install time, and compared by the compatibility test suite against the capabilities the plugin actually calls, so that an over-broad declaration fails the plugin's own CI. Not enforced by isolation in v1 (ADR-0012, ADR-0018): installing a plugin gives it the rights of the server process. Declare the narrowest set that works; each entry should be justified in `permissionNotes`.",
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/permission" }
+    },
+    "permissionNotes": {
+      "description": "Per-permission justification, keyed by permission name, rendered next to the permission in the install dialogue. Every key must be a permission that also appears in `permissions`; the compatibility test suite checks the two lists agree.",
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/permission" },
+      "additionalProperties": {
+        "description": "One sentence saying why the plugin needs this permission.",
+        "type": "string",
+        "minLength": 10,
+        "maxLength": 300
+      }
+    },
+    "hooks": {
+      "description": "The hooks this plugin implements, drawn from the v1 hook catalogue in spec/hooks.md. Each entry names the catalogue hook type, a plugin-scoped hook id, and the named export from `main` that implements the corresponding interface. The list is authoritative: the host registers exactly these and nothing else, and the compatibility test suite resolves every entry to a conforming export.",
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/hookDeclaration" }
+    },
+    "events": {
+      "description": "The lifecycle events this plugin subscribes to, from the catalogue in spec/hooks.md. Handlers are delivered after the emitting transaction commits, at least once, so every handler must be idempotent keyed by the event envelope id.",
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/eventSubscription" }
+    },
+    "settings": {
+      "description": "A JSON Schema (draft 2020-12) describing the plugin's own settings. The root must be an object schema. The host uses it three ways: to derive defaults when the plugin is first enabled, to validate every write to `PUT /api/v1/plugins/{id}/settings`, and to generate the settings form in the web UI when the plugin contributes no settings page of its own. Two Recueil-specific annotations are recognised on individual properties: `x-recueil-secret` marks a credential, whose stored value is always an environment or file reference (`${env:NAME}`, `${file:/path}`) resolved when the plugin reads it, never a literal, and which is excluded from logs, events, job parameters and the backup; `x-recueil-restart` marks a value whose change takes effect only after the plugin is reactivated. See spec/plugin-api.md for the storage and surfacing model.",
+      "$ref": "#/$defs/settingsSchema"
+    },
+    "contributes": {
+      "description": "UI contribution points the plugin fills. All contributions are declarative: the manifest states where the contribution appears and which export from `ui` renders it, and the host decides whether and when to mount it. Requires the `ui:contribute` permission and a `ui` entry point.",
+      "$ref": "#/$defs/contributes"
+    }
+  },
+  "$defs": {
+    "packageName": {
+      "description": "An npm-valid package name, optionally scoped.",
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 214,
+      "pattern": "^(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*$"
+    },
+    "semver": {
+      "description": "A semantic version, semver 2.0.0.",
+      "type": "string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+    },
+    "semverRange": {
+      "description": "A semver range in node-semver syntax. This pattern rejects obvious nonsense; the authoritative check is `semver.validRange()` in the host, which runs at install and at activation.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100,
+      "pattern": "^[0-9xX*][0-9a-zA-Z.\\-+ ]*$|^[\\^~><=]{1,2} ?[0-9xX*][0-9a-zA-Z.\\-+ ]*(?: ?(?:\\|\\| ?)?[\\^~><=]{0,2} ?[0-9xX*][0-9a-zA-Z.\\-+ ]*)*$",
+      "examples": ["^1.0.0", ">=1.2.0 <2.0.0", "1.x", "^1.4.0 || ^2.0.0"]
+    },
+    "relativeModulePath": {
+      "description": "A package-relative path to a JavaScript module, always beginning `./` and never traversing upwards.",
+      "type": "string",
+      "maxLength": 300,
+      "pattern": "^\\./[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*\\.(?:js|mjs|cjs)$",
+      "not": { "pattern": "(^|/)\\.\\.(/|$)" }
+    },
+    "relativeAssetPath": {
+      "description": "A package-relative path to a static asset, always beginning `./` and never traversing upwards.",
+      "type": "string",
+      "maxLength": 300,
+      "pattern": "^\\./[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*\\.(?:svg|png|webp)$",
+      "not": { "pattern": "(^|/)\\.\\.(/|$)" }
+    },
+    "identifierSlug": {
+      "description": "A lower-case, hyphen- or dot-separated identifier used for hook ids, contribution ids and command ids. Unique within its plugin; the host qualifies it with the plugin name to make it globally unique.",
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 64,
+      "pattern": "^[a-z0-9]+(?:[-.][a-z0-9]+)*$"
+    },
+    "exportName": {
+      "description": "The name of a JavaScript export in the plugin's entry module.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z_$][A-Za-z0-9_$]*$"
+    },
+    "person": {
+      "description": "A named person or organisation.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "description": "Full name of the person or organisation.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "email": {
+          "description": "Contact address for security reports and registry correspondence.",
+          "type": "string",
+          "format": "email",
+          "maxLength": 200
+        },
+        "url": {
+          "description": "Homepage of the person or organisation.",
+          "type": "string",
+          "format": "uri"
+        },
+        "orcid": {
+          "description": "ORCID iD in bare 16-digit form with hyphens. Recueil is a research tool and its plugin authors are often researchers; the registry uses this to attribute plugins in citation blocks.",
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{4}-[0-9]{4}-[0-9]{3}[0-9X]$"
+        }
+      }
+    },
+    "permission": {
+      "description": "A single host capability, in `resource:action` form. Read permissions grant retrieval through the SDK façade; write permissions grant creation, update and trashing, always through the façade and never by direct database or filesystem access.",
+      "type": "string",
+      "enum": [
+        "items:read",
+        "items:write",
+        "documents:read",
+        "documents:write",
+        "attachments:read",
+        "attachments:write",
+        "annotations:read",
+        "annotations:write",
+        "notes:read",
+        "notes:write",
+        "collections:read",
+        "collections:write",
+        "tags:read",
+        "tags:write",
+        "creators:read",
+        "creators:write",
+        "terms:read",
+        "terms:write",
+        "fields:read",
+        "fields:write",
+        "graph:read",
+        "graph:write",
+        "search:read",
+        "checks:read",
+        "checks:write",
+        "dedup:read",
+        "dedup:write",
+        "ingest:read",
+        "ingest:write",
+        "sr:read",
+        "sr:write",
+        "analytics:read",
+        "storage:read",
+        "storage:write",
+        "jobs:read",
+        "jobs:write",
+        "events:subscribe",
+        "settings:read",
+        "settings:write",
+        "secrets:read",
+        "audit:read",
+        "network:outbound",
+        "filesystem:read",
+        "filesystem:write",
+        "process:spawn",
+        "ui:contribute"
+      ]
+    },
+    "hookType": {
+      "description": "A hook from the v1 catalogue. Each value corresponds to one TypeScript interface documented in spec/hooks.md.",
+      "type": "string",
+      "enum": [
+        "resolver",
+        "check",
+        "dedupRule",
+        "ingestSource",
+        "ingestStage",
+        "storageBackend",
+        "exporter",
+        "importer",
+        "graphEdgeProvider",
+        "analyticsExport",
+        "srTemplate"
+      ]
+    },
+    "lifecycleEvent": {
+      "description": "A lifecycle event emitted by the host after the originating transaction commits. Payload shapes are documented in spec/hooks.md.",
+      "type": "string",
+      "enum": [
+        "item.created",
+        "item.updated",
+        "item.merged",
+        "item.trashed",
+        "item.restored",
+        "document.ingested",
+        "attachment.added",
+        "annotation.created",
+        "check.completed",
+        "job.started",
+        "job.finished",
+        "job.failed"
+      ]
+    },
+    "pipelineAnchor": {
+      "description": "A stage of the ingestion pipeline (CONCEPT.md 5.3) that an `ingestStage` hook attaches to.",
+      "type": "string",
+      "enum": [
+        "hash",
+        "duplicate_check",
+        "archive_extraction",
+        "type_detection",
+        "ocr",
+        "metadata_extraction",
+        "resolution",
+        "rules",
+        "confidence_gate",
+        "commit"
+      ]
+    },
+    "hookDeclaration": {
+      "description": "One implemented hook: its catalogue type, its plugin-scoped id, and the export that implements it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "id", "export"],
+      "properties": {
+        "type": {
+          "description": "Which catalogue hook this is.",
+          "$ref": "#/$defs/hookType"
+        },
+        "id": {
+          "description": "Plugin-scoped hook id, unique within this manifest. Surfaces in check results, dedup verdicts, provenance records, job parameters and the audit log, so it is part of the plugin's public contract and should not change between versions.",
+          "$ref": "#/$defs/identifierSlug"
+        },
+        "export": {
+          "description": "Named export from `main` implementing the interface for `type`.",
+          "$ref": "#/$defs/exportName"
+        },
+        "title": {
+          "description": "Human-readable label for the hook, shown wherever the hook is selectable — the checks list, the exporter menu, the storage backend picker. Defaults to `id`.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "description": {
+          "description": "One sentence explaining what this particular hook does, shown as help text next to the title.",
+          "type": "string",
+          "maxLength": 300
+        },
+        "priority": {
+          "description": "Ordering weight within the hook type; lower runs first. Host built-ins sit at 100. Ties are broken by plugin name then hook id, so ordering is deterministic across restarts. Ignored for hook types the host invokes by explicit selection rather than in a chain (`storageBackend`, `exporter`, `importer`, `srTemplate`).",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000,
+          "default": 100
+        },
+        "provides": {
+          "description": "The concrete units this hook contributes, for hook types that supply a set: source names for `resolver`, check ids for `check`, format ids for `exporter` and `importer`, edge types for `graphEdgeProvider`, table names for `analyticsExport`, template ids for `srTemplate`. Declared here so the host can populate menus and the registry can index capabilities without loading the plugin.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 50,
+          "uniqueItems": true,
+          "items": {
+            "description": "One unit provided by this hook.",
+            "$ref": "#/$defs/identifierSlug"
+          }
+        },
+        "anchor": {
+          "description": "For `ingestStage` only: the pipeline stage this stage attaches to. Required for `ingestStage`, forbidden elsewhere.",
+          "$ref": "#/$defs/pipelineAnchor"
+        },
+        "position": {
+          "description": "For `ingestStage` only: whether the stage runs before or after its anchor.",
+          "type": "string",
+          "enum": ["before", "after"],
+          "default": "after"
+        },
+        "scheme": {
+          "description": "For `storageBackend` only: the URI scheme this backend serves, used in `documents.storage_backend` and in configuration. Required for `storageBackend`, forbidden elsewhere.",
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 20,
+          "pattern": "^[a-z][a-z0-9+.-]*$"
+        },
+        "timeoutMs": {
+          "description": "Override for the host's default per-call timeout for this hook type (see the timeout table in spec/hooks.md). Raise it only when the work genuinely cannot be moved into a job; the host clamps the value to its configured ceiling and logs when it does.",
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 3600000
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "ingestStage" } }, "required": ["type"] },
+          "then": { "required": ["anchor"] },
+          "else": { "properties": { "anchor": false, "position": false } }
+        },
+        {
+          "if": { "properties": { "type": { "const": "storageBackend" } }, "required": ["type"] },
+          "then": { "required": ["scheme"] },
+          "else": { "properties": { "scheme": false } }
+        }
+      ]
+    },
+    "eventSubscription": {
+      "description": "A subscription to one lifecycle event.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["event", "export"],
+      "properties": {
+        "event": {
+          "description": "The lifecycle event to subscribe to.",
+          "$ref": "#/$defs/lifecycleEvent"
+        },
+        "export": {
+          "description": "Named export from `main` implementing the handler, `(envelope, ctx) => Promise<void>`.",
+          "$ref": "#/$defs/exportName"
+        },
+        "mode": {
+          "description": "`async` (the default) queues the handler on the job runner, so a slow or failing handler cannot delay the request that emitted the event; `blocking` runs it inline within the emitting request after commit, and is only for handlers that must complete before the API responds. Blocking handlers share a single budget across all plugins.",
+          "type": "string",
+          "enum": ["async", "blocking"],
+          "default": "async"
+        }
+      }
+    },
+    "settingsSchema": {
+      "description": "A draft 2020-12 JSON Schema whose root is an object schema. Only the root shape is constrained here; the host validates the whole document with a full metaschema check at install time.",
+      "type": "object",
+      "required": ["type", "properties"],
+      "properties": {
+        "type": {
+          "description": "Must be `object`: plugin settings are always a flat or nested object, never a bare scalar or array.",
+          "const": "object"
+        },
+        "properties": {
+          "description": "The settings themselves. Each property should carry a `title`, a `description` and a `default`, because the generated settings form is built from exactly those.",
+          "type": "object"
+        },
+        "required": {
+          "description": "Settings with no usable default. A plugin with required settings is enabled but inactive until they are supplied; the plugin list shows it as `needs configuration`.",
+          "type": "array",
+          "items": {
+            "description": "Name of a required setting.",
+            "type": "string"
+          }
+        }
+      }
+    },
+    "contributionBase": {
+      "description": "Fields common to every UI contribution point.",
+      "type": "object",
+      "required": ["id", "title", "entry"],
+      "properties": {
+        "id": {
+          "description": "Contribution id, unique within this manifest. Used as the persistence key for user preferences such as collapsed state and panel order, so it must stay stable across versions.",
+          "$ref": "#/$defs/identifierSlug"
+        },
+        "title": {
+          "description": "Label shown to the user. British English, sentence case, no trailing full stop.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "entry": {
+          "description": "Named export from `ui` that renders this contribution.",
+          "$ref": "#/$defs/exportName"
+        },
+        "icon": {
+          "description": "Package-relative path to an icon for this contribution.",
+          "$ref": "#/$defs/relativeAssetPath"
+        },
+        "order": {
+          "description": "Ordering weight among sibling contributions; lower appears first. Host sections sit at 100. The user's own ordering, once set, wins over this value.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000,
+          "default": 100
+        },
+        "when": {
+          "description": "A visibility expression evaluated against the current UI context, in the small boolean grammar documented in spec/plugin-api.md (identifiers, comparisons, `&&`, `||`, `!`, parentheses). Absent means always visible. The expression cannot call code; it exists so the host can decide visibility without mounting the contribution.",
+          "type": "string",
+          "maxLength": 300
+        }
+      }
+    },
+    "contributes": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "description": "The declared UI contributions, grouped by contribution point.",
+      "properties": {
+        "itemPaneSections": {
+          "description": "Sections added to the item pane, alongside the core sections. This is the busiest contribution point: enrichment provenance, citation contexts and per-plugin diagnostics all live here.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "$ref": "#/$defs/contributionBase",
+            "unevaluatedProperties": false,
+            "properties": {
+              "itemTypes": {
+                "description": "Item types this section applies to. Absent means all types. Values are Recueil item types (`article`, `book`, `chapter`, `report`, `thesis`, `dataset`, `preprint`, `webpage`, `invoice`, `letter`, `contract`, `photo`, and any type added by configuration).",
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {
+                  "description": "One item type.",
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9_]*$"
+                }
+              },
+              "collapsedByDefault": {
+                "description": "Whether the section starts collapsed the first time a user sees it. After that the user's own state wins.",
+                "type": "boolean",
+                "default": false
+              }
+            }
+          }
+        },
+        "sidebarPanels": {
+          "description": "Panels added to the application sidebar, for plugin surfaces that are not tied to a single item.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "$ref": "#/$defs/contributionBase",
+            "unevaluatedProperties": false,
+            "properties": {
+              "position": {
+                "description": "Which sidebar the panel docks into.",
+                "type": "string",
+                "enum": ["left", "right"],
+                "default": "left"
+              },
+              "badge": {
+                "description": "Whether the panel may display a count badge, supplied at runtime by the panel itself.",
+                "type": "boolean",
+                "default": false
+              }
+            }
+          }
+        },
+        "contextActions": {
+          "description": "Actions added to context menus and selection toolbars. Recueil is keyboard-first, so give every action a keybinding where one is free.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "$ref": "#/$defs/contributionBase",
+            "unevaluatedProperties": false,
+            "required": ["id", "title", "entry", "targets"],
+            "properties": {
+              "targets": {
+                "description": "The kinds of selection this action applies to.",
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {
+                  "description": "One selection kind.",
+                  "type": "string",
+                  "enum": [
+                    "item",
+                    "items",
+                    "document",
+                    "attachment",
+                    "annotation",
+                    "note",
+                    "collection",
+                    "tag",
+                    "creator",
+                    "term",
+                    "graph_node",
+                    "review_record",
+                    "review_queue_entry"
+                  ]
+                }
+              },
+              "keybinding": {
+                "description": "Default keybinding in the host's chord notation, for example `mod+shift+k`. Advisory: the user's own bindings win, and a clash with a core binding is resolved in favour of the core binding with a warning in the plugin list.",
+                "type": "string",
+                "maxLength": 40,
+                "pattern": "^(?:(?:mod|ctrl|alt|shift|meta)\\+)*[a-z0-9]+(?:[a-z0-9]*)$"
+              },
+              "destructive": {
+                "description": "Whether the action is presented as destructive and asks for confirmation. Note that Recueil never deletes (P5), so this means trashing, merging or overwriting, not erasure.",
+                "type": "boolean",
+                "default": false
+              }
+            }
+          }
+        },
+        "networkRenderers": {
+          "description": "Alternative renderers for graph and network views, for plugins that supply a layout or visual encoding the built-in Sigma.js and Cytoscape.js views do not.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "$ref": "#/$defs/contributionBase",
+            "unevaluatedProperties": false,
+            "required": ["id", "title", "entry", "networkKinds"],
+            "properties": {
+              "networkKinds": {
+                "description": "Which network views this renderer offers itself for.",
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {
+                  "description": "One network view kind.",
+                  "type": "string",
+                  "enum": ["auto_map", "curated_network", "deep_dive", "local_citation_network"]
+                }
+              },
+              "exportsImages": {
+                "description": "Whether the renderer can produce SVG or PNG for the export menu. A renderer that cannot is still usable on screen but is excluded from figure export.",
+                "type": "boolean",
+                "default": false
+              }
+            }
+          }
+        },
+        "screeningPanels": {
+          "description": "Panels added to the systematic-review workspace. Anything mounted here that influences a decision must supply the automation stanza required by ADR-0020 when the review has disclosure enabled.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "$ref": "#/$defs/contributionBase",
+            "unevaluatedProperties": false,
+            "required": ["id", "title", "entry", "stage"],
+            "properties": {
+              "stage": {
+                "description": "Which stage of the review workflow the panel belongs to.",
+                "type": "string",
+                "enum": ["title_abstract", "full_text", "extraction", "risk_of_bias", "prisma"]
+              },
+              "influencesDecisions": {
+                "description": "Whether the panel can suggest or record screening, extraction or risk-of-bias values. When true the host requires the plugin to be listed as an automation-capable plugin at review setup (ADR-0020) and refuses to record a suggestion without an automation stanza.",
+                "type": "boolean",
+                "default": false
+              }
+            }
+          }
+        },
+        "settingsPages": {
+          "description": "Custom settings pages, for plugins whose configuration is too rich for the form generated from the `settings` schema. A plugin with a settings page still declares a `settings` schema: the schema remains the validation contract for the stored value, and the page is only a nicer editor for it.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "$ref": "#/$defs/contributionBase",
+            "unevaluatedProperties": false,
+            "properties": {
+              "replacesGeneratedForm": {
+                "description": "Whether this page replaces the automatically generated settings form, or appears alongside it as an extra tab.",
+                "type": "boolean",
+                "default": true
+              }
+            }
+          }
+        },
+        "commands": {
+          "description": "Entries in the command palette, the keyboard-first path to everything a plugin can do.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "$ref": "#/$defs/contributionBase",
+            "unevaluatedProperties": false,
+            "properties": {
+              "category": {
+                "description": "Grouping label in the command palette, for example `Enrichment` or `Systematic review`. Defaults to the plugin's `displayName`.",
+                "type": "string",
+                "maxLength": 40
+              },
+              "keybinding": {
+                "description": "Default keybinding in the host's chord notation. Advisory, as for context actions.",
+                "type": "string",
+                "maxLength": 40,
+                "pattern": "^(?:(?:mod|ctrl|alt|shift|meta)\\+)*[a-z0-9]+(?:[a-z0-9]*)$"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "$schema": "https://etabli.github.io/recueil/schema/plugin-manifest-v1.json",
+      "name": "@recueil/resolver-openalex",
+      "displayName": "OpenAlex resolver",
+      "version": "1.2.0",
+      "description": "Resolves works, authors, venues and topics against OpenAlex, and supplies reference and citation edges for the graph.",
+      "author": {
+        "name": "Recueil maintainers",
+        "url": "https://github.com/etabli/recueil"
+      },
+      "licence": "AGPL-3.0-or-later",
+      "homepage": "https://etabli.github.io/recueil/plugins/resolver-openalex",
+      "repository": "https://github.com/etabli/recueil",
+      "keywords": ["resolver", "openalex", "bibliometrics", "citations"],
+      "recueilApi": "^1.0.0",
+      "main": "./dist/index.js",
+      "permissions": [
+        "items:read",
+        "items:write",
+        "creators:write",
+        "terms:write",
+        "graph:read",
+        "graph:write",
+        "jobs:write",
+        "settings:read",
+        "secrets:read",
+        "network:outbound"
+      ],
+      "permissionNotes": {
+        "items:write": "Writes resolved bibliographic fields, each with a provenance record naming OpenAlex and the fetch timestamp.",
+        "graph:write": "Materialises cites and cited-by edges from referenced_works and the cited_by endpoint.",
+        "secrets:read": "Reads the optional OpenAlex API key, needed for the higher rate limit at scale.",
+        "network:outbound": "Calls api.openalex.org."
+      },
+      "hooks": [
+        {
+          "type": "resolver",
+          "id": "openalex",
+          "export": "openAlexResolver",
+          "title": "OpenAlex",
+          "description": "Lookup by DOI, PMID, arXiv id or OpenAlex id; metadata search; references, citations and metrics.",
+          "priority": 20,
+          "provides": ["openalex"],
+          "timeoutMs": 30000
+        },
+        {
+          "type": "graphEdgeProvider",
+          "id": "openalex-edges",
+          "export": "openAlexEdgeProvider",
+          "title": "OpenAlex citation edges",
+          "provides": ["cites", "version-of"]
+        }
+      ],
+      "events": [
+        { "event": "item.created", "export": "onItemCreated", "mode": "async" },
+        { "event": "item.merged", "export": "onItemMerged", "mode": "async" }
+      ],
+      "settings": {
+        "type": "object",
+        "properties": {
+          "mailto": {
+            "title": "Polite-pool address",
+            "description": "Contact address sent with every request, as OpenAlex asks. Improves rate limits and is good manners.",
+            "type": "string",
+            "format": "email"
+          },
+          "apiKey": {
+            "title": "API key",
+            "description": "Optional premium key, given as an environment reference such as ${env:OPENALEX_API_KEY}. Leave empty to use the free pool.",
+            "type": "string",
+            "x-recueil-secret": true
+          },
+          "requestsPerSecond": {
+            "title": "Requests per second",
+            "description": "Ceiling for this resolver. The adaptive limiter backs off below this on 429 responses; it never exceeds it.",
+            "type": "number",
+            "minimum": 0.1,
+            "maximum": 10,
+            "default": 5
+          },
+          "cacheTtlHours": {
+            "title": "Cache lifetime (hours)",
+            "description": "How long a fetched record is reused before it is refetched.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8760,
+            "default": 168
+          },
+          "fetchCitedBy": {
+            "title": "Fetch citing works",
+            "description": "Whether to pull the cited-by list as well as the reference list. Doubles request volume.",
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "required": ["mailto"]
+      }
+    },
+    {
+      "$schema": "https://etabli.github.io/recueil/schema/plugin-manifest-v1.json",
+      "name": "@recueil/storage-s3",
+      "displayName": "S3 storage backend",
+      "version": "1.0.3",
+      "description": "Stores document bytes in an S3-compatible object store under the content-addressed layout, with integrity verification on read.",
+      "author": {
+        "name": "Recueil maintainers",
+        "url": "https://github.com/etabli/recueil"
+      },
+      "licence": "AGPL-3.0-or-later",
+      "repository": "https://github.com/etabli/recueil",
+      "keywords": ["storage", "s3", "minio", "backend"],
+      "recueilApi": ">=1.0.0 <2.0.0",
+      "main": "./dist/index.js",
+      "permissions": [
+        "storage:read",
+        "storage:write",
+        "documents:read",
+        "settings:read",
+        "secrets:read",
+        "network:outbound"
+      ],
+      "permissionNotes": {
+        "storage:write": "This plugin is a storage backend; writing document bytes is its whole purpose.",
+        "secrets:read": "Reads the access key and secret key for the bucket.",
+        "network:outbound": "Talks to the configured S3 endpoint."
+      },
+      "hooks": [
+        {
+          "type": "storageBackend",
+          "id": "s3",
+          "export": "s3Backend",
+          "scheme": "s3",
+          "title": "S3-compatible object store",
+          "description": "Content-addressed object storage at <bucket>/<prefix>/aa/bb/<sha256>.",
+          "timeoutMs": 60000
+        },
+        {
+          "type": "check",
+          "id": "s3-object-integrity",
+          "export": "objectIntegrityCheck",
+          "title": "S3 object integrity",
+          "description": "Re-reads a sample of objects and compares the SHA-256 against the Document record.",
+          "provides": ["s3-object-integrity"],
+          "priority": 400
+        }
+      ],
+      "settings": {
+        "type": "object",
+        "properties": {
+          "endpoint": {
+            "title": "Endpoint",
+            "description": "Base URL of the S3-compatible service. Leave empty for AWS S3.",
+            "type": "string",
+            "format": "uri"
+          },
+          "region": {
+            "title": "Region",
+            "description": "Bucket region.",
+            "type": "string",
+            "default": "eu-central-1"
+          },
+          "bucket": {
+            "title": "Bucket",
+            "description": "Bucket holding the content-addressed store.",
+            "type": "string",
+            "minLength": 3
+          },
+          "prefix": {
+            "title": "Key prefix",
+            "description": "Prefix under which the aa/bb/<sha256> tree is written.",
+            "type": "string",
+            "default": "recueil/"
+          },
+          "accessKeyId": {
+            "title": "Access key id",
+            "description": "Environment reference to the bucket access key, e.g. ${env:S3_ACCESS_KEY_ID}.",
+            "type": "string",
+            "x-recueil-secret": true
+          },
+          "secretAccessKey": {
+            "title": "Secret access key",
+            "description": "Environment reference to the bucket secret key, e.g. ${env:S3_SECRET_ACCESS_KEY}.",
+            "type": "string",
+            "x-recueil-secret": true
+          },
+          "forcePathStyle": {
+            "title": "Force path-style addressing",
+            "description": "Needed by MinIO and most self-hosted gateways. Changing this reconnects the client, so the plugin is reactivated.",
+            "type": "boolean",
+            "default": true,
+            "x-recueil-restart": true
+          },
+          "verifyOnRead": {
+            "title": "Verify hash on read",
+            "description": "Recompute the SHA-256 of every object as it is read. Safe but slower.",
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "required": ["bucket", "accessKeyId", "secretAccessKey"]
+      }
+    },
+    {
+      "$schema": "https://etabli.github.io/recueil/schema/plugin-manifest-v1.json",
+      "name": "recueil-plugin-cochrane-rob",
+      "displayName": "Cochrane RoB templates",
+      "version": "0.4.1",
+      "description": "Adds RoB 2 and ROBINS-I instruments as systematic-review templates, with a screening-workspace panel that shows domain judgements while extracting.",
+      "author": {
+        "name": "A Reviewer",
+        "email": "reviewer@example.org",
+        "orcid": "0000-0002-1825-0097"
+      },
+      "licence": "AGPL-3.0-or-later",
+      "repository": "https://github.com/example/recueil-plugin-cochrane-rob",
+      "keywords": ["systematic-review", "risk-of-bias", "rob2", "robins-i"],
+      "icon": "./assets/icon.svg",
+      "recueilApi": "^1.2.0",
+      "main": "./dist/server.js",
+      "ui": "./dist/ui.js",
+      "permissions": ["sr:read", "sr:write", "items:read", "settings:read", "ui:contribute"],
+      "permissionNotes": {
+        "sr:write": "Writes risk-of-bias assessments and the frozen instrument alongside them.",
+        "ui:contribute": "Renders the domain-judgement panel in the review workspace."
+      },
+      "hooks": [
+        {
+          "type": "srTemplate",
+          "id": "cochrane-rob",
+          "export": "cochraneRobTemplates",
+          "title": "Cochrane risk-of-bias instruments",
+          "provides": ["rob2", "rob2-cluster", "robins-i"]
+        }
+      ],
+      "events": [{ "event": "item.updated", "export": "invalidateAssessments" }],
+      "settings": {
+        "type": "object",
+        "properties": {
+          "defaultTool": {
+            "title": "Default instrument",
+            "description": "Instrument offered first when a new assessment is started.",
+            "type": "string",
+            "enum": ["rob2", "rob2-cluster", "robins-i"],
+            "default": "rob2"
+          },
+          "requireJustification": {
+            "title": "Require a justification for every domain",
+            "description": "Refuse to save a domain judgement without free-text support.",
+            "type": "boolean",
+            "default": true
+          }
+        }
+      },
+      "contributes": {
+        "screeningPanels": [
+          {
+            "id": "rob-domains",
+            "title": "Risk of bias",
+            "entry": "RobDomainPanel",
+            "stage": "risk_of_bias",
+            "influencesDecisions": false,
+            "order": 50
+          }
+        ],
+        "itemPaneSections": [
+          {
+            "id": "rob-summary",
+            "title": "Risk of bias",
+            "entry": "RobSummarySection",
+            "itemTypes": ["article", "preprint", "report"],
+            "collapsedByDefault": true,
+            "when": "item.inReview"
+          }
+        ],
+        "commands": [
+          {
+            "id": "start-rob2",
+            "title": "Start a RoB 2 assessment",
+            "entry": "startRob2Command",
+            "category": "Systematic review",
+            "keybinding": "mod+shift+b"
+          }
+        ]
+      }
+    }
+  ]
+}

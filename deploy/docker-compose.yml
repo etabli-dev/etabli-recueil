@@ -1,0 +1,90 @@
+# Recueil — base deployment.
+#
+#   cp .env.example .env
+#   docker compose up -d
+#
+# This is the whole thing: one container, one volume, SQLite inside it. The optional sidecars live
+# in docker-compose.sidecars.yml and are opt-in per profile; nothing here depends on them.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.sidecars.yml --profile grobid up -d
+#
+# Status: untested. At Phase 0 the image in `image:` does not exist yet, so this file has never been
+# run. See README.md.
+
+name: recueil
+
+services:
+  recueil:
+    image: ${RECUEIL_IMAGE:-ghcr.io/etabli-dev/recueil}:${RECUEIL_VERSION:-latest}
+
+    # To run your own build instead of the published image, uncomment this and run
+    # `docker compose build`. The context is the repository root because the Dockerfile builds the
+    # whole workspace; `target: runtime` skips the OCR toolchain stage.
+    #build:
+    #  context: ..
+    #  dockerfile: deploy/Dockerfile
+    #  target: runtime
+
+    # Optional: the server's own defaults are enough to start. `required: false` so a fresh clone
+    # comes up before anyone has copied .env.example.
+    env_file:
+      - path: .env
+        required: false
+
+    # Bound to loopback by default. Put a reverse proxy in front of it for TLS (CONCEPT.md §5.15);
+    # the container port follows RECUEIL_PORT so the two cannot drift apart.
+    ports:
+      - "${RECUEIL_PUBLISH_ADDR:-127.0.0.1}:${RECUEIL_PUBLISH_PORT:-3000}:${RECUEIL_PORT:-3000}"
+
+    # Everything stateful: the SQLite database, the content-addressed store, scratch space. A named
+    # volume rather than a bind mount, because the container runs as uid 1000 and a bind mount
+    # inherits the host's ownership instead of the image's. README.md covers the bind-mount case.
+    volumes:
+      - recueil-data:/data
+
+    restart: unless-stopped
+
+    # PID 1 in the image is tini, so signals and zombie children are already handled; this covers
+    # the case of someone overriding the entrypoint.
+    init: true
+
+    # Long enough for an in-flight job to be marked interrupted and for SQLite to checkpoint.
+    stop_grace_period: 30s
+
+    healthcheck:
+      # Duplicated from the image's own HEALTHCHECK so that it is visible and adjustable here, and
+      # so it still applies if the entrypoint is overridden.
+      test:
+        - CMD
+        - node
+        - -e
+        - "const port=process.env.RECUEIL_PORT||3000;fetch('http://127.0.0.1:'+port+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      # First start migrates the database and builds the FTS index, which on a large imported
+      # library takes considerably longer than a restart.
+      start_period: 60s
+
+    security_opt:
+      - no-new-privileges:true
+
+    # The server binds a port above 1024 and writes only to /data; it needs no Linux capabilities.
+    cap_drop:
+      - ALL
+
+    # Hardening worth turning on once you know your plugins: a read-only root with a writable /tmp.
+    # Left off by default because a plugin that shells out to a tool with its own temporary files
+    # will fail in ways that look like a Recueil bug.
+    #read_only: true
+    #tmpfs:
+    #  - /tmp:size=512m
+
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+volumes:
+  recueil-data:

@@ -1,0 +1,142 @@
+---
+title: "Concepts"
+subtitle: "The vocabulary everything else assumes"
+---
+
+::: {.callout-note appearance="simple"}
+The model described here is settled — it is specified in
+[`spec/data-model.md`](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/data-model.md)
+and drawn in [`spec/erd.mmd`](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/erd.mmd) —
+but it is not yet implemented. Phase 1 builds it.
+:::
+
+Four ideas carry most of the weight: the separation of **documents from items**, **content-hash
+identity**, **facets**, and **provenance on every derived fact**. Get these four and the API, the
+CLI and the plugin hooks all read as obvious consequences.
+
+## Documents, items, attachments
+
+Most reference managers conflate the file with the record about the file. Recueil does not, because
+the two have different identities, different lifetimes and different sources of truth.
+
+| Concept | What it is | Identity |
+|---|---|---|
+| **Document** | A file. A PDF, a scan, an email, a photo, a dataset archive. Bytes plus MIME type, size and the provenance of where it came from. | Its SHA-256 |
+| **Item** | The library record. A thing you cite, file or read: an article, book, chapter, report, thesis, dataset, preprint, webpage, invoice, letter, contract, photo. | An internal id |
+| **Attachment** | The relation between the two, carrying a role: `primary`, `supplement`, `snapshot`, `scan`. | The pair, plus its role |
+
+The relation is genuinely many-to-many, and both directions occur in practice:
+
+- **One item, many documents.** A paper with its published PDF, its accepted manuscript, its
+  supplementary spreadsheet and an HTML snapshot of the landing page. Four documents, one item.
+- **One document, many items.** A single conference proceedings PDF that is the primary attachment
+  of nine chapter items. One document, stored once, nine items.
+
+### Why the separation earns its keep
+
+- The same bytes are stored once, no matter how many items point at them. Deduplication is a
+  property of the model rather than a maintenance task.
+- Re-downloading a paper you already have is a no-op that gets logged, not a second copy.
+- An item can exist with no document at all — a book you have read but do not have a scan of, a
+  reference found in someone else's bibliography — and gain one later without changing identity.
+- A document can exist with no item, sitting in the review queue, waiting for a decision about what
+  it actually is.
+
+## Content-hash identity
+
+**A file is its bytes.** The SHA-256 of a document's content is its identity. Path, filename and
+modification time are metadata about a copy, never a statement about sameness
+([ADR-0004](adr.qmd)).
+
+This one decision resolves a surprising number of arguments:
+
+- Ingesting the same file twice, from the scanner and again by email, links to the existing document
+  and stops. The pipeline is idempotent by construction.
+- Storage is content-addressed, so the layout on disk is derived from the hash and does not depend
+  on the database. The store is readable and re-importable without the application, which is what
+  "no lock-in" has to mean to be worth saying.
+- Backups deduplicate well, and integrity checking is a rehash rather than a trust exercise.
+- Rename anything you like. Nothing breaks.
+
+### What the hash does not solve
+
+Identical bytes prove sameness. **Different bytes prove nothing.** The same paper downloaded from
+the publisher and from a repository differs by a watermark; a re-scan of the same page differs
+everywhere. These are *near-duplicates*, and they are handled by a separate layer — a simhash over
+extracted text — which **flags and never merges automatically**. Byte-identical files are linked
+without asking; anything else goes to a human, with the reason recorded.
+
+## Facets
+
+An item's *type* says what it is. Its *facets* say which vocabularies apply to it. A facet is a
+coherent block of fields attached to an item, rather than a hundred nullable columns that are empty
+for most records.
+
+| Facet | Fields | Applies to |
+|---|---|---|
+| **Bibliographic** | title, creators, venue, date, identifiers (DOI, PMID, PMCID, arXiv, ISBN, OpenAlex, S2), abstract, keywords, MeSH terms, language, citation key | Scholarly items |
+| **Office** | correspondent, document date, archive serial number, amount, reference number | Private and office documents, mapping Paperless-ngx's model |
+
+An item can carry both, and this is the point rather than an edge case. A standards document is
+correspondence *and* something you cite. An invoice from a publisher is an office document that
+belongs in a project collection. Facets let one library hold your reading and your filing without
+either pretending to be the other, and without a scanned electricity bill acquiring an empty
+"journal volume" field.
+
+Beyond facets, arbitrary structure comes from **custom fields** — typed as text, number, date,
+choice, multi-choice, JSON or item-reference. The same mechanism that adds a field to your invoices
+is the mechanism that generates a systematic-review extraction form, which is why extraction data
+comes out of the tool as a table rather than as a reshaping exercise.
+
+## Provenance
+
+**Every derived fact records where it came from.** Not the item — the *field*. Not the graph — the
+*edge*.
+
+A metadata field carries its source, the timestamp it was fetched, and a confidence. A graph edge
+carries the same, plus its evidence, which for a citation extracted from a PDF is the sentence
+around it. A merge carries the record of what was merged and stays reversible.
+
+This buys four things:
+
+1. **Merge policy that is not a guess.** When Crossref and OpenAlex disagree about a page range, the
+   per-field source ordering decides, and the decision is inspectable afterwards.
+2. **Manual edits that survive.** A field you have corrected by hand is locked and no resolver
+   overwrites it. Enrichment can be re-run as often as you like without fear.
+3. **Honest maps.** Every network view shows coverage statistics beside it: how many items had
+   reference data, from which sources, fetched when. A co-citation map built on 40% coverage is a
+   different object from one built on 95%, and the difference must be visible or the map is
+   misleading.
+4. **Reproducibility.** A frozen curated network embeds the metadata as it stood at freeze time, so
+   a figure in a paper still means what it meant when it was made.
+
+## Supporting concepts
+
+| Concept | What it is |
+|---|---|
+| **Collection** | Hierarchical grouping, by hand. An item can be in several. |
+| **Tag** | Flat label with a colour and a scheme. |
+| **Note** | Markdown, attached to an item or standing alone. |
+| **Annotation** | A highlight, note, area or ink mark on a document. Stored as a record against a target and a selector using the W3C Web Annotation model ([ADR-0009](adr.qmd), [ADR-0017](adr.qmd)), which is what makes it portable across every platform's PDF viewer and exportable back into an embedded PDF annotation. |
+| **Creator** | A person, with name forms, ORCID and OpenAlex author id, and an explicit disambiguation status. |
+| **Term** | A vocabulary entry in a scheme — author keyword, MeSH with its tree numbers, tag, OpenAlex topic, custom — with thesaurus mapping rules. This is the layer that makes co-word maps roll up sensibly instead of showing "COVID-19", "covid 19" and "SARS-CoV-2" as three nodes. |
+| **ShadowWork** | An external work known only from a reference list or a deep dive. It participates in the graph, is never confused with something you own, and can be promoted to a real item. |
+| **Review queue** | Where anything ambiguous goes, with its reason and a proposed action. |
+| **Job** | A long-running operation with an idempotency key and a log. Imports, enrichment and dedup runs are resumable and safe to re-run. |
+| **Audit log and trash** | Nothing is deleted. Deletion is a move to trash with restore, on top of an append-only audit log recording actor, action and before/after state. |
+
+## The ten principles
+
+The four ideas above are consequences of a shorter list. In full, from
+[CONCEPT.md §3](https://github.com/etabli-dev/etabli-recueil/blob/main/CONCEPT.md):
+
+1. The server is the source of truth.
+2. Content hash is identity.
+3. Flag, never guess.
+4. Provenance on every derived fact.
+5. Never delete.
+6. API-first.
+7. Reuse over rebuild.
+8. Plugin contract before UI.
+9. Idempotent, resumable batch operations.
+10. No lock-in.

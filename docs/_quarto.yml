@@ -1,0 +1,125 @@
+project:
+  type: website
+  output-dir: _site
+  render:
+    - "*.qmd"
+
+lang: en-GB
+
+website:
+  title: "Recueil"
+  description: >-
+    Self-hosted, API-first document and reference manager with built-in reference
+    verification, bibliometrics and systematic-review workflow.
+  site-url: "https://etabli-dev.github.io/etabli-recueil/"
+  repo-url: "https://github.com/etabli-dev/etabli-recueil"
+  repo-branch: main
+  repo-subdir: docs
+  repo-actions: [edit, source, issue]
+  page-navigation: true
+  back-to-top-navigation: true
+  bread-crumbs: false
+  reader-mode: false
+
+  search:
+    location: navbar
+    type: overlay
+    copy-button: true
+
+  navbar:
+    title: "Recueil"
+    pinned: true
+    collapse-below: lg
+    left:
+      - text: "Getting started"
+        href: getting-started.qmd
+      - text: "Concepts"
+        href: concepts.qmd
+      - text: "Self-hosting"
+        href: self-hosting.qmd
+      - text: "Reference"
+        menu:
+          - text: "API"
+            href: api.qmd
+          - text: "CLI"
+            href: cli.qmd
+          - text: "Plugins"
+            href: plugins.qmd
+      - text: "Project"
+        menu:
+          - text: "Roadmap"
+            href: roadmap.qmd
+          - text: "Decision records"
+            href: adr.qmd
+          - text: "Contributing"
+            href: contributing.qmd
+    right:
+      - icon: github
+        href: "https://github.com/etabli-dev/etabli-recueil"
+        aria-label: "Recueil on GitHub"
+
+  sidebar:
+    style: floating
+    search: false
+    collapse-level: 2
+    contents:
+      - section: "Start here"
+        contents:
+          - text: "Overview"
+            href: index.qmd
+          - getting-started.qmd
+          - concepts.qmd
+      - section: "Running it"
+        contents:
+          - self-hosting.qmd
+      - section: "Reference"
+        contents:
+          - api.qmd
+          - cli.qmd
+          - plugins.qmd
+      - section: "Project"
+        contents:
+          - roadmap.qmd
+          - adr.qmd
+          - contributing.qmd
+
+  page-footer:
+    border: true
+    left: >-
+      Recueil — Gather. Verify. Map.
+    center: >-
+      Licensed [AGPL-3.0-or-later](https://github.com/etabli-dev/etabli-recueil/blob/main/LICENSE).
+    right:
+      - text: "Concept"
+        href: "https://github.com/etabli-dev/etabli-recueil/blob/main/CONCEPT.md"
+      - text: "Code of conduct"
+        href: "https://github.com/etabli-dev/etabli-recueil/blob/main/CODE_OF_CONDUCT.md"
+      - text: "Security"
+        href: "https://github.com/etabli-dev/etabli-recueil/blob/main/SECURITY.md"
+
+format:
+  html:
+    theme:
+      light: cosmo
+      dark: darkly
+    toc: true
+    toc-depth: 3
+    toc-expand: true
+    number-sections: false
+    anchor-sections: true
+    smooth-scroll: true
+    code-copy: true
+    code-overflow: wrap
+    code-line-numbers: false
+    link-external-newwindow: true
+    link-external-icon: false
+    tbl-cap-location: bottom
+    grid:
+      sidebar-width: 270px
+      body-width: 900px
+      margin-width: 250px
+
+execute:
+  freeze: auto
+  echo: true
+  warning: false

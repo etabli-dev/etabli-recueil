@@ -1,0 +1,116 @@
+---
+title: "Plugins"
+subtitle: "Extension surfaces, the hook catalogue and the contract"
+---
+
+::: {.callout-important}
+Not yet implemented. The manifest schema and hook catalogue are Phase 0 deliverables and exist in
+`spec/`; the SDK and the plugin host arrive in Phase 3, and the registry in Phase 9.
+:::
+
+::: {.callout-tip}
+## Start by not writing a plugin
+
+Most extensions should not be plugins. A script against the [API](api.qmd) or MCP needs no manifest,
+no review, no release and no compatibility window, and it cannot take the server down with it. A
+complete API removes the need for most plugins, which is the main reason the API is complete.
+
+Write a plugin when you need to take part in a decision the server is in the middle of making. That
+is the whole test.
+:::
+
+## Four surfaces
+
+| # | Surface | Use it for |
+|---|---|---|
+| 1 | **API and MCP scripts** | Anything that can happen before or after an operation rather than during it |
+| 2 | **Server plugins** | Resolvers, checks, dedup rules, ingest sources and stages, storage backends, importers and exporters, graph edge providers, analytics exports, SR templates |
+| 3 | **UI plugins** | Item-pane sections, sidebar panels, context actions, network renderers, screening panels |
+| 4 | **Translators** | Zotero's format, belonging upstream in Zotero's translator repository ([ADR-0006](adr.qmd)) |
+
+## Server plugins
+
+An npm package with a `recueil.plugin.json` manifest, validated against
+[`spec/plugin-manifest.schema.json`](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/plugin-manifest.schema.json)
+at install and at every activation.
+
+```json
+{
+  "name": "recueil-plugin-example-resolver",
+  "version": "0.1.0",
+  "pluginApi": "^1.0.0",
+  "licence": "AGPL-3.0-or-later",
+  "permissions": ["network:crossref.org", "items:read", "items:write"],
+  "hooks": ["resolver"],
+  "settings": { "$schema": "https://json-schema.org/draft/2020-12/schema" }
+}
+```
+
+The manifest declares the plugin API range it works against, the permissions it wants, the hooks it
+implements, a JSON Schema for its settings so the UI can render a settings form, and any UI
+contributions. **Declare permissions honestly.** v1 runs plugins in-process and trusted, and does
+not enforce them by isolation ([ADR-0012](adr.qmd), [ADR-0018](adr.qmd)) — but they are recorded and
+shown to the operator at install time, and they become enforceable the moment multi-user exists.
+
+## Hook catalogue (v1)
+
+Hooks let a plugin participate in an operation. Lifecycle events tell it that one happened.
+
+| Hook | Called to |
+|---|---|
+| `resolver` | Look up metadata by identifier, search by metadata, fetch references, citations or metrics |
+| `check` | Contribute a verification check with an id, severity, explanation and optional auto-fix |
+| `dedupRule` | Contribute matching or merge logic to either dedup layer |
+| `ingestSource` | Feed documents into the pipeline from somewhere new |
+| `ingestStage` | Take part in the pipeline itself |
+| `storageBackend` | Store and retrieve content-addressed bytes |
+| `exporter` / `importer` | Add a serialisation format in either direction |
+| `graphEdgeProvider` | Supply graph edges, with provenance |
+| `analyticsExport` | Add a table to the Parquet bundle |
+| `srTemplate` | Add an extraction form or risk-of-bias instrument |
+
+**Lifecycle events:** `item.created`, `item.updated`, `item.merged`, `item.trashed`,
+`item.restored`, `document.ingested`, `attachment.added`, `annotation.created`, `check.completed`,
+`job.started`, `job.finished`, `job.failed`.
+
+If what you need is not in this catalogue, the proposal is a request for a new hook rather than a
+plugin. New hooks are contract changes and need an ADR. Open an issue describing the workflow you
+want to join, not the function you would like to call — the full catalogue with its guarantees is in
+[`spec/hooks.md`](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/hooks.md).
+
+## Developer experience
+
+- **`@recueil/plugin-sdk`** — typed. Import this and nothing else from the project. No Drizzle, no
+  service classes, no database handle, no direct reach into the content store. An import lint in the
+  compatibility suite enforces it, and this is what keeps a future move to a sandboxed host a change
+  of host rather than a rewrite of every plugin.
+- **`create-recueil-plugin`** — a scaffold with a working example and its tests.
+- **Compatibility test suite** — plugins run it in their own CI, against the plugin API version they
+  claim.
+- **Versioning** — the plugin API is versioned independently of the application, with a
+  two-minor-version deprecation window. Before 1.0 it may still break between minors; after 1.0 it
+  is frozen at v1.
+
+## First-party plugins
+
+The built-in features are plugins, which is the only reliable way to find out whether the contract
+is any good. If a first-party feature needs something the hook catalogue cannot express, the
+catalogue is wrong.
+
+`resolver-openalex` · `resolver-crossref` · `resolver-pubmed` · `resolver-s2` · `resolver-datacite` ·
+`resolver-isbn` · `checks-core` · `dedup-files` · `dedup-records` · `ingest-imap` · `ingest-webdav` ·
+`ingest-folder` · `storage-webdav` · `storage-s3` · `export-bibliometrix` · `export-vosviewer` ·
+`export-gephi` · `sr-templates` · `citation-context-scicite`
+
+## Publishing
+
+Name it `recueil-plugin-<something>` on npm; the `@recueil/` scope is reserved for first-party
+plugins in the monorepo. Community plugins live in their author's repository at their author's
+release pace. The registry is a JSON index in a GitHub repository with install-from-URL support, and
+is Phase 9 work; until it exists, link your plugin from a discussion thread.
+
+A plugin that links the server in-process is a derivative work of an AGPL-3.0-or-later program, so
+`AGPL-3.0-or-later` is the expected licence for a plugin's own source.
+
+A plugin that duplicates a first-party one is welcome. Competition between a plugin and the built-in
+behaviour is a sign the hook is doing its job.

@@ -1,0 +1,108 @@
+---
+title: "Getting started"
+subtitle: "What first use will look like, and what is possible today"
+---
+
+::: {.callout-important}
+## Nothing on this page works yet
+
+There is no release, no image on `ghcr.io` and no `recueil` binary. Every command below is written
+in the present tense because that is how a manual reads, but each one is a **Phase 1 or later**
+commitment. The Phase column in [the roadmap](roadmap.qmd) says when.
+
+What you *can* do today: read [CONCEPT.md](https://github.com/etabli-dev/etabli-recueil/blob/main/CONCEPT.md),
+read the [concepts](concepts.qmd) page, read the [decision records](adr.qmd), and disagree with any
+of it in an issue.
+:::
+
+## Choosing a shape
+
+Recueil is one server. How you run it is the only real decision, and it can be changed later
+because both shapes run identical code.
+
+| Shape | For | Phase |
+|---|---|---|
+| **Docker** | A homelab, a NAS, a VPS. The server plus optional sidecars, reachable from every device on your network. | 1 |
+| **Desktop** | One machine, no infrastructure. The Tauri shell bundles the same server as a sidecar process on `localhost`. | 4 |
+| **From source** | Development, and anyone who prefers it. `pnpm install && pnpm build`. | 1 |
+
+Nothing else needs to be running first. v1 is SQLite only, so there is no database server to
+install, and the file is created on first start.
+
+## Docker quickstart
+
+```sh
+mkdir -p recueil/{data,storage} && cd recueil
+curl -O https://raw.githubusercontent.com/etabli-dev/etabli-recueil/main/deploy/docker-compose.yml
+docker compose up -d
+```
+
+The server comes up on port 8080 with an empty library. Confirm it:
+
+```sh
+curl -s http://localhost:8080/health
+```
+
+```json
+{"status":"ok","version":"0.1.0","database":"sqlite","items":0}
+```
+
+That response on an empty library is the exit criterion for Phase 0, and the first thing that will
+be true of this project.
+
+## First run
+
+1. **Create an API token.** Everything authenticates, including the browser session, and everything
+   is attributable in the audit log. `recueil token create --name laptop --scope 'items:*'`, or the
+   equivalent in Settings.
+2. **Point the connector at your server.** Install the Zotero Connector and set its server address
+   to your Recueil instance. Recueil speaks the Zotero connector protocol, so the existing extension
+   and its roughly six hundred translators work without modification ([ADR-0006](adr.qmd)).
+3. **Save something.** Open a paper in the browser and press the connector button. The item, its
+   PDF and its metadata land in the library, the PDF is hashed, and enrichment resolves the DOI.
+4. **Check that it can leave again.** `recueil export --format bibtex --collection Inbox > inbox.bib`.
+   If your data cannot get out on day one, do not put it in.
+
+## Importing an existing library
+
+### From Zotero
+
+The Zotero importer is first-class and is the reason Phase 1 exists.
+
+```sh
+recueil import zotero \
+  --data-dir ~/Zotero \
+  --better-bibtex ~/Zotero/better-bibtex.sqlite \
+  --report zotero-import-report.md
+```
+
+It reads `zotero.sqlite` directly — items, fields, creators, collections, tags, notes, relations,
+imported and linked attachments, annotations and citation keys — hashes every attachment from the
+storage directory or a WebDAV archive, and writes a verification report: counts per item type,
+attachment hash coverage, and every file it could not find, with the reason.
+
+The run is idempotent, so re-running it after fixing a problem does not duplicate anything, and
+Zotero item keys are kept as external identifiers. **Keep Zotero installed and read-only until the
+report satisfies you.**
+
+### From Paperless-ngx
+
+```sh
+recueil import paperless --url https://paperless.example --token "$PAPERLESS_TOKEN"
+```
+
+Documents, tags, correspondents, document types, custom fields, archive serial numbers and the
+original files, mapped onto the [Office facet](concepts.qmd#facets). Phase 2.
+
+### From files
+
+BibTeX and BibLaTeX (including `file` fields), RIS, EndNote XML, CSL-JSON, JabRef with groups,
+Mendeley exports, and CSV with a column mapping. Every importer has a matching exporter, because a
+format you can only read is a trap.
+
+## Where to go from here
+
+- [Concepts](concepts.qmd) — the vocabulary the rest of the documentation uses.
+- [Self-hosting](self-hosting.qmd) — configuration, storage backends, TLS, backup.
+- [CLI](cli.qmd) — the full command surface.
+- [API](api.qmd) — for anything you would rather script than click.

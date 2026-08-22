@@ -1,0 +1,20 @@
+{
+  "//": [
+    "The references below restate this package's workspace dependencies in TypeScript's own",
+    "terms. They are what lets `tsc --build` produce the upstream .d.ts files this package",
+    "resolves through its dependencies' exports, so a fresh checkout can be built - or",
+    "type-checked - one package at a time, in any order, without a prior workspace-wide build."
+  ],
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "composite": true,
+    "rootDir": "src",
+    "tsBuildInfoFile": "dist/tsconfig.build.tsbuildinfo"
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["test/**/*.ts", "vitest.config.ts", "**/*.test.ts"],
+  "references": [
+    { "path": "../../packages/core/tsconfig.build.json" },
+    { "path": "../server/tsconfig.build.json" }
+  ]
+}

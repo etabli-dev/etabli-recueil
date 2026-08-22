@@ -1,0 +1,107 @@
+---
+title: "Decision records"
+subtitle: "Every architectural decision, numbered, dated and immutable"
+---
+
+Recueil records its architectural decisions as numbered ADRs so that the reasoning stays readable in
+order rather than being reconstructed from a diff two years later. Each record states its **context**
+before its **decision**, and closes with **consequences** — including what the decision costs. An ADR
+with no cost in it has not been thought through.
+
+**An accepted ADR is never edited.** It is superseded by a later one and both stay in the
+repository. Setting an earlier record's status to `Superseded by ADR-NNNN` is the only edit ever
+made to an accepted record.
+
+The records themselves live in
+[`spec/adr/`](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/) in the repository.
+This page is an index; the files are authoritative.
+
+## Index
+
+::: {.column-page}
+
+| # | Title | What it settles | Status | Phase |
+|---|---|---|---|---|
+| **0001** | [Server-first architecture](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0001-server-first-architecture.md) | The server is the product; every client, including the desktop shell, is a client of the same REST API. | Accepted | Phase 0 |
+| **0002** | [TypeScript monorepo](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0002-typescript-monorepo.md) | One pnpm and Turborepo monorepo, TypeScript throughout, Node 22 LTS as the runtime floor. | Accepted | Phase 0 |
+| **0003** | [SQLite by default, Postgres optional](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0003-sqlite-by-default-postgres-optional.md) | Drizzle against SQLite by default, Postgres as a supported alternative behind the same schema. | Accepted | Phase 0 |
+| **0004** | [Content-hash identity](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0004-content-hash-identity.md) | A document is the SHA-256 of its bytes; storage is content-addressed and re-ingesting links rather than copies. | Accepted | Phase 0 |
+| **0005** | [AGPL-3.0-or-later](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0005-agpl-30-or-later.md) | AGPL-3.0-or-later for the server and all first-party code. Required by Zotero's translators; prevents SaaS capture. | Accepted | Phase 0 |
+| **0006** | [Zotero connector protocol compatibility](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0006-zotero-connector-protocol-compatibility.md) | Implement the connector endpoints Zotero's extension expects, and run translation-server as a sidecar. | Accepted | Phase 0 |
+| **0007** | [Tauri 2 for desktop and mobile shells](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0007-tauri-2-for-desktop-and-mobile-shells.md) | Tauri 2 for all five platforms, with the server as a sidecar in desktop local mode. Capacitor is the documented fallback. | Accepted | Phase 0 |
+| **0008** | [Parquet and DuckDB analytics layer](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0008-parquet-and-duckdb-analytics-layer.md) | Analytics leaves as a Parquet bundle, not paginated JSON; DuckDB may attach the SQLite file directly in local mode. | Accepted | Phase 0 |
+| **0009** | [Annotations as records, W3C Web Annotation model](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0009-annotations-as-records-w3c-web-annotation-model.md) | Annotations are database records in the W3C Web Annotation model. Embedding into a PDF is a conversion, not the storage. | Accepted | Phase 0 |
+| **0010** | [SQLite-backed in-process job queue](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0010-sqlite-backed-in-process-job-queue.md) | A persistent job queue in the primary database, run in-process, with idempotency keys. No mandatory Redis. | Accepted | Phase 0 |
+| **0011** | [FTS5 baseline, Meilisearch optional](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0011-fts5-baseline-meilisearch-optional.md) | SQLite FTS5 always available; Meilisearch optional behind one search interface so the backend stays swappable. | Accepted | Phase 0 |
+| **0012** | [In-process trusted plugin host in v1](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0012-in-process-trusted-plugin-host-in-v1.md) | Plugins load in-process and are trusted in v1. Permissions are declared and shown, not enforced by isolation. | Accepted | Phase 0 |
+| **0013** | [Curation canvas in-app, ggraph for publication figures](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0013-curation-canvas-in-app-ggraph-for-publication-figures.md) | The in-app editor is a curation canvas that owns what the figure contains; final rendering goes out to ggraph. | Accepted | Phase 0 (governs Phase 6) |
+| **0014** | [Tool-for-you through M3, open the repo at M4](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0014-tool-for-you-through-m3-open-repo-at-m4.md) | Public and AGPL from the first commit, but developed as a tool for its author through M3 and opened at M4. | Accepted | Phase 0 |
+| **0015** | [SQLite only until multi-user](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0015-sqlite-only-until-multi-user.md) | v1 ships SQLite only — no Postgres build, service, CI matrix or support offer. ADR-0003 remains the direction of travel. | Accepted | Phase 0 |
+| **0016** | [Better BibTeX-compatible citation keys](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0016-better-bibtex-compatible-citation-keys.md) | The default citation key is Better BibTeX's `auth.lower + shorttitle(3,3) + year`, pinned per item and configurable. | Accepted | Phase 0 (governs Phase 1) |
+| **0017** | [W3C Web Annotation JSON as the annotation storage format](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0017-w3c-web-annotation-json-as-annotation-storage-format.md) | Annotations are stored and transported as W3C Web Annotation JSON-LD, fixing ADR-0009 at the format level. | Accepted | Phase 0 (governs Phase 4) |
+| **0018** | [Sandboxing tier: in-process until multi-user](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0018-sandboxing-tier-in-process-until-multi-user.md) | Plugins stay in-process and trusted through 1.0, including after the registry ships. Sandboxing waits for multi-user. | Accepted | Phase 0 (governs Phase 9) |
+| **0019** | [Name: Recueil](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0019-name-recueil.md) | The name is Recueil: a gathered collection of texts, from *cueillir*, to gather. Free on npm, CRAN, PyPI and as a URI scheme. | Accepted | Phase 0 |
+| **0020** | [Systematic-review automation disclosure](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0020-systematic-review-automation-disclosure.md) | Automation disclosure is a per-review setting, off by default, exported with the audit trail when on. | Accepted | Phase 0 (governs Phase 7) |
+
+:::
+
+ADRs 0001–0012 are the technology decisions catalogued in
+[CONCEPT.md §5.16](https://github.com/etabli-dev/etabli-recueil/blob/main/CONCEPT.md). ADRs
+0013–0020 resolve the open-decision backlog in §10 — the questions the concept document deliberately
+left open until they blocked something.
+
+## Reading them in groups
+
+Twenty records is more than anyone wants to read in order. These are the useful clusters.
+
+**What the thing is.** [0001](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0001-server-first-architecture.md)
+server-first, [0019](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0019-name-recueil.md)
+the name, [0014](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0014-tool-for-you-through-m3-open-repo-at-m4.md)
+who it is for and when that changes.
+
+**How data is stored.** [0004](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0004-content-hash-identity.md)
+content-hash identity, [0003](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0003-sqlite-by-default-postgres-optional.md)
+and [0015](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0015-sqlite-only-until-multi-user.md)
+the database, [0009](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0009-annotations-as-records-w3c-web-annotation-model.md)
+and [0017](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0017-w3c-web-annotation-json-as-annotation-storage-format.md)
+annotations, [0016](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0016-better-bibtex-compatible-citation-keys.md)
+citation keys.
+
+**How data gets out.** [0008](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0008-parquet-and-duckdb-analytics-layer.md)
+the analytics layer, [0013](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0013-curation-canvas-in-app-ggraph-for-publication-figures.md)
+publication figures.
+
+**How it is extended.** [0012](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0012-in-process-trusted-plugin-host-in-v1.md)
+and [0018](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0018-sandboxing-tier-in-process-until-multi-user.md)
+the plugin host and its sandboxing tier, [0006](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0006-zotero-connector-protocol-compatibility.md)
+the Zotero protocol.
+
+**Ethics and disclosure.** [0005](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0005-agpl-30-or-later.md)
+the licence, [0020](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0020-systematic-review-automation-disclosure.md)
+automation disclosure in systematic reviews.
+
+## When a change needs an ADR
+
+Write one if the change:
+
+- adds, replaces or removes a dependency that would be painful to swap later — a database, a queue,
+  a search engine, a UI framework;
+- changes a public contract: the REST API's shape, the plugin API, the manifest schema, the storage
+  layout, an export format;
+- changes a stored data format, or requires a migration that cannot be reversed;
+- trades away one of the binding principles, or narrows a stated goal;
+- resolves a question already listed as open.
+
+You do not need one for a bug fix, a refactor with no external effect, a first-party plugin that
+uses only catalogued hooks, or documentation.
+
+## Writing one
+
+Take the next free number — four digits, never reused, even if a record is withdrawn — and name the
+file `NNNN-kebab-case-title.md`. Copy the section structure of any existing record. Add a row to the
+index table in [`spec/adr/README.md`](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/README.md).
+
+Propose it as a pull request containing **only the ADR**, with status `Proposed`, so that the
+discussion happens on the decision rather than on the diff that implements it.
+
+Statuses are `Proposed`, `Accepted`, `Superseded by ADR-NNNN` and `Deprecated`.

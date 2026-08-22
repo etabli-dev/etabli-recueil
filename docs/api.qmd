@@ -1,0 +1,121 @@
+---
+title: "API"
+subtitle: "The real surface of the product"
+---
+
+::: {.callout-important}
+Not yet implemented. The OpenAPI skeleton is a Phase 0 deliverable; the endpoints arrive with the
+features they serve, starting in Phase 1. Paths and shapes below are the intent, and will be
+authoritative only once `spec/openapi.yaml` says so.
+:::
+
+**Nothing in Recueil is UI-only.** That is a binding principle rather than an aspiration, and it has
+a test: if a feature can be done in the web interface and not through the API, the feature is not
+finished. The web UI, the CLI, the MCP server and the R and Python packages are all clients of the
+same endpoints, with no privileged back channel between the UI and the server.
+
+## The contract
+
+`spec/openapi.yaml` is generated from the Zod schemas the server validates with, so the document and
+the implementation cannot drift: they are the same source. OpenAPI 3.1, versioned under `/api/v1`.
+
+The generated document drives the TypeScript client, the Python models, the MCP tool definitions and
+the reference section of this site.
+
+## Authentication
+
+```sh
+curl -H "Authorization: Bearer $RECUEIL_TOKEN" \
+     https://recueil.example.org/api/v1/items?limit=25
+```
+
+Scoped bearer tokens for programmatic access, session cookies for the browser. Scopes are
+resource-and-verb pairs (`items:read`, `sr:write`, `admin:*`). Every mutation is attributed in the
+audit log to the token that made it.
+
+## Resources
+
+| Group | Paths | What lives there |
+|---|---|---|
+| Library | `/items`, `/documents`, `/attachments`, `/collections`, `/tags`, `/fields`, `/notes`, `/annotations`, `/creators`, `/terms` | The core model |
+| Search | `/search` | Boolean and per-field queries, facets, saved searches |
+| Graph | `/graph/nodes`, `/graph/edges`, `/graph/deep-dive` | Citation and derived networks, shadow works, budgeted expansion |
+| Analytics | `/analytics/export` | Parquet bundle for R, Python and DuckDB |
+| Quality | `/checks`, `/dedup` | The verification engine and both dedup layers, including dry runs |
+| Ingestion | `/ingestion/sources`, `/ingestion/queue`, `/ingestion/review` | Sources, the pipeline and the review queue |
+| Systematic review | `/sr/reviews`, `/sr/screening`, `/sr/extraction`, `/sr/rob`, `/sr/prisma` | The PRISMA workflow |
+| Networks | `/networks` | Curated network documents, versions, freezing |
+| Platform | `/plugins`, `/jobs`, `/export`, `/system` | Administration |
+
+## Conventions
+
+**Pagination** is cursor-based for records. Offsets lie when the underlying set changes under you,
+and analytics should not be paginated at all — that is what the Parquet export is for.
+
+**Bulk endpoints** take an array and an `Idempotency-Key` header. Replaying a key returns the
+original result rather than acting twice, which is what makes a client-side write queue safe.
+
+**Errors** are RFC 9457 problem documents: a stable `type` URI, a human `title`, and a `detail` that
+names the field.
+
+**Events** arrive on an SSE stream at `/events`, filtered by type, and as outbound webhooks with an
+HMAC signature. The event vocabulary is the same one plugins subscribe to: `item.created`,
+`item.updated`, `item.merged`, `document.ingested`, `check.completed`, `job.finished`, and the rest
+of the [hook catalogue](plugins.qmd).
+
+## Analytics: tables, not JSON
+
+Bibliometrics needs columns. Paginating a hundred thousand works through JSON to build a co-citation
+matrix is the wrong shape of pipe, so there is a second one ([ADR-0008](adr.qmd)).
+
+```sh
+curl -H "Authorization: Bearer $RECUEIL_TOKEN" \
+     "https://recueil.example.org/api/v1/analytics/export?collection=phd" \
+     -o export.zip
+```
+
+The bundle contains Parquet files — `works`, `creators`, `works_creators`, `terms`, `works_terms`,
+`edges`, `metrics`, and the systematic-review tables — which Arrow, polars, pandas and DuckDB all
+read natively. In local mode, DuckDB can attach the SQLite file directly and skip the export.
+
+Converters produce the formats the analysis ecosystem already expects: a bibliometrix `M` data frame
+with Web of Science tag mapping (`AU`, `AF`, `TI`, `SO`, `DT`, `DE`, `ID`, `AB`, `C1`, `CR`, `TC`,
+`PY`, `DI`, `SR`), VOSviewer network and map JSON, Gephi GEXF, GraphML, CiteSpace WoS text, and CSV.
+
+## MCP
+
+The MCP server exposes the API to language models as tools derived from the same OpenAPI document:
+search, get, add and update items, run checks, dry-run dedup, launch a deep dive, export BibTeX,
+record screening decisions, write extraction data. Resources cover library statistics and review
+status; prompts cover reference auditing and screening assistance.
+
+Writes made through MCP are attributed in the audit log exactly like any other token, and are
+scoped by that token. A model gets the permissions you gave it and no others, and you can see
+afterwards what it did. For systematic reviews there is a further control: automation disclosure is
+a per-review setting that records which decisions were tool-assisted, off by default, exported with
+the audit trail when on ([ADR-0020](adr.qmd)).
+
+## Connector endpoint
+
+`/connector/*` implements Zotero's connector protocol, so the existing Zotero Connector extension
+and its translator library work against Recueil unmodified ([ADR-0006](adr.qmd)). Recueil ships its
+own WebExtension in Phase 8, speaking the same protocol with a collection and tag picker,
+office-document capture and page snapshots.
+
+## Clients
+
+| Client | Language | Notes |
+|---|---|---|
+| `@recueil/client-ts` | TypeScript | Generated from the OpenAPI document; used by the web UI |
+| `recueil` | R | `httr2`. `rc_items()`, `rc_search()`, `rc_bibtex()`, `rc_analytics()`, `rc_bibliometrix()` → an `M` data frame that runs in biblioshiny unmodified, `rc_graph()` → tidygraph, `rc_sr_*()`, `rc_checks()`. Separate repository, CRAN-bound |
+| `recueil` | Python | `httpx`, typed models from OpenAPI, polars and pandas frames, networkx and igraph graphs. Separate repository, PyPI-bound |
+| `recueil` | CLI | See [the CLI page](cli.qmd) |
+
+## Citation endpoints
+
+Per-collection and per-saved-search `.bib` URLs, with a scoped token in the URL, so Overleaf, Quarto
+and Pandoc can pull a bibliography that is never stale. Citation keys are stable, pinned per item
+and Better BibTeX-compatible by default ([ADR-0016](adr.qmd)), so a `.bib` that regenerates does not
+break the `\cite` commands in your manuscript.
+
+CSL-JSON, BibTeX and BibLaTeX, RIS and JSON-LD are available for everything, at every scope.

@@ -1,0 +1,10 @@
+# Quarto build output
+/_site/
+
+# Quarto working directory: caches, freeze results, computed figures
+/.quarto/
+
+# Per-page generated asset directories (name_files/)
+/*_files/
+
+**/*.quarto_ipynb

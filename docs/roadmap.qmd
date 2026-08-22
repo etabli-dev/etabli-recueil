@@ -1,0 +1,163 @@
+---
+title: "Roadmap"
+subtitle: "Ten phases, six milestones, exit criteria instead of dates"
+---
+
+::: {.callout-note appearance="simple"}
+This page summarises [CONCEPT.md §7](https://github.com/etabli-dev/etabli-recueil/blob/main/CONCEPT.md),
+which is authoritative. Where the two disagree, CONCEPT.md is right and this page is stale.
+:::
+
+Recueil is written by one person, incrementally. Each phase is a shippable `0.x` release with an
+**exit criterion** rather than a date, because dates set by a solo maintainer are fiction and exit
+criteria are testable. Effort is relative: S, M, L, XL.
+
+Phases 1 to 3 are the critical path, because they are what retires the stack currently in daily use
+— Zotero with three self-written plugins, Paperless-ngx, and a pile of R scripts holding them
+together.
+
+## Phases
+
+| Phase | Theme | Effort | Milestone |
+|---|---|---|---|
+| **0** | Spec and scaffold | M | — |
+| **1** | Core library + Zotero migration | L | **M1** Zotero replaced |
+| **2** | Ingestion + storage backends | M | **M2** Paperless replaced |
+| **3** | Enrichment, checks, dedup | L | **M3** Plugins retired |
+| **4** | Reading, search, desktop shell | M | — |
+| **5** | Graph, bibliometrics, R/Python | L | **M4** Bibliometrics in R |
+| **6** | Curated networks | M–L | — |
+| **7** | Systematic review | XL | **M5** First SR end-to-end |
+| **8** | Mobile + own connector | M | — |
+| **9** | Community and 1.0 | M, ongoing | **M6** 1.0 |
+
+## Phase 0 — Spec and scaffold
+
+**Where the project is now.** ADRs 0001–0012 written and 0013–0020 decided; data model v1 with ERD,
+migrations and a fixture library; the OpenAPI skeleton, plugin manifest schema and hook catalogue;
+the monorepo scaffold, CI, Docker build, this documentation site, licence, `CITATION.cff` and
+contribution guidance.
+
+**Exit:** `recueil serve` returns health on an empty library, and the specification has been checked
+against the three existing Zotero plugins with a documented answer to "can each be expressed as a
+plugin?".
+
+## Phase 1 — Core library and Zotero migration → M1
+
+Items, documents, attachments, collections, tags, notes and custom fields on content-hash local
+storage over SQLite. REST v1 for all of it, the CLI, the Docker image, backup and restore. A library
+view, item pane and basic PDF viewing in the web UI. The Zotero importer with its verification
+report, BibTeX, CSL-JSON and RIS export with stable citation keys, and the `.bib` endpoint. The
+connector endpoint, so the Zotero Connector works unchanged.
+
+**Exit:** own library imported at 100% item count with an attachment-hash coverage report; daily
+capture via the connector; Overleaf building from the exported `.bib`; thirty days without launching
+Zotero.
+
+## Phase 2 — Ingestion and storage backends → M2
+
+The full pipeline: watched folders, WebDAV feed, IMAP, the scanner path, the rule engine and the
+review-queue UI. The OCRmyPDF worker, the Office facet, the Paperless-ngx importer. WebDAV and S3
+storage backends, and PWA upload as interim mobile capture.
+
+**Exit:** scanner to searchable item with zero manual steps; mail to library; Paperless-ngx
+decommissioned after a verified import.
+
+## Phase 3 — Enrichment, checks, dedup → M3
+
+The resolver framework across every source, with field-level provenance, merge policy and metrics
+time series. The checks engine, report export and bibliography audit mode. File and record dedup
+with a rules UI and dry-run reports. Plugin SDK v1, with all of the above shipped as first-party
+plugins, and the compatibility test suite.
+
+**Exit:** parity tests against Metadata Mender, Attaclone-dedup and Argus One pass on the fixture
+library; those plugins archived; one real manuscript review delivered with a reference audit report.
+
+## Phase 4 — Reading, search, desktop shell
+
+Annotations as records and the PDF.js annotation layer, with export to embedded PDF annotations.
+FTS5 and Meilisearch; saved searches as smart collections. The GROBID sidecar, feeding Phase 5.
+Tauri desktop v1 with watched folders, a tray, the URI scheme and open-in-external-app — including a
+PDF.js performance test on WebKitGTK, which is the known risk on Linux.
+
+**Exit:** annotate, note and cite works entirely inside the application, in the browser and in the
+desktop shell.
+
+## Phase 5 — Graph, bibliometrics, R and Python → M4
+
+Edge providers, shadow works, the local citation network, derived networks and budgeted deep dives.
+The vocabulary layer with MeSH tree import and thesaurus maps. The analytics Parquet export, DuckDB
+attach, and in-app Sigma.js maps carrying coverage statistics. R package v0.1 and Python package
+v0.1.
+
+**Exit:** `rc_bibliometrix()` output runs in biblioshiny unmodified; a VOSviewer map renders from
+the export; the local citation network of the library renders in-app.
+
+## Phase 6 — Curated networks
+
+The CuratedNetwork document model, the Cytoscape.js editor, annotations, versions and freezing.
+Exports to SVG, PDF and PNG, GraphML, GEXF and JSON, TikZ, and tidygraph.
+
+**Exit:** one publication figure produced end to end, in-app or via `ggraph`, per
+[ADR-0013](adr.qmd).
+
+## Phase 7 — Systematic review → M5
+
+In order: sources, import and dedup with source tracking → title and abstract screening → the PRISMA
+counter → full-text retrieval and screening → export to `meta`, `metafor`, PRISMA2020 and `robvis` →
+extraction forms → risk-of-bias templates → snowballing via deep dive → the Quarto report template.
+This phase gets its own specification before any work starts.
+
+**Exit:** a real review run start to finish; the PRISMA flow exported from live counts; extraction
+data loading in R without manual reshaping.
+
+## Phase 8 — Mobile and own connector
+
+Tauri mobile, with Capacitor as the fallback: camera scan, barcode lookup, share sheet, cached
+reading and queued writes. Recueil's own WebExtension superseding the Zotero Connector, published to
+the Chrome Web Store, AMO and Safari.
+
+**Exit:** phone capture to library in under thirty seconds; the extension listed in the Chrome Web
+Store.
+
+## Phase 9 — Community and 1.0 → M6
+
+The plugin registry and `create-recueil-plugin`; this documentation site complete; a demo library.
+Release hygiene: citation blocks, `CITATION.cff`, a Zenodo DOI, multi-arch images, upgrade
+guarantees, a security review. Governance: public roadmap, DCO, issue templates, and the groundwork
+for multi-user.
+
+**Exit:** the 1.0 tag; plugin API v1 frozen; at least one plugin not written by the maintainer.
+
+## Sequencing rules
+
+- Phase 6 and Phase 7 never start before Phase 5's graph schema is in production.
+- Phases 4 and 5 may interleave. Phase 8 is cheap once the API is stable.
+- **Any scope addition to a phase removes something else from it, or goes to the parking lot.** Scope
+  is zero-sum; this is the rule that keeps a solo project shippable.
+
+## Openness
+
+The repository is public and AGPL from the first commit, but the project is developed as a tool for
+its author through **M3** and opens properly at **M4** ([ADR-0014](adr.qmd)). Until then there is no
+support commitment and no roadmap promise. Bug reports, reproductions and corrections to the
+specification are welcome now; large unsolicited pull requests are likely to be declined.
+
+## Parking lot
+
+Post-1.0, in no order: Word, LibreOffice and Google Docs integration via Zotero's integration
+protocol · multi-reviewer screening with conflict resolution · an embeddings-based similarity plugin
+· a citation-intent UI · Wikidata and Wikicite sync · OpenAlex topic clustering · altmetrics · HTML
+snapshot annotation · a Quarto extension · LLM-assisted screening with per-decision disclosure · an
+Overleaf git bridge for `.bib` sync.
+
+## The risks that would actually derail it
+
+| Risk | Mitigation |
+|---|---|
+| Scope creep | Non-goals are written down; one spec per phase; additions are zero-sum |
+| Dependency on Zotero translators and translation-server | Pinned versions; identifier-based fallback import via Crossref and OpenAlex; own connector in Phase 8 |
+| API policy changes at OpenAlex or Semantic Scholar | Resolver abstraction, caching, key support, more than one source per fact |
+| Citation coverage gaps producing misleading maps | Provenance and coverage statistics beside every map |
+| Solo sustainability | Small releases, boring technology, documentation from day one, every phase independently useful |
+| Data loss in migration | Idempotent importers, verification reports, Zotero read-only until M1 is confirmed |

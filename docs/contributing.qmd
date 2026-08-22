@@ -1,0 +1,145 @@
+---
+title: "Contributing"
+subtitle: "What is welcome now, and what is not yet"
+---
+
+::: {.callout-warning}
+## Honest expectations first
+
+Recueil is written by one person to replace a stack they use daily.
+[ADR-0014](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0014-tool-for-you-through-m3-open-repo-at-m4.md)
+sets when that changes: the repository is public and AGPL from the first commit, but the project is
+developed as a tool for its author through **M3** (the end of Phase 3) and opens properly at **M4**
+(the end of Phase 5). Until then:
+
+- no support commitment and no roadmap promise;
+- issues and pull requests may sit for a long time, or be closed with a short reason;
+- the plugin API may break between minor versions, and the data model may change under a migration;
+- a large unsolicited pull request is likely to be declined however good it is, because reviewing
+  and then maintaining it costs more than the feature is worth at this stage.
+
+None of that is meant to keep anyone out. **Bug reports, reproductions, corrections to the
+specification and small focused patches are genuinely welcome now.** For anything larger, open an
+issue and ask whether it fits — a five-minute answer beats a week of work being declined.
+:::
+
+This page is a summary. The authoritative document is
+[`CONTRIBUTING.md`](https://github.com/etabli-dev/etabli-recueil/blob/main/CONTRIBUTING.md) in the
+repository, and it wins wherever the two differ.
+
+## Ground rules
+
+- Everyone taking part is covered by the
+  [Code of Conduct](https://github.com/etabli-dev/etabli-recueil/blob/main/CODE_OF_CONDUCT.md).
+- **Security problems do not go through the issue tracker.** See
+  [SECURITY.md](https://github.com/etabli-dev/etabli-recueil/blob/main/SECURITY.md).
+- **Prose is British English**, matching CONCEPT.md and the ADRs — comments, documentation and
+  user-visible strings alike. Code identifiers follow their own ecosystem: npm's `package.json`
+  keeps `license`, while the plugin manifest's own key is `licence`.
+- **No AI attribution, anywhere.** No co-author trailer for a tool, no "generated with" line, no
+  assistant signature in a commit message, a comment, a file header or a pull request description.
+  Tools are tools; the person who submits a change is its author and is accountable for it. Pull
+  requests carrying such lines will be asked to rewrite their history.
+
+## Getting set up
+
+| Tool | Version | Note |
+|---|---|---|
+| Node.js | 22 LTS or newer | 22 is what CI targets and what the image runs |
+| pnpm | 9.x | `corepack enable && corepack prepare pnpm@9 --activate` |
+| Git | any recent version | commits must be signed off |
+| Docker | optional | only for the sidecar profiles and for building the image |
+
+No database server is needed. v1 is SQLite only, and the file is created on first run.
+
+```sh
+pnpm install          # install the workspace
+pnpm build            # build every package and app
+pnpm test             # unit and integration tests (Vitest)
+pnpm lint             # lint and format check
+pnpm dev              # server and web UI in watch mode
+```
+
+::: {.callout-important appearance="simple"}
+**Phase 0 caveat.** There are no scripts in the root `package.json` yet and nothing runs. `pnpm
+install` succeeds and that is all. The commands above are the contract Phase 1 implements — if they
+do not exist, the code has not landed yet rather than your setup being wrong.
+:::
+
+## Where the specification lives
+
+Recueil is specified before it is written, and the specification is in the repository rather than a
+wiki.
+
+| File | What it settles |
+|---|---|
+| [`CONCEPT.md`](https://github.com/etabli-dev/etabli-recueil/blob/main/CONCEPT.md) | the whole thing: goals, non-goals, principles, architecture, roadmap. Start here |
+| [`spec/data-model.md`](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/data-model.md), [`spec/erd.mmd`](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/erd.mmd) | entities, fields, relations |
+| `spec/openapi.yaml` | the API contract |
+| [`spec/hooks.md`](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/hooks.md) | the v1 hook catalogue and its guarantees |
+| [`spec/plugin-manifest.schema.json`](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/plugin-manifest.schema.json) | `recueil.plugin.json`, validated at install and activation |
+| [`spec/adr/`](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/) | every architectural decision |
+| `docs/` | this site |
+
+If a change contradicts something in `spec/`, either the change is wrong or the spec needs an ADR.
+Say which in the pull request. See [decision records](adr.qmd) for when one is required and how to
+write it.
+
+## Commits
+
+- **Subject:** imperative mood, under 72 characters, capitalised, no trailing full stop. "Add ISBN
+  resolver", not "Added ISBN resolver".
+- **Body:** wrapped at 72 characters, explaining **why**. The diff already says what. Note the
+  alternatives you rejected.
+- **Scope:** one logical change per commit. Move-only and rename-only changes go in their own commit
+  so the substantive diff stays readable.
+- **References:** `Refs #123`, `Closes #123` or `Implements ADR-0016` in the body, not the subject.
+
+## Developer Certificate of Origin
+
+Recueil uses the [DCO 1.1](https://developercertificate.org/) rather than a contributor licence
+agreement. Nothing to sign, no copyright assigned: you keep yours, and your contribution is licensed
+AGPL-3.0-or-later like the rest of the repository.
+
+```sh
+git commit -s -m "Add ISBN resolver"
+```
+
+Use a real name — a pseudonym you are known by is acceptable, an anonymous handle is not — and an
+address that reaches you.
+
+## Pull requests
+
+1. Open an issue first for anything not small and obvious, and wait for a reply.
+2. Branch from `main`. One topic per pull request.
+3. Fill in the template: what and why, the linked issue, the roadmap phase, the checklist.
+4. Keep the diff focused. Unrelated formatting churn is the usual reason a patch stalls.
+5. Tests come with the change. Anything touching a public contract updates `spec/` in the same pull
+   request.
+6. Documentation comes with the change too, when there is user-visible behaviour to describe.
+7. Expect review comments on British English, on ADR compliance, and on whether the change belongs
+   to the phase it claims.
+
+## Contributing to this site
+
+The documentation is a Quarto website in `docs/`, published to GitHub Pages.
+
+```sh
+quarto preview docs     # live preview
+quarto render docs      # build into docs/_site
+```
+
+Every page carries an edit link in its margin. `_site/` and `.quarto/` are generated and are not
+committed.
+
+Documentation-only changes need no ADR and no issue first. If a page describes behaviour that does
+not exist, it must say so and name the phase that brings it — an unmarked promise in a manual is a
+bug in the manual.
+
+## Proposing a plugin
+
+Most extensions should not be plugins at all; see [the plugins page](plugins.qmd) for the order of
+preference and the hook catalogue. If it really is a plugin, read
+[`spec/hooks.md`](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/hooks.md) first: if
+what you need is not in the v1 catalogue, your proposal is a request for a new hook, and new hooks
+are contract changes that need an ADR.

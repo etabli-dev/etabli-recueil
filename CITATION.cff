@@ -1,0 +1,36 @@
+cff-version: 1.2.0
+message: If you use Recueil in your work, please cite it as below.
+title: Recueil
+abstract: >-
+  Recueil is a self-hosted server that gathers documents from anywhere
+  (browser, mail, scanner, WebDAV, camera), keeps a content-addressed library
+  with a bibliographic facet, verifies and enriches references against the open
+  scholarly graph, and exposes the whole library to R, Python and LLMs as data.
+  Systematic reviews and bibliometric mapping are native workflows, not
+  exports.
+type: software
+authors:
+  - family-names: Heller
+    given-names: Raban
+version: 0.1.0
+date-released: '2026-08-22'
+license: AGPL-3.0-or-later
+repository-code: https://github.com/etabli-dev/etabli-recueil
+keywords:
+  - reference manager
+  - document management
+  - bibliometrics
+  - systematic review
+  - citation verification
+  - self-hosted
+  - research software
+
+# Zenodo DOI. Archiving is a Phase 9 deliverable (CONCEPT.md §7); at the first
+# tagged release, uncomment the block below and fill in the concept DOI that
+# Zenodo mints for all versions, then add the version DOI to each release.
+#
+# doi: 10.5281/zenodo.XXXXXXX
+# identifiers:
+#   - type: doi
+#     value: 10.5281/zenodo.XXXXXXX
+#     description: Concept DOI resolving to the latest version of Recueil

@@ -1,0 +1,48 @@
+{
+  "name": "@recueil/cli",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The recueil command line: one process launcher (serve) and a client of the REST API for everything else.",
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "bin": {
+    "recueil": "./dist/index.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc --build tsconfig.build.json && node scripts/finish-build.mjs",
+    "clean": "rm -rf dist",
+    "dev": "tsx src/index.ts",
+    "typecheck": "tsc --build tsconfig.build.json && tsc --noEmit -p tsconfig.json",
+    "test": "tsc --build tsconfig.build.json && vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@recueil/core": "workspace:*",
+    "@recueil/server": "workspace:*",
+    "commander": "^14.0.3",
+    "picocolors": "^1.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.0",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.11"
+  }
+}

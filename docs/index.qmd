@@ -1,0 +1,103 @@
+---
+title: "Recueil"
+subtitle: "Gather. Verify. Map."
+toc: false
+page-layout: full
+---
+
+Recueil is a self-hosted server that gathers documents from anywhere — browser, mail, scanner,
+WebDAV, camera — keeps a content-addressed library with a bibliographic facet, verifies and
+enriches references against the open scholarly graph, and exposes the whole library to R, Python
+and LLMs as data. Systematic reviews and bibliometric mapping are native workflows, not exports.
+
+::: {.callout-important}
+## Status: Phase 0. Nothing runs yet.
+
+This repository is a specification and a scaffold. There is no release, no Docker image and no
+binary; `pnpm install` succeeds and that is the extent of it. Every command, endpoint and screen
+described on this site is a **contract to be implemented**, not a description of working software.
+
+Each page marks which roadmap phase brings its subject into existence. Phase 0's own exit criterion
+is `recueil serve` answering a health check on an empty library.
+
+The documentation is written first on purpose: writing the manual before the code is a cheap way to
+find out that a design is unpleasant to explain.
+:::
+
+## What it is meant to be
+
+|  | |
+|---|---|
+| **Gather** | One ingestion pipeline behind every source: watched folders, WebDAV, IMAP, scanner, mobile capture, the Zotero connector protocol, bulk importers. Files are identified by their SHA-256, never by their path or name. |
+| **Verify** | A checks engine that asks whether a reference exists, resolves, has been retracted, has a published version, or contradicts its own metadata. It runs on the library and on reference lists pasted in from outside it. |
+| **Map** | Citation, co-citation, coupling, co-word and co-authorship networks built from OpenAlex, Crossref, Semantic Scholar and your own PDFs, with coverage statistics attached to every map, and a Parquet export that lands in R and Python as tables. |
+| **Review** | PRISMA 2020 as a first-class workflow: search runs, dedup with per-source tracking, screening, extraction forms, risk of bias, live flow counts. |
+
+It is one AGPL server with thin clients. Zotero's capture ecosystem, Paperless-ngx's ingestion
+model, bibliometrix and VOSviewer's analysis layer, and Covidence and Rayyan's screening workflow,
+in one place that you run yourself.
+
+## Where to go next
+
+::: {.grid}
+
+::: {.g-col-12 .g-col-md-6}
+### [Concepts](concepts.qmd)
+Documents versus items versus attachments, why the content hash is identity, what a facet is, and
+why every derived fact carries its provenance. Read this before anything else — the rest of the
+documentation assumes this vocabulary.
+:::
+
+::: {.g-col-12 .g-col-md-6}
+### [Getting started](getting-started.qmd)
+What installing and first use will look like, and what is genuinely possible today (reading the
+specification, and running nothing).
+:::
+
+::: {.g-col-12 .g-col-md-6}
+### [Self-hosting](self-hosting.qmd)
+Deployment shapes, storage backends, configuration, tokens, reverse proxies, backup and restore.
+:::
+
+::: {.g-col-12 .g-col-md-6}
+### [API](api.qmd)
+The REST contract, the MCP server and the language clients. Nothing in Recueil is UI-only, so this
+is the real surface of the product.
+:::
+
+::: {.g-col-12 .g-col-md-6}
+### [Roadmap](roadmap.qmd)
+Ten phases, six milestones, exit criteria instead of dates.
+:::
+
+::: {.g-col-12 .g-col-md-6}
+### [Decision records](adr.qmd)
+Twenty accepted ADRs covering the architecture, the licence, the storage formats and the name.
+:::
+
+:::
+
+## The principles that decide arguments
+
+Ten binding principles run through the whole design; these four come up most often when reading the
+rest of the site.
+
+- **The server is the source of truth.** Clients are thin. There is no per-device sync engine, and
+  conflicts are logged rather than merged.
+- **Content hash is identity.** Files are deduplicated by SHA-256. Path, name and modification time
+  never define sameness.
+- **Flag, never guess.** An ambiguous ingestion, dedup or enrichment outcome goes to a review queue
+  with a logged reason. It is not resolved silently.
+- **API-first.** The OpenAPI specification is the contract. The web UI, CLI, MCP server and the R
+  and Python packages are all clients of the same API.
+
+The full list of ten is in [CONCEPT.md §3](https://github.com/etabli-dev/etabli-recueil/blob/main/CONCEPT.md).
+
+## Licence and citation
+
+Recueil is licensed under **AGPL-3.0-or-later**. That choice is not incidental: reusing Zotero's
+translators and translation-server requires it, and it prevents a hosted fork that gives nothing
+back ([ADR-0005](adr.qmd)).
+
+A `CITATION.cff` file is in the repository root, and a Zenodo DOI will be minted at the first
+release.

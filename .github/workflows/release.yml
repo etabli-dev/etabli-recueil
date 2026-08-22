@@ -1,0 +1,153 @@
+# Release: build the multi-architecture container image for a version tag and push it to GHCR.
+#
+# The only trigger that does anything is a `v*` tag. `workflow_dispatch` exists so the workflow can
+# be inspected and started by hand, but every job is guarded on the tag, so a manual run on a branch
+# completes as a no-op rather than publishing something unversioned.
+#
+# Nothing here has been executed yet: at Phase 0 the workspace has no build output, so the image
+# cannot be built. See deploy/README.md.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # ghcr.io/etabli-dev/recueil is the default. GITHUB_TOKEN can only push to the namespace of the
+  # repository's own owner, so if the repository moves, set the `GHCR_IMAGE` repository variable to
+  # the new namespace (or supply a token with `write:packages` for the old one).
+  IMAGE_NAME: ${{ vars.GHCR_IMAGE || 'ghcr.io/etabli-dev/recueil' }}
+
+jobs:
+  image:
+    name: Container image
+    # The guard. Without a v* tag this job is skipped and the workflow is a no-op.
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+      # Both are needed by actions/attest-build-provenance.
+      id-token: write
+      attestations: write
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Derive the version
+        id: version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Building $IMAGE_NAME version $version from ${GITHUB_SHA}"
+
+      # QEMU is what makes the arm64 half of the manifest buildable on an amd64 runner. It is slow;
+      # if release builds become painful, the answer is a native arm64 runner, not dropping arm64:
+      # a self-hosted single-user server is as likely to be a Raspberry Pi or an Ampere VPS as an
+      # x86 box.
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive tags and labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          # latest=auto moves `latest` for a plain semver tag and leaves it alone for a prerelease,
+          # so v1.2.0-rc.1 never becomes the tag people pull by default.
+          flavor: |
+            latest=auto
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}},enable=${{ !startsWith(github.ref_name, 'v0.') }}
+          labels: |
+            org.opencontainers.image.title=Recueil
+            org.opencontainers.image.description=Self-hosted, API-first document and reference manager with reference verification, bibliometrics and systematic-review workflow
+            org.opencontainers.image.licenses=AGPL-3.0-or-later
+            org.opencontainers.image.vendor=etabli
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          # deploy/Dockerfile also carries an ocr-worker stage; the published image is the plain
+          # runtime, so the target is explicit.
+          target: runtime
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          build-args: |
+            RECUEIL_VERSION=${{ steps.version.outputs.version }}
+            RECUEIL_REVISION=${{ github.sha }}
+          # Attach SLSA provenance and an SBOM to the image itself, so `docker buildx imagetools
+          # inspect` and `cosign` can read them without this repository being available.
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # A second, independent provenance record: signed by GitHub's attestation service and
+      # verifiable with `gh attestation verify oci://<image>@<digest>`.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+      # A standalone SPDX document as well as the attached one, because the release page and any
+      # downstream vulnerability scan want a file, not an attestation.
+      - name: Generate the SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          format: spdx-json
+          artifact-name: recueil-${{ steps.version.outputs.version }}-sbom.spdx.json
+          output-file: ${{ runner.temp }}/recueil-sbom.spdx.json
+          # The release, if there is one, is created by hand; this workflow only publishes the image.
+          upload-release-assets: false
+
+      - name: Summarise
+        run: |
+          {
+            echo "## Recueil ${{ steps.version.outputs.version }}"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Image | \`${{ env.IMAGE_NAME }}\` |"
+            echo "| Digest | \`${{ steps.build.outputs.digest }}\` |"
+            echo "| Platforms | linux/amd64, linux/arm64 |"
+            echo
+            echo "Tags:"
+            echo '```'
+            echo "${{ steps.meta.outputs.tags }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

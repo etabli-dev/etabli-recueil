@@ -1,0 +1,125 @@
+name: Bug report
+description: Something in Recueil behaves differently from how it is specified or documented
+title: "[bug] "
+labels:
+  - bug
+  - triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for taking the time to write this up.
+
+        Two things before you start:
+
+        - **Security problems do not belong here.** Do not describe a vulnerability in a public
+          issue — follow [SECURITY.md](https://github.com/etabli-dev/etabli-recueil/blob/main/SECURITY.md) instead.
+        - Recueil is pre-1.0 and maintained by one person, so a reply may take a while
+          ([ADR-0014](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0014-tool-for-you-through-m3-open-repo-at-m4.md)). The
+          report is still worth filing: it will be read.
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The release tag, the Docker image tag, or the commit SHA if you build from source.
+      placeholder: v0.1.0, ghcr.io/etabli-dev/etabli-recueil:0.1.0, or 4f2c1ab
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment mode
+      description: How the server you are running was started.
+      options:
+        - Docker (docker compose, deploy/)
+        - Docker (own compose file or orchestrator)
+        - Local install from source (pnpm)
+        - Desktop app (Tauri, bundled server sidecar)
+        - Other (describe below)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: database
+    attributes:
+      label: Database
+      description: >-
+        v1 ships SQLite only (ADR-0015). Postgres is the direction of travel, not a supported
+        configuration — if you are on it, say so, but expect the answer to be that it is unsupported.
+      options:
+        - SQLite (default)
+        - Postgres (unsupported in v1)
+    validations:
+      required: true
+
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      description: Host OS and architecture, plus the browser if the problem is in the web UI.
+      placeholder: Debian 12, amd64, Firefox 141
+    validations:
+      required: false
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: >-
+        Numbered steps, starting from a state someone else can reach. If a specific file, record or
+        import triggers it, say what kind it is — and attach a redacted sample if you can share one.
+      placeholder: |
+        1. Import the attached BibTeX file with `recueil import ...`
+        2. Open the item in the library view
+        3. Click "Run checks"
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+      description: What you expected to happen, and where that expectation comes from if it is written down (CONCEPT.md, spec/, the docs site).
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+      description: What happened instead. Include the exact error message, and say whether it is reproducible every time.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: >-
+        Relevant server logs, the browser console for UI problems, and the job log if a job failed.
+        This box renders as a code block, so no backticks are needed.
+      render: text
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else
+      description: Library size, plugins installed, sidecars enabled, reverse proxy, whatever you think matters.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the existing issues and this is not a duplicate.
+          required: true
+        - label: This is not a security vulnerability (those go through SECURITY.md).
+          required: true
+        - label: I have removed anything private from the logs and samples I am attaching.
+          required: true

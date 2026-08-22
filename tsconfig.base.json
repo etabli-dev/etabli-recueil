@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "//": [
+    "The compiler settings every Recueil package shares (ADR-0002).",
+    "",
+    "Only options that mean the same thing from any directory live here. Anything that names a",
+    "path — outDir, rootDir, include, tsBuildInfoFile — stays in the package's own tsconfig,",
+    "because TypeScript resolves relative paths against the file that declares them, and a",
+    "\"dist\" written here would mean the repository root rather than the package.",
+    "",
+    "A package may add to this, but should not loosen it: the strictness is the point, and it",
+    "is far cheaper to keep than to reintroduce."
+  ],
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "types": ["node"],
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "exactOptionalPropertyTypes": false,
+    "useUnknownInCatchVariables": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "forceConsistentCasingInFileNames": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "removeComments": false,
+    "newLine": "lf"
+  }
+}

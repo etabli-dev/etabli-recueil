@@ -1,0 +1,51 @@
+{
+  "name": "@recueil/schemas",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Zod schemas and the generated OpenAPI document — the shared contract every other Recueil package imports.",
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./openapi": {
+      "types": "./dist/openapi/index.d.ts",
+      "import": "./dist/openapi/index.js",
+      "default": "./dist/openapi/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc --build tsconfig.build.json",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "openapi": "pnpm run build && node dist/bin/write-openapi.js"
+  },
+  "dependencies": {
+    "yaml": "^2.9.0",
+    "zod": "^4.4.3",
+    "zod-openapi": "^6.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.0",
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.11"
+  }
+}

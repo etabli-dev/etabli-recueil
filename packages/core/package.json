@@ -1,0 +1,51 @@
+{
+  "name": "@recueil/core",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The Recueil core: the Drizzle data model, the forward-only migrations, the content-addressed store and the library services every client reaches through the API.",
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./schema": {
+      "types": "./dist/db/schema.d.ts",
+      "import": "./dist/db/schema.js",
+      "default": "./dist/db/schema.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc --build tsconfig.build.json && node scripts/copy-migrations.mjs",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --build tsconfig.build.json && tsc --noEmit -p tsconfig.json",
+    "test": "tsc --build tsconfig.build.json && node scripts/copy-migrations.mjs && vitest run",
+    "test:watch": "vitest",
+    "db:generate": "drizzle-kit generate"
+  },
+  "dependencies": {
+    "@recueil/schemas": "workspace:*",
+    "better-sqlite3": "^12.4.1",
+    "drizzle-orm": "^0.44.6",
+    "ulid": "^3.0.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.19.0",
+    "drizzle-kit": "^0.31.5",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.11"
+  }
+}

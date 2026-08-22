@@ -1,0 +1,90 @@
+# Dependency updates.
+#
+# Weekly rather than daily, and grouped rather than one pull request per package, because this is a
+# solo project (ADR-0014) and a dependency queue nobody reads is worse than no queue at all. Majors
+# stay ungrouped: those are the ones that need reading.
+
+version: 2
+
+updates:
+  # ---------------------------------------------------------------------------------------------
+  # npm — the pnpm workspace
+  #
+  # One directory entry, not one per workspace member: apps/*, packages/* and plugins/* share the
+  # single pnpm-lock.yaml at the root, so Dependabot resolves the whole workspace from "/" and
+  # opens one pull request per group covering every member. If a member ever gets its own lockfile,
+  # add it here with the `directories:` glob form.
+  # ---------------------------------------------------------------------------------------------
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Berlin
+    open-pull-requests-limit: 10
+    labels:
+      - dependencies
+    groups:
+      # Tooling churn: lint, format, types, test runners, build tooling. Almost always safe together
+      # and almost never interesting individually.
+      development:
+        dependency-type: development
+        update-types:
+          - minor
+          - patch
+      # Runtime dependencies, but only the updates that cannot change a contract.
+      production:
+        dependency-type: production
+        update-types:
+          - minor
+          - patch
+    ignore:
+      # @types/node tracks the runtime, and the runtime is Node 22 LTS (CONCEPT.md §5.16, and the
+      # Docker image). Raise this deliberately when the image moves to the next LTS, not because a
+      # bot noticed a new major.
+      - dependency-name: "@types/node"
+        update-types:
+          - version-update:semver-major
+    # No `commit-message:` block on purpose. Dependabot's default subject — "Bump x from 1.2.3 to
+    # 1.3.0" — is already imperative, capitalised and under 72 characters, which is the commit
+    # convention in CONTRIBUTING.md.
+
+  # ---------------------------------------------------------------------------------------------
+  # GitHub Actions — the workflows in this directory
+  # ---------------------------------------------------------------------------------------------
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Berlin
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - ci
+    groups:
+      actions:
+        update-types:
+          - minor
+          - patch
+
+  # ---------------------------------------------------------------------------------------------
+  # Docker — the base image in deploy/Dockerfile
+  #
+  # The sidecar images in deploy/docker-compose.sidecars.yml are pinned by hand: they are optional,
+  # they are not built here, and GROBID in particular is upgraded when its model output is checked
+  # against the fixture library, not when a tag moves.
+  # ---------------------------------------------------------------------------------------------
+  - package-ecosystem: docker
+    directory: /deploy
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Berlin
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - deployment

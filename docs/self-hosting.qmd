@@ -1,0 +1,159 @@
+---
+title: "Self-hosting"
+subtitle: "Running the server yourself, which is the only way it runs"
+---
+
+::: {.callout-important}
+Not yet implemented. Ships across Phases 1 to 3; the storage backends land in Phase 2. This page is
+the operator contract those phases must satisfy.
+:::
+
+Recueil has no hosted edition and no account. You run it, or it does not run. That constrains the
+design usefully: the default deployment has to be a single process with a single file behind it,
+and everything heavier has to be optional.
+
+## Requirements
+
+| | Minimum | Comfortable |
+|---|---|---|
+| CPU | 2 cores | 4 cores; OCR and GROBID are the hungry parts |
+| RAM | 1 GB | 4 GB, or 8 GB with the GROBID sidecar |
+| Disk | Your library, plus about 15% | Same, on something you back up |
+| Runtime | Docker, or Node 22 LTS | Docker, for the sidecar profiles |
+| Database | None. SQLite is the default and v1 is SQLite only ([ADR-0015](adr.qmd)) | |
+
+Recueil runs on `amd64` and `arm64`, so a Raspberry Pi or an ARM NAS is a reasonable host for a
+single-user library — with the caveat that OCR and GROBID will be slow enough that you will want to
+run them elsewhere or not at all.
+
+## Deployment shapes
+
+### Docker (the reference deployment)
+
+The `deploy/` directory holds a `docker-compose.yml` with the server, and the heavy optional
+components behind **compose profiles** so that none of them start unless you ask.
+
+| Profile | Service | Adds |
+|---|---|---|
+| *(none)* | `recueil` | The server. SQLite, local file storage, FTS5 search. |
+| `ocr` | OCRmyPDF / Tesseract worker | A text layer on scans |
+| `grobid` | GROBID | Scholarly PDF metadata, reference lists, in-text citation contexts |
+| `search` | Meilisearch | Search for libraries that have outgrown FTS5 ([ADR-0011](adr.qmd)) |
+| `translation` | `zotero/translation-server` | Import by URL, DOI, PMID, ISBN, arXiv |
+| `intent` | SciCite | Local classification of citation intent |
+
+```sh
+docker compose --profile ocr --profile grobid up -d
+```
+
+Start with none of them. Add one when you have a reason you can name.
+
+### Desktop
+
+The Tauri 2 shell bundles the same server binary as a sidecar on `localhost` (Phase 4). Same code,
+same database file, no container. It adds watched folders, a tray icon, the `recueil://item/<id>`
+URI scheme for deep links out of Overleaf or Quarto, and open-in-external-app.
+
+### From source
+
+```sh
+pnpm install && pnpm build && pnpm --filter @recueil/server start
+```
+
+## Configuration
+
+Configuration is environment variables, because that is what containers, systemd and secret
+managers all already speak. Every variable has a default that works.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `RECUEIL_DATA_DIR` | `/data` | Database, search index, scratch space |
+| `RECUEIL_STORAGE_DIR` | `/storage` | Content-addressed file store |
+| `RECUEIL_PORT` | `8080` | Listen port |
+| `RECUEIL_BASE_URL` | — | Public URL. Required behind a reverse proxy so generated links are correct |
+| `RECUEIL_LOG_LEVEL` | `info` | `trace` … `error`; output is structured JSON |
+| `RECUEIL_UNPAYWALL_EMAIL` | — | Required by Unpaywall's terms |
+| `RECUEIL_CROSSREF_MAILTO` | — | Puts you in Crossref's polite pool. Set it |
+| `RECUEIL_OPENALEX_KEY` | — | Optional; needed at scale |
+| `RECUEIL_S2_KEY`, `RECUEIL_NCBI_KEY` | — | Optional; raise rate limits |
+| `RECUEIL_GROBID_URL`, `RECUEIL_MEILI_URL`, `RECUEIL_TRANSLATION_URL` | — | Sidecar endpoints; unset means the feature is off |
+
+Secrets are read from the environment, and `_FILE` suffixed variants read from a file path for
+Docker and Kubernetes secrets.
+
+## Storage backends
+
+The content store is pluggable, and the choice is per-instance rather than per-item.
+
+| Backend | Notes | Phase |
+|---|---|---|
+| Local filesystem | Content-addressed layout derived from the SHA-256. The default | 1 |
+| WebDAV | A Nextcloud or ownCloud share as the store | 2 |
+| S3 | Any S3-compatible object store; MinIO, Backblaze B2, Wasabi | 2 |
+
+Whichever you choose, the layout is documented and derived from the hash, so the store can be read,
+verified and re-imported without the application running. That is the concrete meaning of the
+no-lock-in principle.
+
+## Reverse proxy and TLS
+
+Recueil speaks plain HTTP and expects a reverse proxy — Caddy, nginx, Traefik — to terminate TLS. It
+does not manage certificates, because your proxy already does it better.
+
+```caddy
+recueil.example.org {
+    reverse_proxy localhost:8080
+}
+```
+
+Set `RECUEIL_BASE_URL` to the public URL. The server needs it for connector callbacks, webhook
+payloads, `.bib` endpoint URLs and the SSE stream.
+
+**Do not put it on the open internet unless you mean to.** A Tailscale or WireGuard network is the
+right answer for a personal library, and the deployment is designed for it.
+
+## Authentication
+
+Single user in v1, with scoped API tokens; the schema is shaped for users and groups so that
+multi-user can be added later without a painful migration.
+
+- **Session auth** for the web UI.
+- **Scoped bearer tokens** for everything else — the CLI, scripts, the R and Python packages, the
+  MCP server, a `.bib` URL you paste into Overleaf.
+- Every token is named, scoped, revocable and shown with its last-used timestamp.
+- Every write is attributed in the audit log to the token that made it, including writes made by an
+  LLM through MCP. There is no anonymous mutation.
+
+A `.bib` endpoint token is the one credential you will be tempted to paste somewhere careless. Scope
+it to read-only on one collection.
+
+## Backup and restore
+
+```sh
+recueil backup --to /backups/recueil
+recueil restore --from /backups/recueil/2026-08-22
+```
+
+A backup is a consistent snapshot of the database, a manifest of the file store and the
+configuration, in a layout designed for `restic` to deduplicate well. Because the store is content
+addressed and append-only in practice, incremental backups are cheap.
+
+**Restore is exercised in CI.** A backup procedure that has never been restored is a hypothesis.
+
+## Monitoring
+
+- `GET /health` — liveness and readiness, with the database and each configured sidecar reported
+  separately.
+- `GET /metrics` — Prometheus format: queue depth, job durations and failures, resolver call counts
+  and rate-limit state per source, ingestion throughput, review-queue size.
+- Structured JSON logs on stdout, with a correlation id per request and per job.
+
+The two numbers worth alerting on for a personal instance are **review-queue size** and **failed
+jobs**. Both mean something is waiting for you.
+
+## Upgrades
+
+Migrations run automatically at start and are forward-only. Take a backup first; the release notes
+will say so too. Multi-arch images are published to `ghcr.io`, and version pinning is supported and
+recommended. Until 1.0, the data model may change under a migration and the plugin API may break
+between minor versions — see [ADR-0014](adr.qmd) for what is and is not promised before then.

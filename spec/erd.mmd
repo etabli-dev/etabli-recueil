@@ -1,0 +1,686 @@
+%% Recueil — entity relationship diagram
+%% Companion to spec/data-model.md. Covers CONCEPT.md 5.2.
+%% Only key columns are shown; the authoritative column lists are in data-model.md.
+%% Phase markers: (P6) curated networks, (P7) systematic review. Everything else is Phase 1-5.
+
+erDiagram
+
+    %% ---------------------------------------------------------------
+    %% Identity and access
+    %% ---------------------------------------------------------------
+
+    users {
+        text id PK
+        text username UK
+        text email
+        text password_hash "argon2id, nullable"
+        boolean is_active
+        boolean is_admin
+        timestamp created_at
+    }
+
+    api_tokens {
+        text id PK
+        text user_id FK
+        text name
+        text token_prefix UK "display and lookup"
+        text token_hash UK "sha256 of secret"
+        json scopes
+        text client "cli, mcp, connector, r, python, web_session"
+        timestamp expires_at
+        timestamp revoked_at
+    }
+
+    %% ---------------------------------------------------------------
+    %% Files
+    %% ---------------------------------------------------------------
+
+    documents {
+        text id PK
+        text sha256 UK "identity, ADR-0004"
+        text mime_type
+        integer byte_size
+        text storage_backend "local, webdav, s3"
+        text storage_key "aa/bb/full-hash"
+        text simhash "near-duplicate blocking"
+        text source_kind
+        text source_ref
+        boolean has_text_layer
+        timestamp ingested_at
+        timestamp trashed_at
+    }
+
+    %% ---------------------------------------------------------------
+    %% Library core
+    %% ---------------------------------------------------------------
+
+    items {
+        text id PK
+        text public_id UK "8-char key, Zotero-compatible"
+        text item_type
+        text title
+        text owner_user_id FK
+        text merged_into_item_id FK "dedup tombstone"
+        text promoted_from_shadow_work_id FK
+        text source_system "zotero, paperless, bibtex"
+        text source_id "idempotent re-import"
+        integer version
+        timestamp date_added
+        timestamp trashed_at
+    }
+
+    item_bibliographic {
+        text item_id PK,FK
+        text title
+        text container_title "venue"
+        text issued_date "EDTF, may be partial"
+        integer issued_year
+        text doi UK
+        text pmid
+        text pmcid
+        text arxiv_id
+        text isbn
+        text openalex_id
+        text semantic_scholar_id
+        text abstract
+        text language_code
+        text citation_key UK
+        boolean citation_key_locked
+        text retraction_status
+        text oa_status
+    }
+
+    item_office {
+        text item_id PK,FK
+        text correspondent
+        text correspondent_creator_id FK
+        text document_date
+        integer asn UK "archive serial number"
+        text reference_number
+        integer amount_minor
+        text amount_currency
+        text due_date
+        text office_document_type
+    }
+
+    attachments {
+        text id PK
+        text item_id FK
+        text document_id FK "null for linked_url"
+        text role "primary, supplement, snapshot, scan"
+        text link_mode "stored, linked_file, linked_url"
+        text url
+        boolean has_annotations
+        integer annotation_count
+        integer position
+        timestamp trashed_at
+    }
+
+    field_provenance {
+        text id PK
+        text entity_type "item_bibliographic, item_office, creators"
+        text entity_id
+        text field_path
+        text source "crossref, openalex, grobid, manual"
+        text source_record_id
+        real confidence
+        boolean locked "manual lock, P4"
+        timestamp fetched_at
+    }
+
+    item_metrics {
+        text id PK
+        text item_id FK
+        text metric "cited_by_count, fwci, venue_2yr_mean_citedness"
+        real metric_value
+        text source
+        timestamp observed_at
+    }
+
+    %% ---------------------------------------------------------------
+    %% Organisation
+    %% ---------------------------------------------------------------
+
+    collections {
+        text id PK
+        text public_id UK
+        text name
+        text parent_id FK
+        text owner_user_id FK
+        text kind "manual or smart"
+        json query "smart collections only"
+        integer depth
+        integer position
+        timestamp trashed_at
+    }
+
+    collection_items {
+        text collection_id PK,FK
+        text item_id PK,FK
+        integer position
+        timestamp added_at
+    }
+
+    tags {
+        text id PK
+        text name
+        text normalised_name
+        text colour
+        text scheme "manual, automatic, imported"
+        text term_id FK "optional controlled vocabulary link"
+        text owner_user_id FK
+    }
+
+    item_tags {
+        text item_id PK,FK
+        text tag_id PK,FK
+        text source "manual, rule, plugin, import"
+        real confidence
+        timestamp added_at
+    }
+
+    annotation_tags {
+        text annotation_id PK,FK
+        text tag_id PK,FK
+        timestamp added_at
+    }
+
+    custom_fields {
+        text id PK
+        text field_key UK
+        text name
+        text data_type "text, number, date, choice, multi, json, item_reference"
+        json config "choices, units, bounds"
+        json applies_to_item_types
+        text plugin_id FK
+        integer position
+    }
+
+    field_values {
+        text id PK
+        text field_id FK
+        text item_id FK
+        text review_id FK "P7 extraction scope"
+        text extraction_form_id FK "P7"
+        text group_key "repeatable arm or outcome"
+        integer ordinal
+        text value_text
+        real value_number
+        boolean value_boolean
+        text value_date
+        json value_json
+        text value_item_id FK
+    }
+
+    %% ---------------------------------------------------------------
+    %% Content
+    %% ---------------------------------------------------------------
+
+    notes {
+        text id PK
+        text public_id UK
+        text item_id FK "null for standalone notes"
+        text owner_user_id FK
+        text content_markdown
+        text source_format "markdown or html"
+        integer version
+        timestamp trashed_at
+    }
+
+    annotations {
+        text id PK
+        text public_id UK
+        text document_id FK "W3C target"
+        text item_id FK "reading context"
+        text annotation_type "highlight, note, area, ink"
+        text motivation "W3C motivation"
+        json selector "W3C selector set"
+        text quoted_text
+        text body_text
+        text colour
+        integer page_index
+        text position_sort_key
+        text author_user_id FK
+        boolean is_external "extracted from embedded PDF"
+        timestamp trashed_at
+    }
+
+    %% ---------------------------------------------------------------
+    %% People and vocabulary
+    %% ---------------------------------------------------------------
+
+    creators {
+        text id PK
+        text kind "person or organisation"
+        text family_name
+        text given_name
+        text literal_name
+        text display_name
+        text sort_name
+        json name_variants
+        text orcid UK
+        text openalex_author_id
+        text ror "organisations"
+        text disambiguation_status
+        text merged_into_creator_id FK
+    }
+
+    item_creators {
+        text item_id PK,FK
+        integer ordinal PK
+        text creator_id FK
+        text role "author, editor, translator, recipient"
+        text raw_name "as printed"
+        text affiliation_raw "bibliometrix C1"
+        text affiliation_ror
+        text country_code
+        boolean is_corresponding
+    }
+
+    terms {
+        text id PK
+        text scheme "author_keyword, mesh, tag, openalex_topic, custom"
+        text code "e.g. MeSH descriptor UI"
+        text label
+        text normalised_label
+        text parent_id FK
+        text preferred_term_id FK "thesaurus roll-up"
+        json tree_numbers "MeSH tree numbers"
+        text external_uri
+    }
+
+    item_terms {
+        text item_id PK,FK
+        text term_id PK,FK
+        text source "author, indexer, openalex, extracted, manual"
+        real weight
+        boolean is_major_topic
+        text qualifier_term_id FK
+    }
+
+    %% ---------------------------------------------------------------
+    %% Graph
+    %% ---------------------------------------------------------------
+
+    shadow_works {
+        text id PK
+        text source "openalex, crossref, s2, grobid"
+        text source_id
+        text doi
+        text title
+        text container_title
+        integer issued_year
+        json authors
+        json raw_record
+        text discovered_via "reference_list, deep_dive, cited_by"
+        text discovered_from_item_id FK
+        text promoted_item_id FK
+        text promotion_status
+        integer seen_count
+    }
+
+    graph_nodes {
+        text id PK
+        text node_type "item, shadow_work, creator, venue, term, institution"
+        text item_id FK
+        text shadow_work_id FK
+        text creator_id FK
+        text term_id FK
+        text external_scheme "issn_l, ror, openalex"
+        text external_id
+        text label
+        json external_ids
+    }
+
+    graph_edges {
+        text id PK
+        text edge_type "cites, co_cited, coupled, co_occurs, co_author, same_as, version_of"
+        text source_node_id FK
+        text target_node_id FK
+        boolean directed
+        real weight
+        real normalised_weight
+        text normalisation "association_strength, salton, jaccard"
+        text provenance_source
+        timestamp provenance_fetched_at
+        real confidence
+        text derivation "asserted or derived"
+        text run_id FK
+        text scheme "co_occurs vocabulary"
+    }
+
+    edge_evidence {
+        text id PK
+        text edge_id FK
+        text kind "citation_context, reference_string, api_record"
+        text document_id FK
+        integer page_index
+        text text_excerpt
+        text intent "background, method, result"
+        real intent_confidence
+        text model
+    }
+
+    %% ---------------------------------------------------------------
+    %% Operations
+    %% ---------------------------------------------------------------
+
+    review_queue {
+        text id PK
+        text subject_type "document, item, attachment, merge_candidate"
+        text subject_id
+        text reason_code
+        text explanation
+        text proposed_action
+        json proposed_payload
+        real confidence
+        text severity
+        text status "open, accepted, rejected, deferred, superseded"
+        text dedupe_key UK "one open entry per problem"
+        text job_id FK
+        text resolved_by_user_id FK
+    }
+
+    check_results {
+        text id PK
+        text check_id "completeness, doi_resolves, retraction"
+        text subject_type
+        text subject_id
+        text item_id FK
+        text severity
+        text status "pass, fail, warn, skipped"
+        text message
+        json detail
+        boolean auto_fixable
+        text run_id FK
+        timestamp checked_at
+    }
+
+    jobs {
+        text id PK
+        text job_type
+        text idempotency_key UK "P9"
+        json params
+        text state "queued, running, succeeded, failed, cancelled, dead"
+        integer priority
+        timestamp run_after
+        timestamp lease_expires_at
+        integer attempts
+        json cursor "resume point"
+        json result
+        text parent_job_id FK
+        text created_by_user_id FK
+        text plugin_id FK
+    }
+
+    job_logs {
+        text id PK
+        text job_id FK
+        timestamp logged_at
+        text level
+        text message
+        json data
+    }
+
+    audit_log {
+        text id PK
+        timestamp occurred_at
+        text actor_type "user, token, system, plugin, job, mcp"
+        text actor_user_id FK
+        text actor_token_id FK
+        text actor_plugin_id FK
+        text action "item.updated"
+        text entity_type
+        text entity_id
+        json before
+        json after
+        text request_id
+    }
+
+    trash {
+        text id PK
+        text entity_type
+        text entity_id
+        timestamp trashed_at
+        text trashed_by_user_id FK
+        text reason "user, merge, import_rollback, plugin"
+        json restore_payload
+        text merge_target_item_id FK "reversible merge"
+        timestamp restored_at
+        timestamp purged_at
+    }
+
+    plugins {
+        text id PK
+        text name UK
+        text version
+        text plugin_api_range
+        text source "builtin, npm, url, local"
+        json manifest
+        json permissions
+        json settings
+        boolean enabled
+        text install_state
+    }
+
+    %% ---------------------------------------------------------------
+    %% Curated networks (Phase 6)
+    %% ---------------------------------------------------------------
+
+    curated_networks {
+        text id PK
+        text public_id UK
+        text name
+        text owner_user_id FK
+        text review_id FK
+        text current_version_id FK
+        timestamp trashed_at
+    }
+
+    curated_network_versions {
+        text id PK
+        text network_id FK
+        integer version
+        json document "nodes, edges, layout, style, annotations"
+        json frozen_snapshot "metadata embedded at freeze"
+        boolean is_frozen
+        text parent_version_id FK
+        text created_by_user_id FK
+    }
+
+    %% ---------------------------------------------------------------
+    %% Systematic review (Phase 7)
+    %% ---------------------------------------------------------------
+
+    reviews {
+        text id PK
+        text public_id UK
+        text title
+        text question
+        json protocol "PICO and eligibility"
+        text registration_id
+        text status
+        boolean automation_disclosure "ADR-020"
+        integer screener_count
+        boolean blind_mode
+        json exclusion_reasons
+        text owner_user_id FK
+        timestamp trashed_at
+    }
+
+    search_runs {
+        text id PK
+        text review_id FK
+        text source_database "pubmed, embase, wos, scopus, cochrane, openalex"
+        text interface
+        text query_string
+        json filters
+        timestamp executed_at
+        integer records_returned
+        integer records_imported
+        text source_file_document_id FK "the export file itself"
+        text import_job_id FK
+        text rerun_of_search_run_id FK
+    }
+
+    review_records {
+        text id PK
+        text review_id FK
+        text item_id FK
+        text stage "identified, screened, full_text, included, excluded"
+        text dedup_status
+        text duplicate_of_id FK
+        text retrieval_status
+        text full_text_document_id FK
+        text extraction_status
+        timestamp added_at
+    }
+
+    review_record_sources {
+        text review_record_id PK,FK
+        text search_run_id PK,FK
+        text external_record_id "PMID, accession"
+        timestamp imported_at
+    }
+
+    screening_decisions {
+        text id PK
+        text review_id FK
+        text review_record_id FK
+        text stage "title_abstract or full_text"
+        text screener_user_id FK
+        text decision "include, exclude, maybe"
+        text exclusion_reason_code
+        boolean tool_assisted "ADR-020"
+        boolean is_current
+        text superseded_by_id FK
+        timestamp decided_at
+    }
+
+    extraction_forms {
+        text id PK
+        text review_id FK
+        text name
+        integer version
+        json schema_json "custom_field references"
+        json repeatable_groups "arms and outcomes"
+        text template "rct, observational, diagnostic"
+        text status "draft, active, locked"
+    }
+
+    rob_assessments {
+        text id PK
+        text review_id FK
+        text review_record_id FK
+        text tool "rob2, robins_i, newcastle_ottawa, quadas2"
+        text tool_version
+        json instrument "frozen at assessment time"
+        json signalling_answers
+        json domain_judgements
+        text overall_judgement
+        text outcome_label
+        text assessor_user_id FK
+        boolean is_current
+    }
+
+    prisma_counts {
+        text id PK
+        text review_id FK
+        timestamp snapshot_at
+        text stage_key "records_identified, duplicates_removed, studies_included"
+        text source_label "per database"
+        integer count_value
+        text computed_by "live or frozen"
+    }
+
+    %% ---------------------------------------------------------------
+    %% Relationships
+    %% ---------------------------------------------------------------
+
+    users ||--o{ api_tokens : "issues"
+    users ||--o{ items : "owns"
+    users ||--o{ collections : "owns"
+    users ||--o{ tags : "owns"
+    users ||--o{ notes : "owns"
+    users ||--o{ annotations : "authors"
+    users ||--o{ audit_log : "acts in"
+    users ||--o{ trash : "trashes"
+    users ||--o{ reviews : "owns"
+    users ||--o{ curated_networks : "owns"
+    api_tokens ||--o{ audit_log : "acts in"
+
+    items ||--o| item_bibliographic : "has facet"
+    items ||--o| item_office : "has facet"
+    items ||--o{ attachments : "attaches"
+    documents ||--o{ attachments : "is attached as"
+    items ||--o{ item_metrics : "measured by"
+    items |o--o{ items : "merged into"
+    shadow_works |o--o| items : "promoted to"
+    shadow_works }o--o| items : "discovered from"
+
+    items ||--o{ collection_items : "filed in"
+    collections ||--o{ collection_items : "contains"
+    collections |o--o{ collections : "parent of"
+
+    items ||--o{ item_tags : "tagged"
+    tags ||--o{ item_tags : "applies to"
+    annotations ||--o{ annotation_tags : "tagged"
+    tags ||--o{ annotation_tags : "applies to"
+    terms |o--o{ tags : "controlled by"
+
+    custom_fields ||--o{ field_values : "typed by"
+    items ||--o{ field_values : "carries"
+    plugins |o--o{ custom_fields : "defines"
+
+    items ||--o{ notes : "annotated by"
+    documents ||--o{ annotations : "targeted by"
+    items |o--o{ annotations : "read as"
+
+    items ||--o{ item_creators : "credits"
+    creators ||--o{ item_creators : "credited on"
+    creators |o--o{ creators : "merged into"
+    creators |o--o{ item_office : "correspondent of"
+
+    items ||--o{ item_terms : "indexed by"
+    terms ||--o{ item_terms : "indexes"
+    terms |o--o{ terms : "broader than"
+    terms |o--o{ terms : "preferred form of"
+
+    items |o--o| graph_nodes : "projected as"
+    shadow_works |o--o| graph_nodes : "projected as"
+    creators |o--o| graph_nodes : "projected as"
+    terms |o--o| graph_nodes : "projected as"
+    graph_nodes ||--o{ graph_edges : "source of"
+    graph_nodes ||--o{ graph_edges : "target of"
+    graph_edges ||--o{ edge_evidence : "evidenced by"
+    documents |o--o{ edge_evidence : "quoted from"
+
+    jobs ||--o{ job_logs : "logs"
+    jobs |o--o{ jobs : "parent of"
+    jobs |o--o{ review_queue : "raises"
+    jobs |o--o{ graph_edges : "materialises"
+    jobs |o--o{ check_results : "produces"
+    items |o--o{ check_results : "checked"
+    plugins |o--o{ jobs : "schedules"
+    items |o--o{ trash : "restorable as"
+
+    curated_networks ||--o{ curated_network_versions : "versioned as"
+    curated_network_versions |o--o{ curated_network_versions : "parent of"
+
+    reviews ||--o{ search_runs : "runs"
+    reviews ||--o{ review_records : "screens"
+    reviews ||--o{ extraction_forms : "defines"
+    reviews ||--o{ prisma_counts : "counts"
+    reviews ||--o{ screening_decisions : "records"
+    reviews ||--o{ rob_assessments : "appraises"
+    reviews |o--o{ curated_networks : "illustrated by"
+    items ||--o{ review_records : "considered as"
+    search_runs ||--o{ review_record_sources : "identifies"
+    review_records ||--o{ review_record_sources : "identified by"
+    review_records ||--o{ screening_decisions : "decided by"
+    review_records ||--o{ rob_assessments : "assessed by"
+    review_records |o--o{ review_records : "duplicate of"
+    documents |o--o{ search_runs : "export file for"
+    documents |o--o{ review_records : "full text for"
+    extraction_forms ||--o{ field_values : "instantiated by"
+    reviews ||--o{ field_values : "scopes"

@@ -1,0 +1,380 @@
+# Continuous integration for the Recueil monorepo.
+#
+# Phase 0 note: most workspace packages do not define lint, typecheck, test or build scripts yet.
+# Every script step therefore prefers the root script when one exists and otherwise falls back to
+# `pnpm -r --if-present`, which is a no-op when nothing implements the script. A package that has
+# not been written yet must not turn the run red; a package that has been written and fails must.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Keep installs quiet and deterministic.
+  CI: "true"
+  # Node 22 is the reference runtime (CONCEPT.md §5.16); 24 is tested so the next LTS is not a
+  # surprise. The Docker image always runs 22.
+  NODE_VERSION_DEFAULT: "22"
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["22", "24"]
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Node ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Enable pnpm through Corepack
+        run: |
+          corepack enable || npm install --global pnpm@9
+          echo "pnpm $(pnpm --version), node $(node --version)"
+
+      - name: Locate the pnpm store
+        id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-${{ runner.os }}-node${{ matrix.node }}-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            pnpm-${{ runner.os }}-node${{ matrix.node }}-
+            pnpm-${{ runner.os }}-
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        env:
+          SCRIPT: lint
+        run: |
+          if node -e "process.exit((require('./package.json').scripts ?? {})[process.env.SCRIPT] ? 0 : 1)"; then
+            pnpm run "$SCRIPT"
+          else
+            echo "::notice::No root '$SCRIPT' script yet; running it across workspace packages instead."
+            pnpm -r --if-present run "$SCRIPT"
+          fi
+
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["22", "24"]
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Node ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Enable pnpm through Corepack
+        run: |
+          corepack enable || npm install --global pnpm@9
+          echo "pnpm $(pnpm --version), node $(node --version)"
+
+      - name: Locate the pnpm store
+        id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-${{ runner.os }}-node${{ matrix.node }}-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            pnpm-${{ runner.os }}-node${{ matrix.node }}-
+            pnpm-${{ runner.os }}-
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        env:
+          SCRIPT: typecheck
+        run: |
+          if node -e "process.exit((require('./package.json').scripts ?? {})[process.env.SCRIPT] ? 0 : 1)"; then
+            pnpm run "$SCRIPT"
+          else
+            echo "::notice::No root '$SCRIPT' script yet; running it across workspace packages instead."
+            pnpm -r --if-present run "$SCRIPT"
+          fi
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["22", "24"]
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Node ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Enable pnpm through Corepack
+        run: |
+          corepack enable || npm install --global pnpm@9
+          echo "pnpm $(pnpm --version), node $(node --version)"
+
+      - name: Locate the pnpm store
+        id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-${{ runner.os }}-node${{ matrix.node }}-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            pnpm-${{ runner.os }}-node${{ matrix.node }}-
+            pnpm-${{ runner.os }}-
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Test
+        env:
+          SCRIPT: test
+        run: |
+          if node -e "process.exit((require('./package.json').scripts ?? {})[process.env.SCRIPT] ? 0 : 1)"; then
+            pnpm run "$SCRIPT"
+          else
+            echo "::notice::No root '$SCRIPT' script yet; running it across workspace packages instead."
+            pnpm -r --if-present run "$SCRIPT"
+          fi
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["22", "24"]
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Node ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Enable pnpm through Corepack
+        run: |
+          corepack enable || npm install --global pnpm@9
+          echo "pnpm $(pnpm --version), node $(node --version)"
+
+      - name: Locate the pnpm store
+        id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-${{ runner.os }}-node${{ matrix.node }}-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            pnpm-${{ runner.os }}-node${{ matrix.node }}-
+            pnpm-${{ runner.os }}-
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        env:
+          SCRIPT: build
+        run: |
+          if node -e "process.exit((require('./package.json').scripts ?? {})[process.env.SCRIPT] ? 0 : 1)"; then
+            pnpm run "$SCRIPT"
+          else
+            echo "::notice::No root '$SCRIPT' script yet; running it across workspace packages instead."
+            pnpm -r --if-present run "$SCRIPT"
+          fi
+
+      # Phase 0's exit criterion (CONCEPT.md §7): the *built* CLI serves /health with an empty
+      # library. It runs here rather than in the test job because it needs the build output, and it
+      # runs against a throwaway database and store in a temporary directory. A build that compiles
+      # but cannot boot is a red build.
+      - name: Smoke test the built CLI
+        run: pnpm run smoke
+
+  spec:
+    # The specification is the contract (P6), so it is checked on every commit whether or not any
+    # code exists yet. This job deliberately depends on nothing in the workspace: it installs its
+    # own validators into the runner's temporary directory, so a broken workspace cannot mask a
+    # broken specification and an unwritten one cannot excuse it.
+    name: Specification
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION_DEFAULT }}
+
+      - name: Install the validators
+        # Installed beside the script rather than into the workspace: ES module resolution walks up
+        # from the importing file, so the packages must sit in $RUNNER_TEMP/node_modules, and the
+        # workspace stays untouched by anything CI needs for itself.
+        run: |
+          npm install --no-save --no-audit --no-fund \
+            --prefix "$RUNNER_TEMP" \
+            ajv@8.17.1 ajv-formats@3.0.1 yaml@2.6.1
+
+      - name: Write the validation script
+        run: |
+          cat > "$RUNNER_TEMP/validate-spec.mjs" <<'VALIDATOR'
+          import { readFileSync, existsSync } from 'node:fs';
+          import Ajv2020 from 'ajv/dist/2020.js';
+          import addFormats from 'ajv-formats';
+          import { parse as parseYaml } from 'yaml';
+
+          const problems = [];
+          const note = (message) => console.log(`  ${message}`);
+
+          // spec/plugin-manifest.schema.json — the plugin contract (CONCEPT.md §5.13). It must be
+          // valid JSON, must declare draft 2020-12, must validate against that meta-schema and must
+          // compile, because the host compiles it at install time and at every activation.
+          const schemaPath = 'spec/plugin-manifest.schema.json';
+          console.log(`Checking ${schemaPath}`);
+          if (!existsSync(schemaPath)) {
+            problems.push(`${schemaPath} is missing`);
+          } else {
+            let schema;
+            try {
+              schema = JSON.parse(readFileSync(schemaPath, 'utf8'));
+              note('valid JSON');
+            } catch (error) {
+              problems.push(`${schemaPath} is not valid JSON: ${error.message}`);
+            }
+            if (schema) {
+              if (schema.$schema !== 'https://json-schema.org/draft/2020-12/schema') {
+                problems.push(`${schemaPath} does not declare the draft 2020-12 $schema`);
+              }
+              if (typeof schema.$id !== 'string') {
+                problems.push(`${schemaPath} has no $id`);
+              }
+              // strictRequired is off: `anyOf: [{ required: ["main"] }, { required: ["ui"] }]` is a
+              // deliberate either-or in the manifest, not a mistake.
+              const ajv = new Ajv2020({
+                strict: true,
+                strictRequired: false,
+                allErrors: true,
+                allowUnionTypes: true,
+              });
+              addFormats(ajv);
+              try {
+                if (!ajv.validateSchema(schema)) {
+                  for (const error of ajv.errors ?? []) {
+                    problems.push(`${schemaPath} ${error.instancePath || '/'}: ${error.message}`);
+                  }
+                } else {
+                  note('validates against the draft 2020-12 meta-schema');
+                }
+                ajv.compile(schema);
+                note('compiles under Ajv strict mode');
+              } catch (error) {
+                problems.push(`${schemaPath} does not compile: ${error.message}`);
+              }
+            }
+          }
+
+          // spec/openapi.yaml — the API contract (P6). This checks that it parses and is shaped like
+          // an OpenAPI 3.x document. Full linting against the OpenAPI meta-schema belongs with the
+          // generator once the Zod schemas produce this file rather than a human editing it.
+          const apiPath = 'spec/openapi.yaml';
+          console.log(`Checking ${apiPath}`);
+          if (!existsSync(apiPath)) {
+            problems.push(`${apiPath} is missing`);
+          } else {
+            let document;
+            try {
+              document = parseYaml(readFileSync(apiPath, 'utf8'));
+              note('parses as YAML');
+            } catch (error) {
+              problems.push(`${apiPath} is not valid YAML: ${error.message}`);
+            }
+            if (document) {
+              if (typeof document.openapi !== 'string' || !document.openapi.startsWith('3.')) {
+                problems.push(`${apiPath} has no OpenAPI 3.x version string`);
+              } else {
+                note(`declares OpenAPI ${document.openapi}`);
+              }
+              for (const key of ['info', 'paths']) {
+                if (!document[key]) {
+                  problems.push(`${apiPath} has no top-level '${key}'`);
+                }
+              }
+            }
+          }
+
+          if (problems.length > 0) {
+            console.error('\nSpecification checks failed:');
+            for (const problem of problems) {
+              console.error(`  - ${problem}`);
+            }
+            process.exit(1);
+          }
+          console.log('\nSpecification checks passed.');
+          VALIDATOR
+
+      - name: Validate the specification
+        # Run from the checkout, so the relative paths in the script resolve against the repository.
+        run: node "$RUNNER_TEMP/validate-spec.mjs"
+
+  # A single required status check to protect main with, so the branch protection rule does not have
+  # to be edited every time the matrix changes.
+  ci:
+    name: CI complete
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [lint, typecheck, test, build, spec]
+    steps:
+      - name: Report
+        run: |
+          echo "lint:      ${{ needs.lint.result }}"
+          echo "typecheck: ${{ needs.typecheck.result }}"
+          echo "test:      ${{ needs.test.result }}"
+          echo "build:     ${{ needs.build.result }}"
+          echo "spec:      ${{ needs.spec.result }}"
+          if [ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" = "true" ]; then
+            echo "::error::At least one CI job did not pass."
+            exit 1
+          fi

@@ -1,0 +1,163 @@
+# Recueil — optional sidecars (CONCEPT.md §5.1).
+#
+# An overlay, not a standalone file: always pass it after the base file, and enable the profiles you
+# want. Nothing in here starts unless its profile is named.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.sidecars.yml --profile grobid up -d
+#   docker compose -f docker-compose.yml -f docker-compose.sidecars.yml \
+#       --profile grobid --profile search up -d
+#
+# Or set COMPOSE_FILE and COMPOSE_PROFILES in .env and drop the flags:
+#
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.sidecars.yml
+#   COMPOSE_PROFILES=grobid,search
+#
+# Starting a profile is only half of it: the server ignores a sidecar until it is told the URL, so
+# uncomment the matching variable in .env as well. That is deliberate — a URL that is set but not
+# answering is a misconfiguration, while a URL that is unset is a feature that is off.
+#
+# | Profile       | Service              | .env variable                    |
+# |---------------|----------------------|----------------------------------|
+# | `grobid`      | grobid               | RECUEIL_GROBID_URL               |
+# | `ocr`         | ocr-worker           | RECUEIL_OCR_ENABLED              |
+# | `search`      | meilisearch          | RECUEIL_SEARCH_BACKEND, …_URL    |
+# | `translation` | translation-server   | RECUEIL_TRANSLATION_SERVER_URL   |
+#
+# The services share the base file's default network, so the hostnames below are the service names.
+# None of them publishes a port to the host: they are reachable from the server container and from
+# nowhere else. The commented `ports:` entries are for debugging one by hand.
+#
+# No healthchecks. These images do not all ship an HTTP client, and a healthcheck that cannot run
+# reports unhealthy for the wrong reason. Recueil probes its own sidecars and reports what it finds
+# through /health (spec/hooks.md, HealthReport).
+#
+# Status: untested. Nothing in this file has been run; see README.md.
+
+name: recueil
+
+services:
+  # ===============================================================================================
+  # GROBID — metadata, reference lists and in-text citation contexts from scholarly PDFs.
+  # CONCEPT.md §5.3 stage 6 and §5.8. Apache-2.0.
+  #
+  # The full image is several gigabytes and includes the deep-learning models; lfoppiano/grobid is
+  # the CRF-only build, an order of magnitude smaller and enough for header and reference parsing.
+  # Pinned by hand rather than by Dependabot: a GROBID upgrade changes extraction output, so it is
+  # checked against the fixture library before it is taken.
+  # ===============================================================================================
+  grobid:
+    image: grobid/grobid:0.8.1
+    profiles: [grobid]
+    restart: unless-stopped
+    #ports:
+    #  - "127.0.0.1:8070:8070"
+    environment:
+      # Roughly one concurrent request per core; GROBID queues the rest rather than thrashing.
+      JAVA_OPTS: -Xmx4g
+    deploy:
+      resources:
+        limits:
+          memory: 6g
+
+  # ===============================================================================================
+  # OCR worker — OCRmyPDF and Tesseract for scans with no text layer. CONCEPT.md §5.3 stage 5.
+  #
+  # Not a published image: it is this repository's own image with the OCR toolchain added, so it has
+  # to be built. `docker compose --profile ocr build` does it.
+  #
+  #   docker compose -f docker-compose.yml -f docker-compose.sidecars.yml --profile ocr build
+  #
+  # Caveat, and it is a real one. ADR-0010 puts the job queue in the database and runs it in the
+  # server process, and its consequences say a single-container deployment stays single-container.
+  # This profile breaks that: a second process opens the same SQLite file to take OCR jobs. On one
+  # host with the same volume and WAL journalling that works, but it is a deployment shape the ADR
+  # did not sanction, so it is off by default and belongs to whoever turns it on. The reason to want
+  # it is that the OCR toolchain is around half a gigabyte the base image otherwise carries for a
+  # feature many libraries never use. If it earns its place, it needs an ADR of its own.
+  # ===============================================================================================
+  ocr-worker:
+    image: recueil-ocr:local
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: ocr-worker
+    profiles: [ocr]
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    # The same volume as the server: the worker reads the queue in the database and writes derived
+    # text back into the content store.
+    volumes:
+      - recueil-data:/data
+    command: ["worker", "--queues", "ocr"]
+    depends_on:
+      - recueil
+    init: true
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  # ===============================================================================================
+  # Meilisearch — the optional search backend (ADR-0011). MIT.
+  #
+  # FTS5 is the default and needs nothing; this is for large libraries and for typo tolerance.
+  # Set RECUEIL_SEARCH_BACKEND=meilisearch, RECUEIL_MEILISEARCH_URL=http://meilisearch:7700 and a
+  # matching RECUEIL_MEILISEARCH_KEY / MEILI_MASTER_KEY pair in .env, then reindex.
+  # ===============================================================================================
+  meilisearch:
+    image: getmeili/meilisearch:v1.11
+    profiles: [search]
+    restart: unless-stopped
+    #ports:
+    #  - "127.0.0.1:7700:7700"
+    environment:
+      MEILI_ENV: production
+      # Required in production: Meilisearch refuses to start without it. Set it in .env to the same
+      # value as RECUEIL_MEILISEARCH_KEY. Not written as ${MEILI_MASTER_KEY:?...} because Compose
+      # interpolates every file it is given before it filters by profile, so a required variable
+      # here would break `docker compose up` for people who never enable this profile.
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-}
+      MEILI_DB_PATH: /meili_data
+      MEILI_NO_ANALYTICS: "true"
+    volumes:
+      - meili-data:/meili_data
+
+  # ===============================================================================================
+  # zotero/translation-server — URL, DOI, PMID, ISBN and arXiv imports through the ~600 Zotero
+  # translators (ADR-0006). AGPL-3.0, which is one of the reasons Recueil is (ADR-0005).
+  #
+  # Zotero publishes no version tags for this image, only `latest`, so the digest is what to pin if
+  # reproducibility matters:
+  #   image: zotero/translation-server@sha256:<digest>
+  # ===============================================================================================
+  translation-server:
+    image: zotero/translation-server:latest
+    profiles: [translation]
+    restart: unless-stopped
+    #ports:
+    #  - "127.0.0.1:1969:1969"
+    environment:
+      # Translators run untrusted JavaScript from the web; keep this one on its own with no volumes
+      # and no access to the library.
+      NODE_ENV: production
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  # ===============================================================================================
+  # SciCite — citation-intent classification over in-text citation contexts (CONCEPT.md §5.8), the
+  # last sidecar in §5.1. There is no maintained image to point at: the published model is a
+  # research artefact, not a service, so packaging it is Phase 5 work and gets a service here when
+  # there is something to run. Until then citation contexts are stored unclassified, which is the
+  # useful half anyway.
+  # ===============================================================================================
+
+volumes:
+  # Declared in docker-compose.yml; repeated here so this file is readable on its own. Compose
+  # merges the two definitions.
+  recueil-data:
+  meili-data:

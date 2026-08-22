@@ -1,0 +1,91 @@
+name: Feature request
+description: Propose a capability Recueil does not have yet
+title: "[feature] "
+labels:
+  - enhancement
+  - triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Recueil is specified before it is written, so the useful shape of a feature request is a
+        **problem**, not a solution. Describe the workflow that is awkward today; the design
+        conversation follows from that.
+
+        Please check first that the idea is not already answered:
+
+        - [CONCEPT.md §2](https://github.com/etabli-dev/etabli-recueil/blob/main/CONCEPT.md) lists the v1 non-goals and why each is out
+        - [CONCEPT.md §7](https://github.com/etabli-dev/etabli-recueil/blob/main/CONCEPT.md) has the roadmap and the post-1.0 parking lot
+        - [spec/adr/](https://github.com/etabli-dev/etabli-recueil/tree/main/spec/adr/) records decisions already taken
+
+        Scope additions are zero-sum: anything added to a phase removes something else from it. A
+        request that says what it would displace is easier to say yes to.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do, and what makes it hard or impossible today? Describe the situation, not the feature.
+      placeholder: When I import a Scopus export, the per-source counts PRISMA needs are lost, so I reconstruct them by hand from the original files.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What you would like Recueil to do. Sketch the API or the UI if you have one in mind, but the problem above matters more.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: phase
+    attributes:
+      label: Roadmap phase
+      description: >-
+        Which phase of CONCEPT.md §7 this belongs to. Guess if you are unsure — being wrong here
+        costs nothing.
+      options:
+        - "Phase 0 — Spec and scaffold"
+        - "Phase 1 — Core library and Zotero migration"
+        - "Phase 2 — Ingestion and storage backends"
+        - "Phase 3 — Enrichment, checks, dedup"
+        - "Phase 4 — Reading, search, desktop shell"
+        - "Phase 5 — Graph, bibliometrics, R and Python"
+        - "Phase 6 — Curated networks"
+        - "Phase 7 — Systematic review"
+        - "Phase 8 — Mobile and own connector"
+        - "Phase 9 — Community and 1.0"
+        - "Post-1.0 — parking lot"
+        - "Not sure"
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: >-
+        What you do instead today, and why the workarounds are not enough. If this could be a script
+        against the API or MCP, or a plugin against the hook catalogue rather than a core feature,
+        say why that does not work — that is the first question it will get.
+    validations:
+      required: true
+
+  - type: textarea
+    id: tradeoff
+    attributes:
+      label: What it displaces
+      description: If this goes into a phase, what comes out of that phase, or what could wait until after 1.0? Optional, but it helps.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I checked the v1 non-goals in CONCEPT.md §2 and this is not one of them.
+          required: true
+        - label: I searched the existing issues and the ADRs, and this is not already decided.
+          required: true
