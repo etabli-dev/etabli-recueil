@@ -29,7 +29,7 @@
 # Node 22 LTS is the reference runtime (CONCEPT.md §5.16). Written out rather than parameterised
 # with an ARG, because Dependabot can only see a literal tag.
 # ------------------------------------------------------------------------------------------------
-FROM node:22-bookworm-slim AS base
+FROM node:26-bookworm-slim AS base
 
 ENV PNPM_HOME=/pnpm \
     PATH=/pnpm:$PATH
