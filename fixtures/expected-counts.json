@@ -1,0 +1,410 @@
+{
+  "$schema": "https://recueil.invalid/fixtures/expected-counts",
+  "description": "Counts asserted by the fixture generator against the numbers stated in fixtures/zotero/lib/counts.mjs. Importer tests should assert against these, not against whatever an importer happens to produce.",
+  "generatedBy": "fixtures/zotero/make-fixture.mjs",
+  "upstream": {
+    "zotero": {
+      "repository": "https://github.com/zotero/zotero",
+      "tag": "10.0.0",
+      "commit": "22f08d1ceddc8bad5718b3bc6eee9d3ae5dccc2c"
+    },
+    "zoteroSchema": {
+      "repository": "https://github.com/zotero/zotero-schema",
+      "commit": "b86c79b56479cadac3288e1f122cf34ef04e8809",
+      "version": 45
+    },
+    "betterBibtex": {
+      "repository": "https://github.com/retorquere/zotero-better-bibtex",
+      "tag": "v7.0.0"
+    }
+  },
+  "verification": {
+    "driver": "better-sqlite3",
+    "sqliteVersion": "3.53.2",
+    "integrityCheck": "ok",
+    "foreignKeyViolations": 0,
+    "userdataVersion": 129,
+    "globalSchemaVersion": 45,
+    "zoteroTables": 59,
+    "betterBibtexTables": [
+      "citationkey"
+    ]
+  },
+  "zotero": {
+    "identifierLayout": "legacy",
+    "itemTypeIds": {
+      "note": 1,
+      "book": 2,
+      "bookSection": 3,
+      "journalArticle": 4,
+      "magazineArticle": 5,
+      "newspaperArticle": 6,
+      "thesis": 7,
+      "letter": 8,
+      "manuscript": 9,
+      "interview": 10,
+      "film": 11,
+      "artwork": 12,
+      "webpage": 13,
+      "attachment": 14,
+      "report": 15,
+      "bill": 16,
+      "case": 17,
+      "hearing": 18,
+      "patent": 19,
+      "statute": 20,
+      "email": 21,
+      "map": 22,
+      "blogPost": 23,
+      "instantMessage": 24,
+      "forumPost": 25,
+      "audioRecording": 26,
+      "presentation": 27,
+      "videoRecording": 28,
+      "tvBroadcast": 29,
+      "radioBroadcast": 30,
+      "podcast": 31,
+      "computerProgram": 32,
+      "conferencePaper": 33,
+      "document": 34,
+      "encyclopediaArticle": 35,
+      "dictionaryEntry": 36,
+      "annotation": 37,
+      "preprint": 38,
+      "dataset": 39,
+      "standard": 40
+    },
+    "library": {
+      "libraryID": 1,
+      "type": "user",
+      "localUserKey": "v3aG8nQf"
+    },
+    "items": {
+      "allRows": 103,
+      "regularRows": 67,
+      "regularLive": 64,
+      "regularTrashed": 3
+    },
+    "liveByType": {
+      "book": 8,
+      "bookSection": 7,
+      "conferencePaper": 2,
+      "dataset": 4,
+      "journalArticle": 20,
+      "preprint": 6,
+      "report": 6,
+      "thesis": 5,
+      "webpage": 6
+    },
+    "allByType": {
+      "book": 9,
+      "bookSection": 7,
+      "conferencePaper": 2,
+      "dataset": 4,
+      "journalArticle": 21,
+      "preprint": 6,
+      "report": 6,
+      "thesis": 5,
+      "webpage": 7
+    },
+    "notes": {
+      "total": 11,
+      "child": 9,
+      "standalone": 2,
+      "trashed": 1,
+      "onTrashedParent": 1
+    },
+    "attachments": {
+      "total": 17,
+      "trashed": 1,
+      "byLinkMode": {
+        "imported_file": 10,
+        "imported_url": 2,
+        "linked_file": 2,
+        "linked_url": 3
+      },
+      "filesPresent": 12,
+      "filesMissing": 2,
+      "standalone": 1,
+      "missing": [
+        {
+          "slug": "at-missing-file",
+          "itemKey": "KRYTCSG5",
+          "linkMode": "imported_file",
+          "reason": "stored file recorded in itemAttachments but absent from storage/"
+        },
+        {
+          "slug": "at-linked-absolute-missing",
+          "itemKey": "E34RN45R",
+          "linkMode": "linked_file",
+          "reason": "linked file recorded with an absolute path from another machine"
+        }
+      ]
+    },
+    "annotations": {
+      "total": 8,
+      "byType": {
+        "highlight": 2,
+        "note": 2,
+        "image": 1,
+        "ink": 1,
+        "underline": 1,
+        "text": 1
+      },
+      "external": 1
+    },
+    "collections": {
+      "total": 9,
+      "live": 8,
+      "trashed": 1,
+      "maxDepth": 3,
+      "empty": 1,
+      "memberships": 68
+    },
+    "tags": {
+      "total": 23,
+      "manual": 12,
+      "automatic": 11,
+      "assignments": 65,
+      "coloured": 3
+    },
+    "creators": {
+      "total": 52,
+      "singleField": 9,
+      "assignments": 106,
+      "byType": {
+        "author": 93,
+        "bookAuthor": 1,
+        "contributor": 3,
+        "editor": 5,
+        "seriesEditor": 2,
+        "translator": 2
+      }
+    },
+    "relations": {
+      "total": 13,
+      "byPredicate": {
+        "dc:relation": 11,
+        "dc:replaces": 1,
+        "owl:sameAs": 1
+      },
+      "dangling": 3
+    },
+    "citationKeys": {
+      "nativeField": 3,
+      "extraLine": 2,
+      "betterBibtexRows": 28,
+      "betterBibtexPinned": 12,
+      "betterBibtexStale": 2,
+      "threeWayConflicts": 1
+    },
+    "storage": {
+      "directories": 11,
+      "files": 11,
+      "linkedFilesOnDisk": 1,
+      "totalBytes": 13437,
+      "contents": [
+        {
+          "slug": "at-donau-pdf",
+          "itemKey": "XF3EXNXK",
+          "path": "storage/XF3EXNXK/Müller et al. - 2019 - Niederschlagsvariabilität im Einzugsgebiet der obe.pdf",
+          "bytes": 1301,
+          "contentType": "application/pdf",
+          "md5": "1d7d7bc88cb424b46cb07477ffb07599",
+          "sha256": "5345108948d76c0ce8ae745c2370b5f0700b622013aad77ec30a875341ff731f"
+        },
+        {
+          "slug": "at-dedup-pdf",
+          "itemKey": "4EGG6MFX",
+          "path": "storage/4EGG6MFX/Bianchi and Müller - 2023 - Graph-based deduplication.pdf",
+          "bytes": 1299,
+          "contentType": "application/pdf",
+          "md5": "3bc4b1a7054605f5c8c9958cd2e12c8d",
+          "sha256": "694a5f4ed209d2ab0a397a4f2ec414c633f4e1ab1bc920b83d16059d6e52ea40"
+        },
+        {
+          "slug": "at-thesis-pdf",
+          "itemKey": "PRTKEVXT",
+          "path": "storage/PRTKEVXT/mueller-2022-dissertation.pdf",
+          "bytes": 1302,
+          "contentType": "application/pdf",
+          "md5": "21948fb76f4070354ff811e1bc15bfaf",
+          "sha256": "9edce1349a4ea98468d3c105a2e635d82a4a85b3524a52687772f4e1c8602d3a"
+        },
+        {
+          "slug": "at-ipcc-pdf",
+          "itemKey": "HESP6FL2",
+          "path": "storage/HESP6FL2/IPCC_AR6_WGI_SPM.pdf",
+          "bytes": 1270,
+          "contentType": "application/pdf",
+          "md5": "c940db27e6deee1d39a2c4e1d5ea5741",
+          "sha256": "2238520732c765a8601fac503051129cda2abd66cae1309612b3fac82d85a818"
+        },
+        {
+          "slug": "at-interop-jis-pdf",
+          "itemKey": "5B7H7EJW",
+          "path": "storage/5B7H7EJW/Okonkwo - 2021 - Interoperability.pdf",
+          "bytes": 1289,
+          "contentType": "application/pdf",
+          "md5": "4a437c625b509cdc80aadc35e15cbc05",
+          "sha256": "2cdfa2ae9161e26be9a5696420ab1bd76d760ca8beff3c8296b14525d1d6b49b"
+        },
+        {
+          "slug": "at-interop-dap-pdf",
+          "itemKey": "C7LW3CYC",
+          "path": "storage/C7LW3CYC/Okonkwo - 2021 - Interoperability.pdf",
+          "bytes": 1255,
+          "contentType": "application/pdf",
+          "md5": "2c1c6f33e8100daa9abf6e4fe0716771",
+          "sha256": "f492383edf8bb4d9ce3a61c796a3ae4b8fc9a966d5e08745da52f5561b5f2ec1"
+        },
+        {
+          "slug": "at-hydro-book-scan",
+          "itemKey": "VKVJXPL9",
+          "path": "storage/VKVJXPL9/kap12-scan.pdf",
+          "bytes": 1275,
+          "contentType": "application/pdf",
+          "md5": "1d79e4461e1f143c1b92b2fa13f3158e",
+          "sha256": "97e03eb5c14498b423bfb48812f339481fd11c8daacfaf3d8b02c2121eef5236"
+        },
+        {
+          "slug": "at-preprint-pdf",
+          "itemKey": "NZAGTQZ7",
+          "path": "storage/NZAGTQZ7/2211.04512v2.pdf",
+          "bytes": 1220,
+          "contentType": "application/pdf",
+          "md5": "f18a214e3f94000edfa8af5e9471af49",
+          "sha256": "7537aa904989ccba89ef233d2b869f00b664f87171f841d6a0f0745b95418994"
+        },
+        {
+          "slug": "at-standalone-pdf",
+          "itemKey": "5LMAV4VA",
+          "path": "storage/5LMAV4VA/unsortiertes-manuskript.pdf",
+          "bytes": 1232,
+          "contentType": "application/pdf",
+          "md5": "0c204663dfc79b25a5666b79febc1c6b",
+          "sha256": "5283f08986b7bc4666515e6427fa761b7865fc0403a46a91818590eb11357a2c"
+        },
+        {
+          "slug": "at-snapshot-bmuv",
+          "itemKey": "L2KQMGI8",
+          "path": "storage/L2KQMGI8/nationale-wasserstrategie.html",
+          "bytes": 413,
+          "contentType": "text/html",
+          "md5": "55491cd302e0ea33faea0601ec2c904b",
+          "sha256": "8c1aad205248dbe4a5316327062b77cd4ec8e1d850431b60dbd79fa614672f63"
+        },
+        {
+          "slug": "at-snapshot-github",
+          "itemKey": "CSRKET46",
+          "path": "storage/CSRKET46/recueil.html",
+          "bytes": 293,
+          "contentType": "text/html",
+          "md5": "352c9037a99e93ac1e0018113bf0ac3f",
+          "sha256": "eddeb878119e555b027c1108acc63507089eb25ba5143b1430984003fcdb7db3"
+        },
+        {
+          "slug": "at-linked-present",
+          "itemKey": "T4MT42CI",
+          "path": "linked-attachments/sonderdrucke/weiss-2018-sonderdruck.pdf",
+          "bytes": 1288,
+          "contentType": "application/pdf",
+          "md5": "541b169873ac0b30cbc440f608e7f306",
+          "sha256": "c346d5a35dccd102c5c1949de5d7d8ff22164242da076f05e9342428c919afad"
+        }
+      ]
+    }
+  },
+  "formats": {
+    "bibtex": {
+      "files": 6,
+      "byFile": {
+        "awkward.bib": {
+          "entries": 12,
+          "strings": 9,
+          "preambles": 1,
+          "comments": 1,
+          "bytes": 6505
+        },
+        "crossref.bib": {
+          "entries": 6,
+          "strings": 0,
+          "preambles": 0,
+          "comments": 0,
+          "bytes": 2207
+        },
+        "files.bib": {
+          "entries": 5,
+          "strings": 0,
+          "preambles": 0,
+          "comments": 0,
+          "bytes": 2382
+        },
+        "macros.bib": {
+          "entries": 0,
+          "strings": 6,
+          "preambles": 0,
+          "comments": 0,
+          "bytes": 706
+        },
+        "malformed.bib": {
+          "entries": 5,
+          "strings": 0,
+          "preambles": 0,
+          "comments": 0,
+          "bytes": 2050
+        },
+        "uses-macros.bib": {
+          "entries": 4,
+          "strings": 0,
+          "preambles": 0,
+          "comments": 0,
+          "bytes": 1166
+        }
+      }
+    },
+    "ris": {
+      "files": 3,
+      "byFile": {
+        "awkward.ris": {
+          "typeTags": 10,
+          "endTags": 10,
+          "lineEnding": "CRLF",
+          "bom": false,
+          "bytes": 3426
+        },
+        "endnote.ris": {
+          "typeTags": 3,
+          "endTags": 3,
+          "lineEnding": "LF",
+          "bom": true,
+          "bytes": 1065
+        },
+        "malformed.ris": {
+          "typeTags": 3,
+          "endTags": 3,
+          "lineEnding": "LF",
+          "bom": false,
+          "bytes": 435
+        }
+      }
+    },
+    "cslJson": {
+      "files": 3,
+      "byFile": {
+        "awkward.json": {
+          "entries": 8,
+          "bytes": 4816
+        },
+        "dates.json": {
+          "entries": 12,
+          "bytes": 1930
+        },
+        "names.json": {
+          "entries": 12,
+          "bytes": 3032
+        }
+      }
+    }
+  }
+}

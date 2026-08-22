@@ -1,0 +1,46 @@
+﻿TY  - JOUR
+A1  - Okonkwo, Chidinma
+T1  - Interoperability
+JF  - Journal of Information Science
+JO  - J Inf Sci
+Y1  - 2021///
+VL  - 47
+IS  - 2
+SP  - 155
+EP  - 170
+DO  - 10.1177/0165551520917000
+SN  - 0165-5515
+N2  - EndNote writes the abstract as N2 rather than AB, the primary author as A1
+rather than AU, and continues a long field on an unindented line like this one.
+KW  - interoperability
+KW  - standards
+L1  - internal-pdf://0165551520917000/okonkwo-2021.pdf
+L2  - http://example.org/record/155
+UR  - https://doi.org/10.1177/0165551520917000
+ER  - 
+
+TY  - CONF
+A1  - Bianchi, Lorenzo
+A1  - Dlamini, Nomsa
+T1  - Reference extraction from born-digital theses
+T2  - Proceedings of the 22nd ACM/IEEE Joint Conference on Digital Libraries
+A2  - van der Berg, Willem J.
+A3  - Series Editor, Some
+CY  - New York, NY
+PB  - ACM
+Y1  - 2022/06/20/
+SP  - 1
+EP  - 10
+DO  - 10.1145/3529372.3530933
+SN  - 978-1-4503-9345-4
+ER  - 
+
+TY  - BOOK
+A1  - de Beauvoir, Simone
+A4  - Parshley, H. M.
+T1  - Le Deuxième Sexe
+PB  - Gallimard
+CY  - Paris
+Y1  - 1949///
+LA  - fr
+ER  - 

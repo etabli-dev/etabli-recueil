@@ -18,17 +18,26 @@ import type { ComponentHealth, HealthStatus } from '@recueil/schemas';
 import { API_VERSION } from '@recueil/schemas';
 import type { FastifyPluginAsync } from 'fastify';
 
-import { ServerHealthResponseSchema, checkDatabase, checkStorage, countLibrary } from '../health.js';
+import { API_BASE_PATH } from '@recueil/schemas';
+
+import {
+  ServerHealthResponseSchema,
+  checkDatabase,
+  checkSearch,
+  checkStorage,
+  countLibrary,
+} from '../health.js';
 import type { ServerHealthResponse } from '../health.js';
 
 export const healthRoutes: FastifyPluginAsync = async (app) => {
-  const { config, library, version, startedAt } = app.recueil;
+  const { config, library, version, startedAt, events } = app.recueil;
 
-  app.get('/health', async (_request, reply) => {
+  app.get('/health', { config: { public: true } }, async (_request, reply) => {
     const checkedAt = new Date();
 
     const database = checkDatabase(library);
     const storage = await checkStorage(library, config.storagePath);
+    const search = checkSearch(library);
 
     // The counts need a working database; asking for them when it is down would throw inside the
     // one handler that must always answer.
@@ -52,6 +61,17 @@ export const healthRoutes: FastifyPluginAsync = async (app) => {
         checkedAt: checkedAt.toISOString(),
         ...(storage.detail === undefined ? {} : { detail: storage.detail }),
       },
+      {
+        // Optional: a library with no FTS5 module still serves everything but `/api/v1/search`,
+        // which is `degraded` and not `error` (ADR-0011).
+        name: 'search',
+        status: search.available ? 'ok' : 'degraded',
+        required: false,
+        checkedAt: checkedAt.toISOString(),
+        ...(search.available
+          ? {}
+          : { detail: 'This SQLite build has no FTS5 module, so full-text search is unavailable.' }),
+      },
     ];
 
     const status: HealthStatus = components.some(
@@ -74,6 +94,12 @@ export const healthRoutes: FastifyPluginAsync = async (app) => {
       components,
       database,
       storage,
+      search,
+      api: {
+        basePath: API_BASE_PATH,
+        eventSubscribers: events.subscriberCount,
+        authRequired: config.requireAuth,
+      },
       ...(librarySummary === undefined ? {} : { library: librarySummary }),
     };
 

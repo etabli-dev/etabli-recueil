@@ -22,7 +22,64 @@ import { CORE_PROBLEM_TYPES, PROBLEM_CONTENT_TYPE } from '@recueil/schemas';
 import type { ProblemDetails, ProblemError } from '@recueil/schemas';
 import type { FastifyError, FastifyReply, FastifyRequest } from 'fastify';
 
+import { RequestValidationError } from './validate.js';
+
 export { PROBLEM_CONTENT_TYPE };
+
+/**
+ * An error a route decided on rather than one a service threw.
+ *
+ * Authentication, scopes and idempotency-key reuse are properties of the HTTP surface — the
+ * services below know nothing about tokens — so they need a carrier of their own that still lands
+ * in the one place a thrown thing becomes a problem document.
+ */
+export class ApiError extends Error {
+  readonly type: string;
+
+  readonly status: number;
+
+  readonly title: string;
+
+  readonly errors?: readonly ProblemError[];
+
+  readonly headers?: Readonly<Record<string, string>>;
+
+  constructor(
+    type: string,
+    status: number,
+    title: string,
+    message: string,
+    options: { errors?: readonly ProblemError[]; headers?: Readonly<Record<string, string>> } = {},
+  ) {
+    super(message);
+    this.name = 'ApiError';
+    this.type = type;
+    this.status = status;
+    this.title = title;
+    if (options.errors !== undefined) this.errors = options.errors;
+    if (options.headers !== undefined) this.headers = options.headers;
+  }
+}
+
+/** 401. The `WWW-Authenticate` header is what makes a bare `curl` say something useful. */
+export const unauthenticated = (detail: string): ApiError =>
+  new ApiError(CORE_PROBLEM_TYPES.unauthenticated, 401, 'Authentication required', detail, {
+    headers: { 'www-authenticate': 'Bearer realm="recueil"' },
+  });
+
+/** 403, naming the scope that was missing. A client that is told which scope can ask for it. */
+export const scopeRequired = (scope: string): ApiError =>
+  new ApiError(
+    CORE_PROBLEM_TYPES.scopeRequired,
+    403,
+    'Scope required',
+    `This token does not hold the '${scope}' scope.`,
+    { errors: [{ path: 'scopes', message: `requires '${scope}'`, code: 'scope_required' }] },
+  );
+
+/** 404 for a resource this surface owns rather than one a service resolves. */
+export const notFound = (what: string): ApiError =>
+  new ApiError(CORE_PROBLEM_TYPES.notFound, 404, 'Not found', what);
 
 /** The problem types the core's own errors map onto. */
 const CORE_ERROR_TYPES: Record<string, { type: string; status: number; title: string }> = {
@@ -98,6 +155,22 @@ export const toProblem = (
   options: ProblemOptions & { exposeDetail?: boolean } = {},
 ): ProblemDetails => {
   const base = { instance: options.instance, traceId: options.traceId };
+
+  if (error instanceof RequestValidationError) {
+    return problem(error.type, error.status, 'Invalid input', {
+      ...base,
+      detail: error.message,
+      errors: [...error.errors],
+    });
+  }
+
+  if (error instanceof ApiError) {
+    return problem(error.type, error.status, error.title, {
+      ...base,
+      detail: error.message,
+      ...(error.errors === undefined ? {} : { errors: [...error.errors] }),
+    });
+  }
 
   if (error instanceof RecueilError) {
     const mapped = CORE_ERROR_TYPES[error.type];

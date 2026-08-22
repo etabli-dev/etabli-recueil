@@ -1,0 +1,90 @@
+[
+  {
+    "id": "name-plain",
+    "type": "article-journal",
+    "title": "An ordinary two-part name",
+    "author": [{ "family": "Okonkwo", "given": "Chidinma" }]
+  },
+  {
+    "id": "name-non-dropping-particle",
+    "type": "article-journal",
+    "title": "A particle that stays with the surname when the name is inverted",
+    "author": [
+      { "family": "Berg", "given": "Willem J.", "non-dropping-particle": "van der" }
+    ]
+  },
+  {
+    "id": "name-dropping-particle",
+    "type": "book",
+    "title": "A particle that is dropped when the name is inverted",
+    "author": [{ "family": "Beauvoir", "given": "Simone", "dropping-particle": "de" }]
+  },
+  {
+    "id": "name-particle-in-family",
+    "type": "article-journal",
+    "title": "The same person written the way most exporters actually write them",
+    "note": "Same human as name-non-dropping-particle. A deduplicator has to see that.",
+    "author": [{ "family": "van der Berg", "given": "Willem J." }]
+  },
+  {
+    "id": "name-suffix",
+    "type": "manuscript",
+    "title": "A generational suffix, without a comma before it",
+    "author": [
+      { "family": "King", "given": "Martin Luther", "suffix": "Jr.", "comma-suffix": false }
+    ]
+  },
+  {
+    "id": "name-suffix-comma",
+    "type": "manuscript",
+    "title": "A suffix that does take a comma",
+    "author": [{ "family": "Stevens", "given": "John Paul", "suffix": "III", "comma-suffix": true }]
+  },
+  {
+    "id": "name-literal",
+    "type": "report",
+    "title": "An institutional name that must not be split",
+    "author": [{ "literal": "Intergovernmental Panel on Climate Change" }]
+  },
+  {
+    "id": "name-static-ordering",
+    "type": "article-journal",
+    "title": "A name whose parts must not be reordered",
+    "author": [{ "family": "中村", "given": "浩", "static-ordering": true }]
+  },
+  {
+    "id": "name-initials-only",
+    "type": "article-journal",
+    "title": "Given names that are already initials",
+    "author": [
+      { "family": "Ng", "given": "K. W." },
+      { "family": "Prasetyo", "given": "B." }
+    ]
+  },
+  {
+    "id": "name-same-family",
+    "type": "article-journal",
+    "title": "Two different people who share a surname",
+    "author": [
+      { "family": "Nakamura", "given": "Hiroshi" },
+      { "family": "Nakamura", "given": "Haruki" }
+    ]
+  },
+  {
+    "id": "name-no-author",
+    "type": "article-journal",
+    "title": "No creator array at all",
+    "container-title": "Journal of Open Research Software"
+  },
+  {
+    "id": "name-many-roles",
+    "type": "chapter",
+    "title": "Six creator roles on one item",
+    "author": [{ "family": "Dlamini", "given": "Nomsa" }],
+    "container-author": [{ "family": "Baumgartner", "given": "Albrecht" }],
+    "editor": [{ "family": "Schöch", "given": "Christof" }],
+    "collection-editor": [{ "family": "Liebscher", "given": "Hans-Jürgen" }],
+    "translator": [{ "family": "Kowalczyk", "given": "Agnieszka" }],
+    "contributor": [{ "literal": "Институт водных проблем РАН" }]
+  }
+]

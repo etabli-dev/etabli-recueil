@@ -1,14 +1,30 @@
 import { describe, expect, it } from 'vitest';
 
-import { COMMANDS, CURRENT_PHASE, phaseTitle } from '../src/catalogue.js';
+import { COMMANDS, CURRENT_PHASE, isImplemented, phaseTitle } from '../src/catalogue.js';
 import { runCli } from './support.js';
 
-const pending = COMMANDS.filter((spec) => spec.phase > CURRENT_PHASE);
+const pending = COMMANDS.filter((spec) => !isImplemented(spec));
 
 describe('commands that are not implemented yet', () => {
-  it('there are some, and `serve` is not one of them', () => {
+  it('there are some, and none of them is a command this build ships', () => {
     expect(pending.length).toBeGreaterThan(0);
-    expect(pending.map((spec) => spec.name)).not.toContain('serve');
+    for (const shipped of ['serve', 'import', 'export', 'backup', 'restore']) {
+      expect(pending.map((spec) => spec.name)).not.toContain(shipped);
+    }
+  });
+
+  it('includes the commands of the current phase that are not built yet, without softening it', async () => {
+    // `token` and `job` belong to Phase 1 and Phase 1 is under way. A build that let them exit
+    // zero, or that quietly renumbered them into a later phase, would be lying about itself.
+    const inThisPhase = pending.filter((spec) => spec.phase === CURRENT_PHASE);
+    expect(inThisPhase.map((spec) => spec.name)).toEqual(['token', 'job']);
+
+    for (const spec of inThisPhase) {
+      const result = await runCli([spec.name]);
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain('is not implemented yet');
+      expect(result.stderr).toContain(`Phase ${spec.phase}`);
+    }
   });
 
   it.each(pending.map((spec) => [spec.name, spec.phase] as const))(
@@ -31,7 +47,7 @@ describe('commands that are not implemented yet', () => {
   );
 
   it('answers with the phase even when given arguments it cannot understand', async () => {
-    const result = await runCli(['import', 'zotero', '--data-dir', '/nowhere', '--report', 'r.md']);
+    const result = await runCli(['ingest', 'watch', '--folder', '/nowhere', '--rule', 'r.json']);
     expect(result.code).toBe(1);
     expect(result.stderr).toContain('is not implemented yet');
     expect(result.stderr).not.toContain('unknown option');

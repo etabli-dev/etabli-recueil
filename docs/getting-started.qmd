@@ -1,108 +1,262 @@
 ---
 title: "Getting started"
-subtitle: "What first use will look like, and what is possible today"
+subtitle: "What works today, from a source checkout"
 ---
 
 ::: {.callout-important}
-## Nothing on this page works yet
+## There is no release yet
 
-There is no release, no image on `ghcr.io` and no `recueil` binary. Every command below is written
-in the present tense because that is how a manual reads, but each one is a **Phase 1 or later**
-commitment. The Phase column in [the roadmap](roadmap.qmd) says when.
+No tag, no image on `ghcr.io`, no installable binary. Everything on this page is run from a source
+checkout with pnpm, and everything on this page has actually been run — where a command belongs to
+a later phase, it is marked as such and it will tell you so itself rather than half-working.
 
-What you *can* do today: read [CONCEPT.md](https://github.com/etabli-dev/etabli-recueil/blob/main/CONCEPT.md),
-read the [concepts](concepts.qmd) page, read the [decision records](adr.qmd), and disagree with any
-of it in an issue.
+The Phase column in [the roadmap](roadmap.qmd) says when the rest arrives.
 :::
 
-## Choosing a shape
+## What is in the tree
 
-Recueil is one server. How you run it is the only real decision, and it can be changed later
-because both shapes run identical code.
+Phase 1 of [the roadmap](roadmap.qmd): the library, the REST contract, the CLI, the web client and
+the Zotero migrator.
 
-| Shape | For | Phase |
-|---|---|---|
-| **Docker** | A homelab, a NAS, a VPS. The server plus optional sidecars, reachable from every device on your network. | 1 |
-| **Desktop** | One machine, no infrastructure. The Tauri shell bundles the same server as a sidecar process on `localhost`. | 4 |
-| **From source** | Development, and anyone who prefers it. `pnpm install && pnpm build`. | 1 |
+| Works now | Not yet |
+|---|---|
+| `recueil serve` — 93 operations over 70 paths | Published Docker image; the `deploy/` files are written but have never been run |
+| `recueil import zotero` with a verification report | `recueil token`, `recueil job` — mint tokens over the API for now |
+| `recueil export bibtex \| biblatex \| csl-json \| ris` | The ingestion pipeline, enrichment, checks, dedup (Phases 2–3) |
+| `recueil backup` / `recueil restore` | The desktop shell, the mobile app, the MCP server |
+| `.bib` feeds for Overleaf and Quarto | translation-server integration for URL/DOI/PMID/ISBN import |
+| Web client: three-pane library, item pane, PDF reader | Annotation, saved-search UI, everything from Phase 2 on |
+| The Zotero connector endpoints answer | Any check against the real Zotero Connector extension |
 
-Nothing else needs to be running first. v1 is SQLite only, so there is no database server to
-install, and the file is created on first start.
+## Build it
 
-## Docker quickstart
-
-```sh
-mkdir -p recueil/{data,storage} && cd recueil
-curl -O https://raw.githubusercontent.com/etabli-dev/etabli-recueil/main/deploy/docker-compose.yml
-docker compose up -d
-```
-
-The server comes up on port 8080 with an empty library. Confirm it:
+Node 22 or later and pnpm 9.
 
 ```sh
-curl -s http://localhost:8080/health
+git clone https://github.com/etabli-dev/etabli-recueil.git
+cd etabli-recueil
+pnpm install
+pnpm -r build
 ```
 
-```json
-{"status":"ok","version":"0.1.0","database":"sqlite","items":0}
-```
+That builds every package and leaves an executable at `apps/cli/dist/index.js`. There is nothing to
+install yet, so the examples below call it as `recueil` and you will want an alias:
 
-That response on an empty library is the exit criterion for Phase 0, and the first thing that will
-be true of this project.
+```sh
+alias recueil="$PWD/apps/cli/dist/index.js"
+```
 
 ## First run
 
-1. **Create an API token.** Everything authenticates, including the browser session, and everything
-   is attributable in the audit log. `recueil token create --name laptop --scope 'items:*'`, or the
-   equivalent in Settings.
-2. **Point the connector at your server.** Install the Zotero Connector and set its server address
-   to your Recueil instance. Recueil speaks the Zotero connector protocol, so the existing extension
-   and its roughly six hundred translators work without modification ([ADR-0006](adr.qmd)).
-3. **Save something.** Open a paper in the browser and press the connector button. The item, its
-   PDF and its metadata land in the library, the PDF is hashed, and enrichment resolves the DOI.
-4. **Check that it can leave again.** `recueil export --format bibtex --collection Inbox > inbox.bib`.
-   If your data cannot get out on day one, do not put it in.
-
-## Importing an existing library
-
-### From Zotero
-
-The Zotero importer is first-class and is the reason Phase 1 exists.
-
 ```sh
-recueil import zotero \
-  --data-dir ~/Zotero \
-  --better-bibtex ~/Zotero/better-bibtex.sqlite \
-  --report zotero-import-report.md
+recueil serve --database ./library.db --storage ./storage
 ```
 
-It reads `zotero.sqlite` directly — items, fields, creators, collections, tags, notes, relations,
-imported and linked attachments, annotations and citation keys — hashes every attachment from the
-storage directory or a WebDAV archive, and writes a verification report: counts per item type,
-attachment hash coverage, and every file it could not find, with the reason.
-
-The run is idempotent, so re-running it after fixing a problem does not duplicate anything, and
-Zotero item keys are kept as external identifiers. **Keep Zotero installed and read-only until the
-report satisfies you.**
-
-### From Paperless-ngx
+The database and the store are created on first start; v1 is SQLite only, so there is nothing to
+install first. The resolved configuration goes to stderr, with anything credential-shaped replaced
+by `****`.
 
 ```sh
-recueil import paperless --url https://paperless.example --token "$PAPERLESS_TOKEN"
+curl -s http://localhost:3000/health
 ```
 
-Documents, tags, correspondents, document types, custom fields, archive serial numbers and the
-original files, mapped onto the [Office facet](concepts.qmd#facets). Phase 2.
+```json
+{
+  "status": "ok",
+  "name": "recueil",
+  "version": "0.0.0",
+  "apiVersion": "v1",
+  "mode": "server",
+  "components": [
+    { "name": "database", "status": "ok", "required": true, "latencyMs": 0.1 },
+    { "name": "storage",  "status": "ok", "required": true },
+    { "name": "search",   "status": "ok", "required": false }
+  ],
+  "library": { "items": 0, "documents": 0, "attachments": 0, "collections": 0 },
+  "database": { "ok": true, "migrationsApplied": 4 },
+  "storage": { "ok": true, "path": "/…/storage", "backend": "local" },
+  "search": { "available": true, "backend": "fts5" },
+  "api": { "basePath": "/api/v1", "eventSubscribers": 0, "authRequired": false }
+}
+```
 
-### From files
+(Timestamps elided.)
 
-BibTeX and BibLaTeX (including `file` fields), RIS, EndNote XML, CSL-JSON, JabRef with groups,
-Mendeley exports, and CSV with a column mapping. Every importer has a matching exporter, because a
-format you can only read is a trap.
+That response on an empty library is the Phase 0 exit criterion, and it is the first thing that is
+true of this project.
+
+The contract the server answers is at `/openapi.json`, and the same document is committed as
+[`spec/openapi.yaml`](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/openapi.yaml).
+It is generated from the Zod schemas the server validates with, and a test asserts in both
+directions that the document and the route table describe the same server.
+
+### Tokens
+
+A fresh `recueil serve` on a laptop admits a request with no credential as the single local
+account, which is what makes the first five minutes usable. Set `RECUEIL_REQUIRE_AUTH=true` and
+every `/api/v1` call needs a token.
+
+`recueil token` is not implemented yet. Mint one over the API:
+
+```sh
+curl -s -X POST http://localhost:3000/api/v1/tokens \
+  -H 'content-type: application/json' \
+  -d '{"name":"laptop","scopes":["items:*","collections:*","export:read"]}'
+```
+
+The secret comes back once and is never retrievable again: the server stores its SHA-256 and
+cannot reproduce it.
+
+## Importing a Zotero library
+
+The Zotero importer is the reason Phase 1 exists.
+
+```sh
+recueil import zotero ~/Zotero/zotero.sqlite \
+  --database ./library.db \
+  --storage ./storage \
+  --linked-base ~/Documents/Papers \
+  --report ./zotero-import
+```
+
+It reads `zotero.sqlite` — items, fields, creators, collections, tags, notes, relations, imported
+and linked attachments, annotations, and citation keys from the native field, from `Extra` and from
+`better-bibtex.sqlite` — hashes every attachment out of the storage directory, a linked-attachment
+base directory or a directory of WebDAV zips, and writes `report.json`, `report.md` and a `_REVIEW/`
+directory.
+
+**Your Zotero library is never written to.** It is copied, opened read-only, and every statement
+that is not a `SELECT` is refused; the report records the SHA-256 of the source database before and
+after to prove it.
+
+The exit code is the verdict, so a migration script cannot carry on past a failure:
+
+| Code | Meaning |
+|---:|---|
+| 0 | Imported, and every check passed |
+| 4 | Imported, but entries were routed to `_REVIEW/` and need a decision |
+| 5 | The parity check failed — do not delete anything |
+
+Re-running is safe. Every write is keyed by something Zotero owns, so a second run over the same
+library updates the same records rather than doubling them, and `--resume` carries on from where an
+interrupted run stopped.
+
+### What the report looks like
+
+Run against the generated fixture library in `fixtures/zotero`, which is the only library this has
+been proved on so far:
+
+```
+  Zotero type        Recueil type      Zotero  Recueil  Δ
+  -----------------  ----------------  ------  -------  -
+  book               book                   9        9  0
+  bookSection        chapter                7        7  0
+  conferencePaper    conference_paper       2        2  0
+  dataset            dataset                4        4  0
+  journalArticle     article               21       21  0
+  preprint           preprint               6        6  0
+  report             report                 6        6  0
+  thesis             thesis                 5        5  0
+  webpage            webpage                7        7  0
+  all regular items                        67       67  0
+
+  attachments      12/14 files resolved (85.7% hash coverage), 12 distinct documents
+  notes            11 · annotations 8 · collections 9 · tags 23 · creators 52
+  citation keys    26 kept, 1 in conflict, 0 refused
+```
+
+Every per-type count matches `fixtures/expected-counts.json` exactly, every resolved file's SHA-256
+matches the digest recorded there, and the two unresolved files are named individually with the
+reason each failed — one a stored file absent from `storage/`, one a linked file recorded at an
+absolute path from another machine.
+
+**This is a fixture, not a life.** The M1 milestone asks for *your own* library imported at 100%
+item count and thirty days without launching Zotero. Neither has happened. Keep Zotero installed
+and read-only until your own report satisfies you.
+
+### Other importers
+
+```sh
+recueil import bibtex refs.bib
+recueil import biblatex refs.bib
+recueil import ris export.ris
+recueil import csl-json refs.json
+```
+
+Each has a matching exporter, because a format you can only read is a trap. Paperless-ngx, EndNote
+XML, JabRef groups, Mendeley and CSV are later phases.
+
+## Getting data back out
+
+```sh
+recueil export bibtex --all --out library.bib
+recueil export csl-json --collection 01M0MYR90WZ4BB8YFY82QESFV7 --out chapter2.json
+recueil export ris --search 'creator:müller' --out subset.ris
+```
+
+Exactly one of `--all`, `--collection`, `--search` and `--ids`. The query language is Recueil's, not
+the index's: `title:`, `creator:`, `container:`, `id:`, `tag:`, `note:` and `text:`, with phrases,
+prefixes, `OR`, `-exclusion` and parentheses. An unknown field name is an error rather than a
+silent search for the literal string.
+
+The document goes to stdout unless `--out` is given; the counts and the losses go to stderr, so
+redirecting stdout produces a file the format can actually read. Losses are reported and never
+silent — a `.bib` file cannot carry an OpenAlex id, and the export says which fields it dropped.
+
+Citation keys are stable: a stored key is used as it stands, a pinned key is never recomputed, and
+only an item with no key at all is given a generated one.
+
+### The `.bib` endpoint
+
+For Overleaf and Quarto, a collection is also a URL:
+
+```
+GET /api/v1/collections/{id}/bibliography.bib?token=rcu_…
+```
+
+Neither tool can set a request header, so the credential goes in the query string — and because a
+token in a URL is a token in a browser history and a proxy log, a `bib_feed` token may hold read
+scopes only. A write scope on one is refused when it is minted.
+
+```sh
+curl -s "http://localhost:3000/api/v1/collections/$ID/bibliography.bib?token=$TOKEN" \
+  -o references.bib
+```
+
+The response is `application/x-bibtex`, carries an `ETag` and an `X-Recueil-Record-Count`, and
+`?format=biblatex` switches dialect. A saved search has the same endpoint under
+`/api/v1/saved-searches/{id}/bibliography.bib`.
+
+## Backup and restore
+
+```sh
+recueil backup --out ./snapshot
+cd snapshot && sha256sum -c checksums.txt      # verifiable without Recueil
+recueil restore ./snapshot --into ./restored
+```
+
+A snapshot is a directory, not an archive: the database taken page by page through SQLite's online
+backup API, the content-addressed store in its own layout, a `manifest.json` and a `checksums.txt`
+that `sha256sum -c` can check on its own. The restore hashes every file as it copies it, and one
+mismatch fails the whole thing and removes what it had written — a directory that looks like a
+library and is not one is worse than no directory at all.
+
+## The web client
+
+```sh
+pnpm --filter @recueil/web run dev
+```
+
+A keyboard-first three-pane library — collections, item list, item pane — with editing that sends
+only the changed field and a PDF.js reader for the attached document. It is a client of the same
+REST contract as everything else; there is no privileged back channel.
+
+`pnpm --filter @recueil/web run build` produces the static bundle in `apps/web/dist`. The server
+does not serve it yet — put it behind any static host or reverse proxy and point it at the API.
 
 ## Where to go from here
 
 - [Concepts](concepts.qmd) — the vocabulary the rest of the documentation uses.
 - [Self-hosting](self-hosting.qmd) — configuration, storage backends, TLS, backup.
-- [CLI](cli.qmd) — the full command surface.
+- [CLI](cli.qmd) — the full command surface, including the parts that are still to come.
 - [API](api.qmd) — for anything you would rather script than click.

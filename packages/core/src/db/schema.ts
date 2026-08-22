@@ -146,6 +146,13 @@ export const RETRACTION_STATUSES = [
   'unknown',
 ] as const;
 export const VERIFICATION_STATUSES = ['unverified', 'verified', 'disputed', 'unverifiable'] as const;
+/** The entities a `field_provenance` row may describe (§3.6). Singular, matching the wire contract. */
+export const PROVENANCE_ENTITY_TYPES = [
+  'item_bibliographic',
+  'item_office',
+  'creator',
+  'item_creator',
+] as const;
 export const ATTACHMENT_ROLES = [
   'primary',
   'supplement',
@@ -515,7 +522,7 @@ export const items = sqliteTable(
  *
  * A separate table rather than nullable columns on `items`, because roughly half a real library —
  * invoices, letters, photos — will never have any of it, and because per-field provenance attaches
- * to this facet specifically (§3.6, arriving with Phase 3).
+ * to this facet specifically (`field_provenance`, §3.6).
  *
  * `item_trashed_at` is mirrored from the parent purely so that "unique among live items" can be a
  * partial unique index rather than a join (§1.1).
@@ -630,6 +637,65 @@ export const itemBibliographic = sqliteTable(
     oneOf('ck_item_bibliographic_verification', 'verification_status', VERIFICATION_STATUSES),
     boolean01('ck_item_bibliographic_key_locked_bool', 'citation_key_locked'),
     boolean01('ck_item_bibliographic_is_preprint_bool', 'is_preprint'),
+  ],
+);
+
+/**
+ * `field_provenance` — per-field source, confidence, timing and the manual lock (§3.6, P4).
+ *
+ * This is the table CONCEPT §5.4's "manual edits locked per field and never overwritten" rests on.
+ * It is generic over the entity rather than a column set repeated on three facets: the same
+ * mechanism covers the bibliographic facet, the office facet and creator identity, so a resolver
+ * asks one question — "may I write this field?" — whatever it is resolving.
+ *
+ * `entity_id` is polymorphic and therefore carries no SQL foreign key (§12, open question O5); the
+ * service layer is what keeps it pointing at a live row.
+ *
+ * The unique index is the whole design: **one current row per field**. History is the audit log, not
+ * a pile of superseded provenance rows, and `previous_value` is the one convenience duplicate, kept
+ * so a per-field history is one indexed query rather than an audit replay.
+ */
+export const fieldProvenance = sqliteTable(
+  'field_provenance',
+  {
+    id: text('id').primaryKey(),
+    entityType: text('entity_type', { enum: PROVENANCE_ENTITY_TYPES }).notNull(),
+    /** The `item_id` or `creator_id`. Polymorphic; no SQL foreign key (§12, O5). */
+    entityId: text('entity_id').notNull(),
+    /** The column name, e.g. `doi`; a dotted path for a value nested in a JSON column. */
+    fieldPath: text('field_path').notNull(),
+    /** Open vocabulary — `plugin:<name>` is a legitimate source — so no `CHECK` (§3.6). */
+    source: text('source').notNull(),
+    /** The upstream record the value came from, so a claim can be re-fetched and re-checked. */
+    sourceRecordId: text('source_record_id'),
+    sourceVersion: text('source_version'),
+    confidence: real('confidence'),
+    /** When the value was obtained. */
+    fetchedAt: text('fetched_at').notNull(),
+    /** When it was written to the facet column. */
+    appliedAt: text('applied_at').notNull(),
+    /** P4-2: no resolver may overwrite this field. Not overridable by configuration. */
+    locked: integer('locked', { mode: 'boolean' }).notNull().default(false),
+    lockedAt: text('locked_at'),
+    lockedByUserId: text('locked_by_user_id').references(() => users.id, { onDelete: 'restrict' }),
+    /** The value this one replaced, as text. Retained when the field is cleared (P4-3). */
+    previousValue: text('previous_value'),
+  },
+  (table) => [
+    /** One current provenance row per field; history lives in `audit_log`. */
+    uniqueIndex('ux_field_provenance_current').on(table.entityType, table.entityId, table.fieldPath),
+    index('ix_field_provenance_entity').on(table.entityType, table.entityId),
+    index('ix_field_provenance_locked')
+      .on(table.entityType, table.entityId)
+      .where(sql`locked = 1`),
+    index('ix_field_provenance_source').on(table.source),
+    oneOf('ck_field_provenance_entity_type', 'entity_type', PROVENANCE_ENTITY_TYPES),
+    check('ck_field_provenance_field_path', sql`"field_path" <> ''`),
+    check('ck_field_provenance_source', sql`"source" <> ''`),
+    confidence01('ck_field_provenance_confidence', 'confidence'),
+    boolean01('ck_field_provenance_locked_bool', 'locked'),
+    /** A lock always records when it was taken; who took it may be a resolver, hence nullable. */
+    check('ck_field_provenance_locked_at', sql`("locked" = 0) = ("locked_at" is null)`),
   ],
 );
 
@@ -1468,7 +1534,18 @@ export const trash = sqliteTable(
       .where(sql`expires_at is not null and purged_at is null`),
     oneOf('ck_trash_entity_type', 'entity_type', TRASH_ENTITY_TYPES),
     oneOf('ck_trash_reason', 'reason', TRASH_REASONS),
-    check('ck_trash_merge', sql`"reason" <> 'merge' or "merge_target_item_id" is not null`),
+    /**
+     * A merge names its winner. For an item merge that is `merge_target_item_id`, exactly as
+     * `spec/data-model.md` §6.6 states it; for a tag (TG2) or creator (CR1) merge the winner is not
+     * an item and cannot go in that column, so the check is scoped to the entity type it was
+     * written for and the winner is recorded in `merge_record`. See `README.md`, departures.
+     */
+    check(
+      'ck_trash_merge',
+      sql`"reason" <> 'merge'
+        or "merge_target_item_id" is not null
+        or "entity_type" <> 'item'`,
+    ),
     jsonValid('ck_trash_restore_payload_json', 'restore_payload'),
     jsonValidOrNull('ck_trash_merge_record_json', 'merge_record'),
   ],
@@ -1484,6 +1561,7 @@ export type DocumentRow = typeof documents.$inferSelect;
 export type DocumentProvenanceRow = typeof documentProvenance.$inferSelect;
 export type ItemRow = typeof items.$inferSelect;
 export type ItemBibliographicRow = typeof itemBibliographic.$inferSelect;
+export type FieldProvenanceRow = typeof fieldProvenance.$inferSelect;
 export type ItemOfficeRow = typeof itemOffice.$inferSelect;
 export type AttachmentRow = typeof attachments.$inferSelect;
 export type CollectionRow = typeof collections.$inferSelect;

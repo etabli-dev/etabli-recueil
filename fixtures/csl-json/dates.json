@@ -1,0 +1,75 @@
+[
+  {
+    "id": "date-year-only",
+    "type": "book",
+    "title": "A year and nothing else",
+    "issued": { "date-parts": [[2019]] }
+  },
+  {
+    "id": "date-year-month",
+    "type": "article-journal",
+    "title": "A year and a month",
+    "issued": { "date-parts": [[2019, 8]] }
+  },
+  {
+    "id": "date-full",
+    "type": "article-journal",
+    "title": "A full date",
+    "issued": { "date-parts": [[2019, 8, 14]] }
+  },
+  {
+    "id": "date-range",
+    "type": "article-journal",
+    "title": "A range with two endpoints",
+    "issued": { "date-parts": [[2019, 3, 1], [2021, 11, 30]] }
+  },
+  {
+    "id": "date-open-range",
+    "type": "book",
+    "title": "A range whose end is open",
+    "issued": { "date-parts": [[1994], [null]] }
+  },
+  {
+    "id": "date-season",
+    "type": "article-journal",
+    "title": "A season instead of a month",
+    "issued": { "date-parts": [[2020]], "season": 2 }
+  },
+  {
+    "id": "date-circa",
+    "type": "manuscript",
+    "title": "An approximate date",
+    "issued": { "date-parts": [[1728]], "circa": true }
+  },
+  {
+    "id": "date-literal",
+    "type": "manuscript",
+    "title": "A date that could not be parsed at all",
+    "issued": { "literal": "Michaelmas term, in the reign of Anne" }
+  },
+  {
+    "id": "date-raw",
+    "type": "webpage",
+    "title": "A raw date string a processor is expected to parse itself",
+    "issued": { "raw": "8 juin 2021" },
+    "accessed": { "raw": "2021-06-08T19:58:03Z" }
+  },
+  {
+    "id": "date-edtf",
+    "type": "dataset",
+    "title": "An EDTF date with an uncertainty qualifier",
+    "issued": { "date-parts": [[2023, 6]], "edtf": "2023-06?" }
+  },
+  {
+    "id": "date-bce",
+    "type": "book",
+    "title": "A date before the common era",
+    "issued": { "date-parts": [[-44, 3, 15]] }
+  },
+  {
+    "id": "date-none",
+    "type": "article-journal",
+    "title": "No date at all",
+    "container-title": "Journal of Undated Things"
+  }
+]

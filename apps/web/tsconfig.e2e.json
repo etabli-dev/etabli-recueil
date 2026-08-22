@@ -1,0 +1,24 @@
+{
+  "//": [
+    "The end-to-end suite runs in Node, not in the browser: it spawns a server, serves files and",
+    "drives Playwright. It therefore needs Node's library and Node's types, which the browser",
+    "bundle's tsconfig deliberately withholds — mixing the two would let a `process` or a `Buffer`",
+    "reach `src/` without the compiler noticing.",
+    "",
+    "Everything else, and in particular the strictness, is inherited from the base (ADR-0002)."
+  ],
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "types": ["node"],
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
+    "allowImportingTsExtensions": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true
+  },
+  "include": ["e2e/**/*.ts", "playwright.config.ts"]
+}

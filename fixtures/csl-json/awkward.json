@@ -1,0 +1,139 @@
+[
+  {
+    "id": "mueller2019niederschlag",
+    "type": "article-journal",
+    "title": "Niederschlagsvariabilität im Einzugsgebiet der oberen Donau, 1961–2015",
+    "container-title": "Hydrologie und Wasserbewirtschaftung",
+    "container-title-short": "HyWa",
+    "volume": "63",
+    "issue": "4",
+    "page": "218-233",
+    "page-first": "218",
+    "DOI": "10.5675/HyWa_2019.4_2",
+    "ISSN": "1439-1783",
+    "language": "de-DE",
+    "abstract": "Für 214 Niederschlagsstationen im Einzugsgebiet der oberen Donau werden Trends der Jahres- und Saisonsummen für den Zeitraum 1961–2015 bestimmt.\n\nDie Ergebnisse zeigen eine signifikante Zunahme der Winterniederschläge bei gleichzeitig abnehmender Sommerniederschlagsmenge im südlichen Teilgebiet.",
+    "author": [
+      { "family": "Müller", "given": "Anna-Lena" },
+      {
+        "family": "Berg",
+        "given": "Willem J.",
+        "non-dropping-particle": "van der"
+      },
+      { "family": "Weiß", "given": "Jürgen" }
+    ],
+    "issued": { "date-parts": [[2019, 8]] },
+    "citation-key": "mueller2019niederschlag"
+  },
+  {
+    "id": "okonkwo2022dna",
+    "type": "article-journal",
+    "title": "The <span class=\"nocase\">DNA</span> of open infrastructure: <i>SPARC</i>, COAR and the CO<sub>2</sub> cost of mirrors",
+    "container-title": "Insights",
+    "volume": "35",
+    "page": "14",
+    "DOI": "10.1629/uksg.588",
+    "author": [{ "family": "Okonkwo", "given": "Chidinma" }],
+    "issued": { "date-parts": [[2022]] },
+    "keyword": "open access,infrastructure,LaTeX tooling"
+  },
+  {
+    "id": "unesco2021wwdr",
+    "type": "book",
+    "title": "The United Nations World Water Development Report 2021: Valuing Water",
+    "title-short": "The United Nations World Water Development Report 2021",
+    "publisher": "UNESCO",
+    "publisher-place": "Paris",
+    "ISBN": "978-92-3-100434-6",
+    "URL": "https://unesdoc.unesco.org/ark:/48223/pf0000375724",
+    "author": [{ "literal": "UNESCO" }],
+    "issued": { "date-parts": [[2021]] },
+    "accessed": { "date-parts": [[2021, 3, 22]] }
+  },
+  {
+    "id": "king1963letter",
+    "type": "manuscript",
+    "title": "Three name shapes in one array: a suffix, a literal name and a particle",
+    "author": [
+      {
+        "family": "King",
+        "given": "Martin Luther",
+        "suffix": "Jr.",
+        "comma-suffix": false
+      },
+      { "literal": "Weltgesundheitsorganisation" },
+      { "family": "Ó Súilleabháin", "given": "Caoimhín" },
+      {
+        "family": "Beauvoir",
+        "given": "Simone",
+        "dropping-particle": "de"
+      }
+    ],
+    "issued": { "date-parts": [[1963, 4, 16]] }
+  },
+  {
+    "id": "anon2021editorial",
+    "type": "article-journal",
+    "title": "Editorial: what counts as a reproducible workflow?",
+    "container-title": "Journal of Open Research Software",
+    "volume": "9",
+    "issue": "1",
+    "DOI": "10.5334/jors.361",
+    "issued": { "date-parts": [[2021, 7]] },
+    "note": "Citation Key: anon2021editorial\nPMID: 34567890"
+  },
+  {
+    "id": "bianchi2022graph",
+    "type": "article",
+    "title": "Graph-based deduplication of bibliographic records at scale",
+    "genre": "Preprint",
+    "publisher": "arXiv",
+    "number": "arXiv:2211.04512",
+    "DOI": "10.48550/arXiv.2211.04512",
+    "URL": "https://arxiv.org/abs/2211.04512",
+    "author": [
+      { "family": "Bianchi", "given": "Lorenzo" },
+      { "family": "Müller", "given": "Anna-Lena" }
+    ],
+    "issued": { "date-parts": [[2022, 11, 8]] },
+    "custom": {
+      "zotero": { "key": "NZAGTQZ7", "libraryID": 1, "itemType": "preprint" }
+    }
+  },
+  {
+    "id": "papadopoulos2017meleti",
+    "type": "article-journal",
+    "title": "Μελέτη της ατμοσφαιρικής ρύπανσης στο λεκανοπέδιο Αττικής",
+    "container-title": "Περιβάλλον και Επιστήμη",
+    "volume": "12",
+    "issue": "1",
+    "page": "44–61",
+    "language": "el",
+    "author": [
+      { "family": "Παπαδόπουλος", "given": "Γεώργιος" },
+      { "literal": "Ελληνική Στατιστική Αρχή" }
+    ],
+    "issued": { "date-parts": [[2017]] }
+  },
+  {
+    "id": "bs-alpine",
+    "type": "chapter",
+    "title": "Wasserhaushaltsmodellierung im alpinen Raum",
+    "container-title": "Lehrbuch der Hydrologie",
+    "edition": "3",
+    "publisher": "Gebrüder Borntraeger",
+    "publisher-place": "Stuttgart",
+    "page": "412–458",
+    "ISBN": "978-3-443-01067-6",
+    "author": [{ "family": "Müller", "given": "Anna-Lena" }],
+    "container-author": [{ "family": "Baumgartner", "given": "Albrecht" }],
+    "editor": [
+      {
+        "family": "Berg",
+        "given": "Willem J.",
+        "non-dropping-particle": "van der"
+      }
+    ],
+    "issued": { "date-parts": [[2019]] }
+  }
+]

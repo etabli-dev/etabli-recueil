@@ -34,7 +34,7 @@ import type {
   DocumentProvenanceRow,
   DocumentRow,
 } from '../db/schema.js';
-import { ConflictError, NotFoundError } from '../errors.js';
+import { ConflictError, InvariantError, NotFoundError } from '../errors.js';
 import { newId } from '../ids.js';
 import { sniffMimeType } from '../mime.js';
 import type { StorageBackend } from '../storage/backend.js';
@@ -42,6 +42,8 @@ import { nowTimestamp } from '../time.js';
 import type { Actor } from './actor.js';
 import { systemActor } from './actor.js';
 import type { AuditService } from './audit.js';
+import type { TrashOptions } from './trash-record.js';
+import { closeTrashRecord, findOpenTrashRecord, openTrashRecord } from './trash-record.js';
 
 export type DocumentSourceKind = (typeof DOCUMENT_SOURCE_KINDS)[number];
 export type AttachmentRole = (typeof ATTACHMENT_ROLES)[number];
@@ -270,6 +272,215 @@ export class DocumentService {
       );
 
       return attachmentId;
+    });
+  }
+
+  /* ---------------------------------------------------------------------------------------- */
+  /* Trash and restore (P5)                                                                      */
+  /* ---------------------------------------------------------------------------------------- */
+
+  /**
+   * Detach a file from an item (AT2).
+   *
+   * A soft delete of the `attachments` row and nothing else. The document survives, because the
+   * bytes may be reachable from another item and because P5 says nothing is deleted; reclaiming
+   * storage is a separate, explicit operation over documents with no live attachment.
+   */
+  detachDocument(attachmentId: string, actor: Actor, options: TrashOptions = {}): void {
+    this.db.transaction((tx) => {
+      const current = tx.select().from(attachments).where(eq(attachments.id, attachmentId)).get();
+      if (current === undefined) throw new NotFoundError('attachment', attachmentId);
+      if (current.trashedAt !== null) return;
+
+      const now = nowTimestamp();
+      tx.update(attachments)
+        .set({ trashedAt: now, updatedAt: now })
+        .where(eq(attachments.id, attachmentId))
+        .run();
+
+      openTrashRecord(tx, {
+        entityType: 'attachment',
+        entityId: attachmentId,
+        groupId: newId(),
+        trashedAt: now,
+        trashedByUserId: actor.userId ?? null,
+        reason: options.reason ?? 'user',
+        reasonDetail: options.reasonDetail ?? null,
+        restorePayload: {
+          itemId: current.itemId,
+          documentId: current.documentId,
+          role: current.role,
+          position: current.position,
+        },
+      });
+
+      this.audit.record(
+        {
+          actor,
+          action: 'attachment.detached',
+          entityType: 'attachment',
+          entityId: attachmentId,
+          before: { itemId: current.itemId, documentId: current.documentId, role: current.role },
+          after: { trashedAt: now },
+          reason: options.reason ?? 'user',
+        },
+        tx,
+      );
+    });
+  }
+
+  /**
+   * Re-attach a detached file.
+   *
+   * Refused for an attachment that went into the bin as part of trashing its item (I4): that one
+   * comes back with the item, and putting it back on its own would leave a live attachment hanging
+   * off a trashed record.
+   */
+  restoreAttachment(attachmentId: string, actor: Actor): void {
+    this.db.transaction((tx) => {
+      const current = tx.select().from(attachments).where(eq(attachments.id, attachmentId)).get();
+      if (current === undefined) throw new NotFoundError('attachment', attachmentId);
+
+      const record = findOpenTrashRecord(tx, 'attachment', attachmentId);
+      if (record === undefined) {
+        if (current.trashedAt === null) return;
+        throw new ConflictError(
+          `Attachment '${attachmentId}' is trashed but has no open trash record, which breaks T1.`,
+          { attachmentId },
+        );
+      }
+      if (record.reason === 'cascade') {
+        throw new InvariantError(
+          'I4',
+          `Attachment '${attachmentId}' went into the trash with item '${current.itemId}'. Restore ` +
+            'the item; the attachment comes back with it.',
+          { attachmentId, itemId: current.itemId },
+        );
+      }
+
+      const item = tx.select().from(items).where(eq(items.id, current.itemId)).get();
+      if (item === undefined) throw new NotFoundError('item', current.itemId);
+      if (item.trashedAt !== null) {
+        throw new ConflictError(
+          `Item '${current.itemId}' is in the trash; restore it before re-attaching files to it.`,
+          { itemId: current.itemId },
+        );
+      }
+
+      const now = nowTimestamp();
+      tx.update(attachments)
+        .set({ trashedAt: null, updatedAt: now })
+        .where(eq(attachments.id, attachmentId))
+        .run();
+      closeTrashRecord(tx, record.id, now, actor.userId ?? null);
+
+      this.audit.record(
+        {
+          actor,
+          action: 'attachment.restored',
+          entityType: 'attachment',
+          entityId: attachmentId,
+          before: { trashedAt: current.trashedAt },
+          after: { trashedAt: null, itemId: current.itemId },
+          reason: record.reason,
+        },
+        tx,
+      );
+    });
+  }
+
+  /**
+   * Trash a document (TR3, D4).
+   *
+   * Refused while any live attachment references it. The rule is not politeness: an attachment with
+   * a trashed document behind it is a row that resolves to bytes the library says are gone, and
+   * every reader of it would have to carry a special case. Detach first, then trash.
+   */
+  trashDocument(id: string, actor: Actor, options: TrashOptions = {}): DocumentRow {
+    return this.db.transaction((tx) => {
+      const current = tx.select().from(documents).where(eq(documents.id, id)).get();
+      if (current === undefined) throw new NotFoundError('document', id);
+      if (current.trashedAt !== null) return current;
+
+      const live = tx
+        .select({ id: attachments.id, itemId: attachments.itemId })
+        .from(attachments)
+        .where(and(eq(attachments.documentId, id), isNull(attachments.trashedAt)))
+        .all();
+      if (live.length > 0) {
+        throw new InvariantError(
+          'D4',
+          `Document '${id}' is still attached to ${live.length} live item(s). Detach it first; a ` +
+            'trashed document behind a live attachment is a reference to bytes the library says ' +
+            'are gone.',
+          { documentId: id, attachmentIds: live.map((row) => row.id) },
+        );
+      }
+
+      const now = nowTimestamp();
+      tx.update(documents).set({ trashedAt: now, updatedAt: now }).where(eq(documents.id, id)).run();
+
+      openTrashRecord(tx, {
+        entityType: 'document',
+        entityId: id,
+        groupId: newId(),
+        trashedAt: now,
+        trashedByUserId: actor.userId ?? null,
+        reason: options.reason ?? 'user',
+        reasonDetail: options.reasonDetail ?? null,
+        restorePayload: { sha256: current.sha256, storageKey: current.storageKey },
+      });
+
+      this.audit.record(
+        {
+          actor,
+          action: 'document.trashed',
+          entityType: 'document',
+          entityId: id,
+          before: { trashedAt: null, sha256: current.sha256 },
+          after: { trashedAt: now },
+          reason: options.reason ?? 'user',
+        },
+        tx,
+      );
+
+      return { ...current, trashedAt: now, updatedAt: now };
+    });
+  }
+
+  /** Put a document back. The blob was never removed, so this is a row update and an audit row. */
+  restoreDocument(id: string, actor: Actor): DocumentRow {
+    return this.db.transaction((tx) => {
+      const current = tx.select().from(documents).where(eq(documents.id, id)).get();
+      if (current === undefined) throw new NotFoundError('document', id);
+
+      const record = findOpenTrashRecord(tx, 'document', id);
+      if (record === undefined) {
+        if (current.trashedAt === null) return current;
+        throw new ConflictError(
+          `Document '${id}' is trashed but has no open trash record, which breaks invariant T1.`,
+          { documentId: id },
+        );
+      }
+
+      const now = nowTimestamp();
+      tx.update(documents).set({ trashedAt: null, updatedAt: now }).where(eq(documents.id, id)).run();
+      closeTrashRecord(tx, record.id, now, actor.userId ?? null);
+
+      this.audit.record(
+        {
+          actor,
+          action: 'document.restored',
+          entityType: 'document',
+          entityId: id,
+          before: { trashedAt: current.trashedAt },
+          after: { trashedAt: null },
+          reason: record.reason,
+        },
+        tx,
+      );
+
+      return { ...current, trashedAt: null, updatedAt: now };
     });
   }
 

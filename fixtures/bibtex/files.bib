@@ -1,0 +1,50 @@
+% Recueil fixture — the `file` field, in the four flavours that actually turn up.
+% 5 entries. The `file` field is not standard BibTeX; every tool invented its own syntax and they
+% are mutually incompatible, which is why an importer has to sniff rather than parse.
+
+% JabRef / Better BibTeX: description : path : type, colon-separated, empty description common.
+@article{file-jabref,
+  author       = {M{\"u}ller, Anna-Lena},
+  title        = {Niederschlagsvariabilit{\"a}t im Einzugsgebiet der oberen {D}onau},
+  journal      = {Hydrologie und Wasserbewirtschaftung},
+  year         = {2019},
+  file         = {Full Text PDF:files/218/mueller-2019.pdf:application/pdf}
+}
+
+% Better BibTeX with several files, semicolon-separated, and a colon inside a filename.
+@article{file-multiple,
+  author       = {Bianchi, Lorenzo and M{\"u}ller, Anna-Lena},
+  title        = {Graph-based deduplication of bibliographic records at scale},
+  journal      = {Journal of Data and Information Science},
+  year         = {2023},
+  file         = {Full Text PDF:files/41/bianchi-2023.pdf:application/pdf;Supplement:files/41/S1\: tables.pdf:application/pdf}
+}
+
+% Zotero's own BibTeX export: an absolute path, no description, no type.
+@book{file-zotero-absolute,
+  author       = {Willinsky, John},
+  title        = {The Access Principle},
+  publisher    = {MIT Press},
+  year         = {2006},
+  file         = {/home/rh/Zotero/storage/5B7H7EJW/Willinsky - 2006 - The Access Principle.pdf}
+}
+
+% Mendeley: braces around each path, colons escaped as `$\backslash$:`, and a leading empty field.
+@article{file-mendeley,
+  author       = {Okonkwo, Chidinma},
+  title        = {Interoperability},
+  journal      = {Journal of Information Science},
+  year         = {2021},
+  file         = {{:C$\backslash$:/Users/rh/Documents/Mendeley Desktop/Okonkwo - 2021 - Interoperability.pdf:pdf}}
+}
+
+% A `file` field pointing at something that is not there, next to a `pdf` field some tools write
+% instead. Both must end up in the verification report rather than silently dropped.
+@article{file-missing,
+  author       = {Wei{\ss}, J{\"u}rgen},
+  title        = {{\"U}ber die Bestimmung von N{\"a}hrstofffl{\"u}ssen in Flie{\ss}gew{\"a}ssern},
+  journal      = {Wasser und Abfall},
+  year         = {2015},
+  file         = {:files/7/weiss-2015-fehlt.pdf:PDF},
+  pdf          = {files/7/weiss-2015-fehlt.pdf}
+}

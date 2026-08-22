@@ -190,12 +190,64 @@ describe('the YAML rendering', () => {
     expect(parseYaml(yaml)).toEqual(JSON.parse(JSON.stringify(document)));
   });
 
-  it('matches the committed spec/openapi.yaml', () => {
-    const committed = readFileSync(committedSpecPath, 'utf8');
-    const packageJson: { version?: string } = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8'));
-    expect(
-      committed,
-      'spec/openapi.yaml is stale — regenerate it with `pnpm --filter @recueil/schemas run openapi`',
-    ).toBe(renderOpenApiYaml({ version: packageJson.version ?? '0.0.0' }));
+});
+
+/**
+ * The committed contract.
+ *
+ * `spec/openapi.yaml` is written by `pnpm --filter @recueil/server run openapi`, because only the
+ * server knows which operations it answers: its writer takes this package's document and merges the
+ * path items declared beside the handlers over it (see `apps/server/src/openapi.ts`). That the file
+ * is byte-for-byte what the server renders is asserted there.
+ *
+ * What this package owns, and therefore what these assertions check, is the other half of the
+ * promise in P6: the components. The committed document is a superset — the server's route bodies
+ * pull in request and response schemas of their own — but every component this package generates
+ * must appear in it unchanged, and every operation this package declares must still be served. If
+ * a Zod schema changes and nobody regenerates, that fails here rather than in a client that
+ * trusted the contract.
+ */
+describe('the committed spec/openapi.yaml', () => {
+  const committedText = readFileSync(committedSpecPath, 'utf8');
+  const committed = parseYaml(committedText) as {
+    openapi?: string;
+    info?: { title?: string };
+    components?: { schemas?: Record<string, unknown>; securitySchemes?: Record<string, unknown> };
+    paths?: Record<string, unknown>;
+  };
+  const packageJson: { version?: string } = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8'));
+  const generated = JSON.parse(
+    JSON.stringify(createOpenApiDocument({ version: packageJson.version ?? '0.0.0' })),
+  ) as typeof committed;
+
+  it('is a generated file, and says which command regenerates it', () => {
+    expect(committedText.startsWith('# Recueil — OpenAPI 3.1 contract.')).toBe(true);
+    expect(committedText).toContain('GENERATED FILE. Do not edit by hand.');
+    expect(committedText).toContain('pnpm --filter @recueil/server run openapi');
+  });
+
+  it('declares the same OpenAPI version and info block', () => {
+    expect(committed.openapi).toBe(OPENAPI_VERSION);
+    expect(committed.info?.title).toBe(generated.info?.title);
+  });
+
+  it('carries every component this package generates, unchanged', () => {
+    const committedSchemas = committed.components?.schemas ?? {};
+    const generatedSchemas = generated.components?.schemas ?? {};
+    const names = Object.keys(generatedSchemas);
+    expect(names.length).toBeGreaterThan(0);
+    for (const name of names) {
+      expect(
+        committedSchemas[name],
+        `${name}: spec/openapi.yaml is stale — regenerate it with \`pnpm --filter @recueil/server run openapi\``,
+      ).toEqual(generatedSchemas[name]);
+    }
+    expect(committed.components?.securitySchemes).toEqual(generated.components?.securitySchemes);
+  });
+
+  it('still declares every path this package declares', () => {
+    for (const path of Object.keys(generated.paths ?? {})) {
+      expect(Object.keys(committed.paths ?? {}), path).toContain(path);
+    }
   });
 });

@@ -91,6 +91,29 @@ export const ServerEnvSchema = z.object({
   ),
   /** The release string reported by `/health`. The image build stamps it (deploy/Dockerfile). */
   RECUEIL_VERSION: optionalString.optional(),
+  /**
+   * Refuse an unauthenticated call to `/api/v1`.
+   *
+   * Off by default, and that default is a deliberate reading of CONCEPT.md §5.15 rather than
+   * laziness: v1 is a single-user server, usually on loopback or a Tailscale address, and a
+   * first run that answers `401` before the operator has minted a token is a first run nobody
+   * gets through. Turning it on is one variable, and a deployment reachable from anywhere but
+   * loopback should turn it on.
+   *
+   * It changes *whether a token is required*, never *whether one is honoured*: a request that
+   * presents a token is authenticated and scope-checked either way, so a write through a token
+   * is attributable in the audit log in both modes (P4, AL3).
+   */
+  RECUEIL_REQUIRE_AUTH: withDefault(booleanish, 'false'),
+  /** The largest single uploaded file. Default 512 MiB — a large scan, not a disk image. */
+  RECUEIL_MAX_UPLOAD_BYTES: withDefault(
+    z
+      .string()
+      .regex(/^\d{1,13}$/u, { message: 'expected a whole number of bytes' })
+      .transform((value) => Number.parseInt(value, 10))
+      .refine((value) => value > 0, { message: 'expected a positive number of bytes' }),
+    '536870912',
+  ),
 });
 
 export type ServerEnv = z.infer<typeof ServerEnvSchema>;
@@ -111,6 +134,10 @@ export interface ServerConfig {
   readonly shutdownTimeoutMs: number;
   /** Set only when `RECUEIL_VERSION` was given; otherwise the package version is used. */
   readonly version?: string;
+  /** Refuse unauthenticated `/api/v1` calls. See `RECUEIL_REQUIRE_AUTH`. */
+  readonly requireAuth: boolean;
+  /** Upload ceiling, in bytes, per file. */
+  readonly maxUploadBytes: number;
 }
 
 /**
@@ -172,5 +199,7 @@ export const loadConfig = (env: NodeJS.ProcessEnv = process.env): ServerConfig =
     trustProxy: parsed.RECUEIL_TRUST_PROXY,
     shutdownTimeoutMs: parsed.RECUEIL_SHUTDOWN_TIMEOUT_MS,
     version: parsed.RECUEIL_VERSION,
+    requireAuth: parsed.RECUEIL_REQUIRE_AUTH,
+    maxUploadBytes: parsed.RECUEIL_MAX_UPLOAD_BYTES,
   });
 };

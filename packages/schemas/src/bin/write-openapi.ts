@@ -1,31 +1,20 @@
 /**
- * Write `spec/openapi.yaml`.
+ * Write this package's OpenAPI document to a named file.
  *
- * Run with `pnpm --filter @recueil/schemas run openapi`. An explicit output path may be given as
- * the first argument, which is what the CI drift check uses to render into a temporary file and
- * compare.
+ * **This is not the writer of the committed contract.** `spec/openapi.yaml` is produced by
+ * `pnpm --filter @recueil/server run openapi`, because only the server knows which operations it
+ * answers: that writer takes the document built here and merges the path items declared beside the
+ * handlers over it. Rendering this package's document straight into `spec/openapi.yaml` would
+ * silently drop every Phase 1 route, so the destination is required rather than defaulted.
+ *
+ * Run with `pnpm --filter @recueil/schemas run openapi -- <path>` — which is what a drift check
+ * does when it renders into a temporary file and compares the components.
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { renderOpenApiYaml } from '../openapi/document.js';
-
-/** Walk up from this file until the workspace root — the directory holding pnpm-workspace.yaml. */
-const findRepositoryRoot = (from: string): string => {
-  let directory = from;
-  for (let depth = 0; depth < 10; depth += 1) {
-    try {
-      readFileSync(join(directory, 'pnpm-workspace.yaml'), 'utf8');
-      return directory;
-    } catch {
-      const parent = dirname(directory);
-      if (parent === directory) break;
-      directory = parent;
-    }
-  }
-  throw new Error(`could not find pnpm-workspace.yaml above ${from}`);
-};
 
 const readPackageVersion = (packageRoot: string): string => {
   try {
@@ -41,9 +30,17 @@ const readPackageVersion = (packageRoot: string): string => {
 };
 
 const here = dirname(fileURLToPath(import.meta.url));
-const repositoryRoot = findRepositoryRoot(here);
 const packageRoot = resolve(here, '..', '..');
-const target = process.argv[2] ?? join(repositoryRoot, 'spec', 'openapi.yaml');
+const target = process.argv[2];
+
+if (target === undefined) {
+  process.stderr.write(
+    'usage: write-openapi <path>\n\n' +
+      'The committed contract is written by `pnpm --filter @recueil/server run openapi`; this\n' +
+      "writer renders this package's document alone, so it needs an explicit destination.\n",
+  );
+  process.exit(2);
+}
 
 const yaml = renderOpenApiYaml({ version: readPackageVersion(packageRoot) });
 

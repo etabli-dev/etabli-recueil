@@ -1,7 +1,7 @@
 /**
  * The library service: items and their two facets (§3.4, §3.5, §3.7).
  *
- * Four rules run through every method here, and they are the reason this is a service rather than
+ * Five rules run through every method here, and they are the reason this is a service rather than
  * a thin repository:
  *
  * - **Every mutation writes an `audit_log` row, in the same transaction as the write** (P5, §6.5).
@@ -13,9 +13,13 @@
  *   service owns it, because trigger syntax is not portable.
  * - **`version` is optimistic concurrency, not a counter** (§1.7). A conditional write with a stale
  *   version is refused and the refusal is audited as `item.conflict`; nothing is merged (P1).
+ * - **Every facet field write records provenance, and a manual lock refuses an automated one**
+ *   (P4, §3.6). There is no path into `item_bibliographic` or `item_office` from outside this
+ *   service that does not go through `applyFacet`, which is what makes CONCEPT §5.4's "manual edits
+ *   locked per field and never overwritten" a property of the data rather than a promise.
  */
 import { SLUG_PATTERN } from '@recueil/schemas';
-import { and, asc, count, desc, eq, isNull, lt, gt, or, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, inArray, isNull, lt, gt, or, sql } from 'drizzle-orm';
 
 import type { RecueilDatabase } from '../db/client.js';
 import {
@@ -27,9 +31,8 @@ import {
   itemTags,
   items,
   notes,
-  trash,
 } from '../db/schema.js';
-import type { ItemBibliographicRow, ItemOfficeRow, ItemRow } from '../db/schema.js';
+import type { FieldProvenanceRow, ItemBibliographicRow, ItemOfficeRow, ItemRow } from '../db/schema.js';
 import { ConflictError, NotFoundError, ValidationError, VersionConflictError } from '../errors.js';
 import { newId, newPublicId } from '../ids.js';
 import { normalise, normaliseDoi } from '../normalise.js';
@@ -38,6 +41,18 @@ import type { Actor } from './actor.js';
 import { AuditService, diffFields } from './audit.js';
 import type { Page } from './cursor.js';
 import { decodeCursor, encodeCursor, resolveLimit } from './cursor.js';
+import { ProvenanceService, manualStamp } from './provenance.js';
+import type { ProvenanceStamp, SkippedField } from './provenance.js';
+import type { LibrarySearch } from './search.js';
+import type { TrashOptions } from './trash-record.js';
+import {
+  closeTrashRecord,
+  findOpenTrashRecord,
+  findTrashGroup,
+  openTrashRecord,
+} from './trash-record.js';
+
+export type { TrashOptions } from './trash-record.js';
 
 /** Everything on the bibliographic facet that a caller may write. */
 export type BibliographicInput = Partial<
@@ -63,6 +78,8 @@ export interface CreateItemInput {
   dateAdded?: string;
   bibliographic?: BibliographicInput;
   office?: OfficeInput;
+  /** Where the facet values came from. Defaults to `manual`, which locks them (P4-1). */
+  provenance?: ProvenanceStamp;
 }
 
 export interface UpdateItemInput {
@@ -75,11 +92,31 @@ export interface UpdateItemInput {
   office?: (Partial<OfficeInput> & { correspondent?: string }) | null;
 }
 
+export interface UpdateItemOptions {
+  expectedVersion?: number;
+  /** Where the facet values came from. Defaults to `manual`, which locks them (P4-1). */
+  provenance?: ProvenanceStamp;
+}
+
 /** An item with its facets. The shape `GET /items/{id}` renders. */
 export interface ItemRecord {
   item: ItemRow;
   bibliographic: ItemBibliographicRow | null;
   office: ItemOfficeRow | null;
+}
+
+/**
+ * The outcome of a facet write, including what the locks refused (P4-4).
+ *
+ * A bulk enrichment run reads `skipped` and reports it. A run that overwrites nothing and says
+ * nothing is a bug, so the count is in the return value rather than only in the log.
+ */
+export interface FacetWriteResult {
+  record: ItemRecord;
+  /** The field paths actually written. */
+  applied: string[];
+  /** The field paths a manual lock refused, and who holds each lock. */
+  skipped: SkippedField[];
 }
 
 export interface ListItemsOptions {
@@ -89,24 +126,50 @@ export interface ListItemsOptions {
   order?: 'asc' | 'desc';
   itemType?: string;
   ownerUserId?: string;
+  /** Only items filed in this collection. */
+  collectionId?: string;
+  /** Only items carrying this tag. */
+  tagId?: string;
+  /** Full-text query, in Recueil's own syntax (`search-query.ts`). */
+  text?: string;
   /** Trashed items are excluded unless asked for; merge losers never appear at all (I2). */
   includeTrashed?: boolean;
 }
 
-export interface TrashOptions {
-  reason?: 'user' | 'merge' | 'import_rollback' | 'cascade' | 'plugin';
-  reasonDetail?: string | null;
-  /** Set when `reason` is `merge`: the winner (§6.6). */
-  mergeTargetItemId?: string | null;
-}
+export type CountItemsOptions = Omit<ListItemsOptions, 'limit' | 'cursor' | 'order'>;
+
+/**
+ * The ceiling on a text filter's candidate set.
+ *
+ * `listItems({ text })` is a SQL query with a full-text predicate folded in, so the matching ids
+ * have to be materialised. Five hundred is the same ceiling `SearchService` puts on a page, and a
+ * caller who wants the long tail of a broad query wants `SearchService.search` and its cursor, not
+ * a library list view.
+ */
+export const TEXT_FILTER_CANDIDATES = 500;
 
 export class LibraryService {
+  private readonly provenance: ProvenanceService;
+
+  private readonly search?: LibrarySearch;
+
   constructor(
     private readonly db: RecueilDatabase,
     private readonly audit: AuditService,
     /** The account owned records fall back to. In v1 there is exactly one (§1.4). */
     private readonly defaultOwnerUserId: string,
-  ) {}
+    options: { provenance?: ProvenanceService; search?: LibrarySearch } = {},
+  ) {
+    // Constructed here when the caller supplies none, rather than left optional: P4-1 says *every*
+    // facet write records provenance, and an optional recorder would make that "usually".
+    this.provenance = options.provenance ?? new ProvenanceService(db, audit);
+    this.search = options.search;
+  }
+
+  /** The per-field provenance service, for callers that need the locks directly (P4). */
+  get fieldProvenance(): ProvenanceService {
+    return this.provenance;
+  }
 
   /* ---------------------------------------------------------------------------------------- */
   /* Create                                                                                      */
@@ -128,6 +191,7 @@ export class LibraryService {
     const id = newId();
     const ownerUserId = input.ownerUserId ?? actor.userId ?? this.defaultOwnerUserId;
     const bibliographic = input.bibliographic;
+    const stamp = input.provenance ?? manualStamp();
 
     // I3: when the facet exists, the item title is the facet title.
     const title =
@@ -154,40 +218,15 @@ export class LibraryService {
 
       let bibliographicRow: ItemBibliographicRow | null = null;
       if (bibliographic !== undefined) {
-        tx.insert(itemBibliographic)
-          .values({
-            ...normaliseBibliographic(bibliographic),
-            itemId: id,
-            title,
-            itemTrashedAt: null,
-            createdAt: now,
-            updatedAt: now,
-          })
-          .run();
-        bibliographicRow = tx
-          .select()
-          .from(itemBibliographic)
-          .where(eq(itemBibliographic.itemId, id))
-          .get() as ItemBibliographicRow;
+        // A brand-new item has no locked fields, so nothing can be refused here; the write still
+        // goes through the same path, because that is what records the provenance (P4-1).
+        bibliographicRow = this.applyBibliographic(tx, id, { ...bibliographic, title }, actor, stamp, now)
+          .row;
       }
 
       let officeRow: ItemOfficeRow | null = null;
       if (input.office !== undefined) {
-        tx.insert(itemOffice)
-          .values({
-            ...input.office,
-            itemId: id,
-            correspondentNormalised: normalise(input.office.correspondent),
-            itemTrashedAt: null,
-            createdAt: now,
-            updatedAt: now,
-          })
-          .run();
-        officeRow = tx
-          .select()
-          .from(itemOffice)
-          .where(eq(itemOffice.itemId, id))
-          .get() as ItemOfficeRow;
+        officeRow = this.applyOffice(tx, id, input.office, actor, stamp, now).row;
       }
 
       this.audit.record(
@@ -202,10 +241,13 @@ export class LibraryService {
             ownerUserId,
             hasBibliographic: bibliographicRow !== null,
             hasOffice: officeRow !== null,
+            provenanceSource: stamp.source,
           },
         },
         tx,
       );
+
+      this.search?.indexItem(id, tx);
 
       return { item: itemRow, bibliographic: bibliographicRow, office: officeRow };
     });
@@ -242,15 +284,20 @@ export class LibraryService {
    * The pair is what makes the order total: `date_modified` alone repeats within a millisecond, and
    * a cursor over a non-total order silently skips or repeats rows. Merge losers are excluded
    * unconditionally — I2 says they never appear in a list.
+   *
+   * The four filters compose. `collectionId` and `tagId` are semi-joins, so an item filed twice
+   * still appears once; `text` narrows to the ids the full-text index matched, which keeps the
+   * cursor working because the ordering stays `(date_modified, id)` rather than becoming relevance.
+   * A caller who wants relevance order wants `SearchService.search`.
    */
   listItems(options: ListItemsOptions = {}): Page<ItemRow> {
     const limit = resolveLimit(options.limit);
     const order = options.order ?? 'desc';
 
-    const conditions = [sql`${items.libraryState} <> 'merged'`];
-    if (options.includeTrashed !== true) conditions.push(isNull(items.trashedAt));
-    if (options.itemType !== undefined) conditions.push(eq(items.itemType, options.itemType));
-    if (options.ownerUserId !== undefined) conditions.push(eq(items.ownerUserId, options.ownerUserId));
+    const conditions = this.filterConditions(options);
+    if (conditions === null) {
+      return { data: [], page: { nextCursor: null, hasMore: false, limit } };
+    }
 
     if (options.cursor !== undefined) {
       const { k, i } = decodeCursor(options.cursor);
@@ -285,12 +332,10 @@ export class LibraryService {
     };
   }
 
-  /** How many live items there are. Cheap enough to expose as `page.total`. */
-  countItems(options: Pick<ListItemsOptions, 'includeTrashed' | 'itemType' | 'ownerUserId'> = {}): number {
-    const conditions = [sql`${items.libraryState} <> 'merged'`];
-    if (options.includeTrashed !== true) conditions.push(isNull(items.trashedAt));
-    if (options.itemType !== undefined) conditions.push(eq(items.itemType, options.itemType));
-    if (options.ownerUserId !== undefined) conditions.push(eq(items.ownerUserId, options.ownerUserId));
+  /** How many items match. Cheap enough to expose as `page.total`. */
+  countItems(options: CountItemsOptions = {}): number {
+    const conditions = this.filterConditions(options);
+    if (conditions === null) return 0;
 
     return (
       this.db
@@ -311,13 +356,28 @@ export class LibraryService {
    * `expectedVersion` is the ETag the API handed out. When it is given and does not match, the
    * write is refused, the refusal is written to the audit log as `item.conflict`, and the caller
    * re-reads — P1's "conflicts logged, not merged", made concrete.
+   *
+   * Facet fields go through the provenance gate. With the default `manual` stamp nothing is
+   * refused, because a human's edit outranks any lock; with a resolver's stamp, locked fields are
+   * left alone. `updateBibliographic` is the same write with the refusals returned rather than
+   * discarded, and is what an enrichment run should call.
    */
   updateItem(
     id: string,
     patch: UpdateItemInput,
     actor: Actor,
-    options: { expectedVersion?: number } = {},
+    options: UpdateItemOptions = {},
   ): ItemRecord {
+    return this.updateItemDetailed(id, patch, actor, options).record;
+  }
+
+  /** `updateItem`, with the P4-4 report of what the locks refused. */
+  updateItemDetailed(
+    id: string,
+    patch: UpdateItemInput,
+    actor: Actor,
+    options: UpdateItemOptions = {},
+  ): FacetWriteResult {
     // The conflict check happens before the transaction opens, because the audit row that records
     // the refusal must survive it: a rejected write rolls its own transaction back, and an audit
     // row written inside would roll back with it, leaving §1.7's "the rejected write is recorded"
@@ -337,6 +397,8 @@ export class LibraryService {
         throw new VersionConflictError('item', id, options.expectedVersion, seen.version);
       }
     }
+
+    const stamp = options.provenance ?? manualStamp();
 
     return this.db.transaction((tx) => {
       const current = tx.select().from(items).where(eq(items.id, id)).get();
@@ -359,28 +421,16 @@ export class LibraryService {
         tx.select().from(itemBibliographic).where(eq(itemBibliographic.itemId, id)).get() ?? null;
       const currentOffice = tx.select().from(itemOffice).where(eq(itemOffice.itemId, id)).get() ?? null;
 
+      const applied: string[] = [];
+      const skipped: SkippedField[] = [];
+
       /* Facets first, because the item title mirrors the bibliographic one (I3). */
       let bibliographicRow = currentBibliographic;
       if (patch.bibliographic !== undefined && patch.bibliographic !== null) {
-        const values = normaliseBibliographic(patch.bibliographic);
-        if (currentBibliographic === null) {
-          tx.insert(itemBibliographic)
-            .values({
-              ...values,
-              itemId: id,
-              itemTrashedAt: null,
-              createdAt: now,
-              updatedAt: now,
-            })
-            .run();
-        } else {
-          tx.update(itemBibliographic)
-            .set({ ...values, updatedAt: now })
-            .where(eq(itemBibliographic.itemId, id))
-            .run();
-        }
-        bibliographicRow =
-          tx.select().from(itemBibliographic).where(eq(itemBibliographic.itemId, id)).get() ?? null;
+        const outcome = this.applyBibliographic(tx, id, patch.bibliographic, actor, stamp, now);
+        bibliographicRow = outcome.row;
+        applied.push(...outcome.applied.map((path) => `bibliographic.${path}`));
+        skipped.push(...outcome.skipped);
       }
 
       let officeRow = currentOffice;
@@ -389,22 +439,17 @@ export class LibraryService {
         if (correspondent === undefined) {
           throw new ValidationError('The office facet requires a correspondent (§3.7).');
         }
-        const values = {
-          ...patch.office,
-          correspondent,
-          correspondentNormalised: normalise(correspondent),
-        };
-        if (currentOffice === null) {
-          tx.insert(itemOffice)
-            .values({ ...values, itemId: id, itemTrashedAt: null, createdAt: now, updatedAt: now })
-            .run();
-        } else {
-          tx.update(itemOffice)
-            .set({ ...values, updatedAt: now })
-            .where(eq(itemOffice.itemId, id))
-            .run();
-        }
-        officeRow = tx.select().from(itemOffice).where(eq(itemOffice.itemId, id)).get() ?? null;
+        const outcome = this.applyOffice(
+          tx,
+          id,
+          { ...patch.office, correspondent },
+          actor,
+          stamp,
+          now,
+        );
+        officeRow = outcome.row;
+        applied.push(...outcome.applied.map((path) => `office.${path}`));
+        skipped.push(...outcome.skipped);
       }
 
       const nextTitle =
@@ -456,19 +501,76 @@ export class LibraryService {
           after: {
             ...(delta.after ?? {}),
             version: nextItem.version,
-            ...(patch.bibliographic !== undefined && patch.bibliographic !== null
-              ? { bibliographic: Object.keys(patch.bibliographic) }
-              : {}),
-            ...(patch.office !== undefined && patch.office !== null
-              ? { office: Object.keys(patch.office) }
-              : {}),
+            ...(applied.length > 0 ? { applied, provenanceSource: stamp.source } : {}),
+            ...(skipped.length > 0 ? { skippedLockedFields: skipped } : {}),
           },
         },
         tx,
       );
 
-      return { item: nextItem, bibliographic: bibliographicRow, office: officeRow };
+      this.search?.indexItem(id, tx);
+
+      return {
+        record: { item: nextItem, bibliographic: bibliographicRow, office: officeRow },
+        applied,
+        skipped,
+      };
     });
+  }
+
+  /**
+   * Write the bibliographic facet, and nothing else.
+   *
+   * This is the call an enrichment run makes. Pass the resolver's stamp — `{ source: 'crossref',
+   * confidence: 0.9 }` — and every field a human has locked is left alone and reported in
+   * `skipped`, while the rest are written with their provenance (P4-2, P4-4).
+   */
+  writeBibliographic(
+    itemId: string,
+    values: BibliographicInput,
+    actor: Actor,
+    options: UpdateItemOptions = {},
+  ): FacetWriteResult {
+    return this.updateItemDetailed(itemId, { bibliographic: values }, actor, options);
+  }
+
+  /** The same for the office facet. */
+  writeOffice(
+    itemId: string,
+    values: Partial<OfficeInput> & { correspondent?: string },
+    actor: Actor,
+    options: UpdateItemOptions = {},
+  ): FacetWriteResult {
+    return this.updateItemDetailed(itemId, { office: values }, actor, options);
+  }
+
+  /* ---------------------------------------------------------------------------------------- */
+  /* Provenance (P4)                                                                             */
+  /* ---------------------------------------------------------------------------------------- */
+
+  /** Every current provenance row for an item's bibliographic facet, keyed by field path. */
+  bibliographicProvenance(itemId: string): Record<string, FieldProvenanceRow> {
+    return this.provenance.map('item_bibliographic', itemId);
+  }
+
+  /** The same for the office facet. */
+  officeProvenance(itemId: string): Record<string, FieldProvenanceRow> {
+    return this.provenance.map('item_office', itemId);
+  }
+
+  /** The bibliographic fields locked against resolver writes (P4-2). */
+  lockedBibliographicFields(itemId: string): string[] {
+    return this.provenance.lockedFields('item_bibliographic', itemId);
+  }
+
+  /** Lock a bibliographic field without changing its value. */
+  lockBibliographicField(itemId: string, fieldPath: string, actor: Actor): FieldProvenanceRow {
+    return this.provenance.lock('item_bibliographic', itemId, fieldPath, actor);
+  }
+
+  /** Unlock a bibliographic field. An explicit user action, audited (P4-3). */
+  unlockBibliographicField(itemId: string, fieldPath: string, actor: Actor): FieldProvenanceRow {
+    return this.provenance.unlock('item_bibliographic', itemId, fieldPath, actor);
   }
 
   /* ---------------------------------------------------------------------------------------- */
@@ -542,11 +644,11 @@ export class LibraryService {
           .set({ trashedAt: now, updatedAt: now })
           .where(eq(attachments.id, child.id))
           .run();
-        this.openTrashRecord(tx, {
+        openTrashRecord(tx, {
           entityType: 'attachment',
           entityId: child.id,
           groupId,
-          now,
+          trashedAt: now,
           reason: 'cascade',
           reasonDetail: `item ${id} trashed`,
           trashedByUserId,
@@ -555,27 +657,28 @@ export class LibraryService {
       }
       for (const child of childNotes) {
         tx.update(notes).set({ trashedAt: now, updatedAt: now }).where(eq(notes.id, child.id)).run();
-        this.openTrashRecord(tx, {
+        openTrashRecord(tx, {
           entityType: 'note',
           entityId: child.id,
           groupId,
-          now,
+          trashedAt: now,
           reason: 'cascade',
           reasonDetail: `item ${id} trashed`,
           trashedByUserId,
           restorePayload: { parentItemId: id },
         });
+        this.search?.removeEntity('note', child.id, tx);
       }
       for (const child of childAnnotations) {
         tx.update(annotations)
           .set({ trashedAt: now, updatedAt: now })
           .where(eq(annotations.id, child.id))
           .run();
-        this.openTrashRecord(tx, {
+        openTrashRecord(tx, {
           entityType: 'annotation',
           entityId: child.id,
           groupId,
-          now,
+          trashedAt: now,
           reason: 'cascade',
           reasonDetail: `item ${id} trashed`,
           trashedByUserId,
@@ -597,15 +700,16 @@ export class LibraryService {
         .where(eq(itemOffice.itemId, id))
         .run();
 
-      this.openTrashRecord(tx, {
+      openTrashRecord(tx, {
         entityType: 'item',
         entityId: id,
         groupId,
-        now,
+        trashedAt: now,
         reason,
         reasonDetail: options.reasonDetail ?? null,
         trashedByUserId,
         mergeTargetItemId: options.mergeTargetItemId ?? null,
+        mergeRecord: options.mergeRecord ?? null,
         restorePayload: {
           collectionIds: memberships,
           tagIds,
@@ -637,6 +741,8 @@ export class LibraryService {
         tx,
       );
 
+      this.search?.removeEntity('item', id, tx);
+
       return {
         item: { ...current, trashedAt: now, dateModified: now, version: current.version + 1 },
         bibliographic:
@@ -658,18 +764,7 @@ export class LibraryService {
       const current = tx.select().from(items).where(eq(items.id, id)).get();
       if (current === undefined) throw new NotFoundError('item', id);
 
-      const record = tx
-        .select()
-        .from(trash)
-        .where(
-          and(
-            eq(trash.entityType, 'item'),
-            eq(trash.entityId, id),
-            isNull(trash.restoredAt),
-            isNull(trash.purgedAt),
-          ),
-        )
-        .get();
+      const record = findOpenTrashRecord(tx, 'item', id);
 
       if (record === undefined) {
         if (current.trashedAt === null) {
@@ -690,14 +785,7 @@ export class LibraryService {
 
       const now = nowTimestamp();
       const group = record.groupId;
-      const siblings =
-        group === null
-          ? [record]
-          : tx
-              .select()
-              .from(trash)
-              .where(and(eq(trash.groupId, group), isNull(trash.restoredAt), isNull(trash.purgedAt)))
-              .all();
+      const siblings = group === null ? [record] : findTrashGroup(tx, group);
 
       let restoredChildren = 0;
       for (const row of siblings) {
@@ -728,6 +816,7 @@ export class LibraryService {
               .set({ trashedAt: null, updatedAt: now })
               .where(eq(notes.id, row.entityId))
               .run();
+            this.search?.indexNote(row.entityId, tx);
             restoredChildren += 1;
             break;
           case 'annotation':
@@ -745,10 +834,7 @@ export class LibraryService {
             );
         }
 
-        tx.update(trash)
-          .set({ restoredAt: now, restoredByUserId: actor.userId ?? null })
-          .where(eq(trash.id, row.id))
-          .run();
+        closeTrashRecord(tx, row.id, now, actor.userId ?? null);
       }
 
       this.audit.record(
@@ -764,6 +850,8 @@ export class LibraryService {
         tx,
       );
 
+      this.search?.indexItem(id, tx);
+
       return {
         item: { ...current, trashedAt: null, dateModified: now, version: current.version + 1 },
         bibliographic:
@@ -777,35 +865,214 @@ export class LibraryService {
   /* Internals                                                                                   */
   /* ---------------------------------------------------------------------------------------- */
 
-  /** One open `trash` row — the other half of invariant T1 (§1.5). */
-  private openTrashRecord(
-    tx: Pick<RecueilDatabase, 'insert'>,
-    input: {
-      entityType: (typeof trash.entityType)['_']['data'];
-      entityId: string;
-      groupId: string;
-      now: string;
-      reason: NonNullable<TrashOptions['reason']>;
-      reasonDetail?: string | null;
-      trashedByUserId: string | null;
-      mergeTargetItemId?: string | null;
-      restorePayload: Record<string, unknown>;
-    },
-  ): void {
-    tx.insert(trash)
-      .values({
-        id: newId(),
-        entityType: input.entityType,
-        entityId: input.entityId,
-        groupId: input.groupId,
-        trashedAt: input.now,
-        trashedByUserId: input.trashedByUserId,
-        reason: input.reason,
-        reasonDetail: input.reasonDetail ?? null,
-        restorePayload: JSON.stringify(input.restorePayload),
-        mergeTargetItemId: input.mergeTargetItemId ?? null,
-      })
-      .run();
+  /**
+   * The shared `WHERE` of `listItems` and `countItems`.
+   *
+   * Returns `null` — meaning "no row can match" — when a text filter matched nothing at all, so
+   * that the caller short-circuits instead of building `id IN ()`, which SQLite will not parse.
+   */
+  private filterConditions(options: ListItemsOptions): ReturnType<typeof and>[] | null {
+    const conditions: ReturnType<typeof and>[] = [sql`${items.libraryState} <> 'merged'`];
+    if (options.includeTrashed !== true) conditions.push(isNull(items.trashedAt));
+    if (options.itemType !== undefined) conditions.push(eq(items.itemType, options.itemType));
+    if (options.ownerUserId !== undefined) conditions.push(eq(items.ownerUserId, options.ownerUserId));
+
+    if (options.collectionId !== undefined) {
+      conditions.push(
+        inArray(
+          items.id,
+          this.db
+            .select({ id: collectionItems.itemId })
+            .from(collectionItems)
+            .where(eq(collectionItems.collectionId, options.collectionId)),
+        ),
+      );
+    }
+
+    if (options.tagId !== undefined) {
+      conditions.push(
+        inArray(
+          items.id,
+          this.db
+            .select({ id: itemTags.itemId })
+            .from(itemTags)
+            .where(eq(itemTags.tagId, options.tagId)),
+        ),
+      );
+    }
+
+    if (options.text !== undefined && options.text.trim() !== '') {
+      const matched = this.textFilterIds(options.text);
+      if (matched.length === 0) return null;
+      conditions.push(inArray(items.id, matched));
+    }
+
+    return conditions;
+  }
+
+  /**
+   * The item ids a text filter matches.
+   *
+   * The index when there is one; otherwise a `LIKE` over the title, which is a poor search and is
+   * meant to be — it exists so that a deployment without FTS5 degrades to something rather than to
+   * an exception, and the honest thing is for it to be visibly narrower rather than silently
+   * pretending to be full-text.
+   */
+  private textFilterIds(text: string): string[] {
+    if (this.search?.available === true) {
+      return this.search.itemIdsMatching(text, TEXT_FILTER_CANDIDATES);
+    }
+
+    const pattern = `%${normalise(text).replaceAll('%', '\\%').replaceAll('_', '\\_')}%`;
+    return this.db
+      .select({ id: items.id })
+      .from(items)
+      .where(sql`lower(coalesce(${items.title}, '')) like ${pattern} escape '\\'`)
+      .limit(TEXT_FILTER_CANDIDATES)
+      .all()
+      .map((row) => row.id);
+  }
+
+  /**
+   * Write bibliographic fields through the provenance gate (P4).
+   *
+   * The order is: normalise, ask the locks which fields may be written, write those, stamp them.
+   * Asking before writing rather than after is what keeps a refused field from ever touching the
+   * column — there is no "write then revert", so there is no window in which the wrong value exists.
+   */
+  private applyBibliographic(
+    tx: RecueilTransaction,
+    itemId: string,
+    input: BibliographicInput,
+    actor: Actor,
+    stamp: ProvenanceStamp,
+    now: string,
+  ): { row: ItemBibliographicRow; applied: string[]; skipped: SkippedField[] } {
+    const values = normaliseBibliographic(input);
+    const current =
+      tx.select().from(itemBibliographic).where(eq(itemBibliographic.itemId, itemId)).get() ?? null;
+
+    const requested = Object.keys(values).filter((key) => values[key as keyof BibliographicInput] !== undefined);
+    const { allowed, skipped } = this.provenance.partition(
+      'item_bibliographic',
+      itemId,
+      requested,
+      stamp.source,
+      tx,
+    );
+
+    const writable: Record<string, unknown> = {};
+    const previous: Record<string, unknown> = {};
+    for (const key of allowed) {
+      writable[key] = values[key as keyof BibliographicInput];
+      previous[key] = current === null ? null : (current as unknown as Record<string, unknown>)[key];
+    }
+
+    if (current === null) {
+      tx.insert(itemBibliographic)
+        .values({ ...writable, itemId, itemTrashedAt: null, createdAt: now, updatedAt: now })
+        .run();
+    } else if (allowed.length > 0) {
+      tx.update(itemBibliographic)
+        .set({ ...writable, updatedAt: now })
+        .where(eq(itemBibliographic.itemId, itemId))
+        .run();
+    }
+
+    if (allowed.length > 0) {
+      this.provenance.applyStamps(tx, {
+        entityType: 'item_bibliographic',
+        entityId: itemId,
+        values: writable,
+        previous,
+        stamp,
+        appliedAt: now,
+        actor,
+      });
+    }
+
+    const row = tx
+      .select()
+      .from(itemBibliographic)
+      .where(eq(itemBibliographic.itemId, itemId))
+      .get() as ItemBibliographicRow;
+    return { row, applied: allowed, skipped };
+  }
+
+  /** The same gate for the office facet (§3.7). */
+  private applyOffice(
+    tx: RecueilTransaction,
+    itemId: string,
+    input: Partial<OfficeInput> & { correspondent: string },
+    actor: Actor,
+    stamp: ProvenanceStamp,
+    now: string,
+  ): { row: ItemOfficeRow; applied: string[]; skipped: SkippedField[] } {
+    if (input.correspondent.trim() === '') {
+      throw new ValidationError('The office facet requires a correspondent (§3.7).');
+    }
+
+    const current = tx.select().from(itemOffice).where(eq(itemOffice.itemId, itemId)).get() ?? null;
+    const values: Record<string, unknown> = {
+      ...input,
+      correspondentNormalised: normalise(input.correspondent),
+    };
+
+    const requested = Object.keys(values).filter(
+      (key) => values[key] !== undefined && key !== 'correspondentNormalised',
+    );
+    const { allowed, skipped } = this.provenance.partition(
+      'item_office',
+      itemId,
+      requested,
+      stamp.source,
+      tx,
+    );
+
+    const writable: Record<string, unknown> = {};
+    const previous: Record<string, unknown> = {};
+    for (const key of allowed) {
+      writable[key] = values[key];
+      previous[key] = current === null ? null : (current as unknown as Record<string, unknown>)[key];
+    }
+    // The normalised mirror follows its source column and is not a field of its own (§1.1).
+    if (allowed.includes('correspondent')) {
+      writable['correspondentNormalised'] = values['correspondentNormalised'];
+    }
+
+    if (current === null) {
+      tx.insert(itemOffice)
+        .values({
+          ...writable,
+          correspondent: input.correspondent,
+          correspondentNormalised: normalise(input.correspondent),
+          itemId,
+          itemTrashedAt: null,
+          createdAt: now,
+          updatedAt: now,
+        } as typeof itemOffice.$inferInsert)
+        .run();
+    } else if (allowed.length > 0) {
+      tx.update(itemOffice)
+        .set({ ...writable, updatedAt: now })
+        .where(eq(itemOffice.itemId, itemId))
+        .run();
+    }
+
+    if (allowed.length > 0) {
+      this.provenance.applyStamps(tx, {
+        entityType: 'item_office',
+        entityId: itemId,
+        values: Object.fromEntries(allowed.map((key) => [key, values[key]])),
+        previous,
+        stamp,
+        appliedAt: now,
+        actor,
+      });
+    }
+
+    const row = tx.select().from(itemOffice).where(eq(itemOffice.itemId, itemId)).get() as ItemOfficeRow;
+    return { row, applied: allowed, skipped };
   }
 
   /** A public key that is not taken. Eight Crockford characters collide about never, but check. */
@@ -818,6 +1085,9 @@ export class LibraryService {
     throw new ConflictError('Could not mint an unused public id in eight attempts.');
   }
 }
+
+/** The transaction handle Drizzle hands a `db.transaction` callback. */
+type RecueilTransaction = Parameters<Parameters<RecueilDatabase['transaction']>[0]>[0];
 
 /** Identifier columns are stored normalised, so the deduplicator compares with `=` (B1). */
 const normaliseBibliographic = (input: BibliographicInput): BibliographicInput => {

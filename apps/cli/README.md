@@ -2,36 +2,45 @@
 
 `recueil` — the command line.
 
-The CLI is a client of the [REST API](../../spec/openapi.yaml) like every other client, with one
-exception: `recueil serve` starts the server rather than talking to one (ADR-0001). Anything the CLI
-can do, a script can do against the API; anything the CLI cannot do, the API cannot do either (P6).
+Anything the CLI can do, a script can do against the [REST API](../../spec/openapi.yaml); anything
+the CLI cannot do, the API cannot do either (P6). Where the two overlap there is one implementation
+behind both — `recueil export` calls the same selection and citation-key code the `.bib` endpoint
+does, so the file a LaTeX build fetches and the file this command writes are the same bytes.
+
+The data commands — `serve`, `import`, `export`, `backup`, `restore` — open the library directly
+rather than talking to a running server (ADR-0001). That is not a shortcut: an importer writes fifty
+thousand records through the service layer in one process, and its idempotency key and resume cursor
+live in the same database as the records. They take the same flags and the same environment
+variables `serve` does.
 
 The intended command surface, the connection variables and the exit codes are documented in
 [`docs/cli.qmd`](../../docs/cli.qmd). This README covers what the package actually does today.
 
-## Status: Phase 0
+## Status: Phase 1
 
-Phase 0's exit criterion is "`recueil serve` returns health with an empty library"
-(CONCEPT.md §7), and that is the whole of what works. Every other command exists, is listed in
-`recueil --help` with the phase that delivers it, and — when run — says so and exits `1`.
+Phase 1 delivers the core library and the Zotero migration (CONCEPT.md §7). Five commands work;
+the rest exist, are listed in `recueil --help` with the phase that delivers them, and — when run —
+say so and exit `1`. Two of those belong to Phase 1 as well and are not built yet; the help text
+says so rather than pretending otherwise.
 
-| Command | Does | Phase |
+| Command | Does | Status |
 |---|---|---|
-| `serve` | Start the server | **0 — works** |
-| `import` | Zotero, Paperless-ngx, BibTeX, RIS, EndNote XML, CSL-JSON, JabRef, CSV | 1 |
-| `export` | BibTeX, BibLaTeX, CSL-JSON, RIS, JSON-LD, CSV, Parquet | 1 |
-| `backup` / `restore` | Consistent snapshot and recovery | 1 |
-| `token` | Create, list and revoke scoped API tokens | 1 |
-| `job` | List, follow, retry and cancel jobs | 1 |
-| `ingest` | Push files in, manage sources, work the review queue | 2 |
-| `check` | Run the verification engine over a scope or a reference list | 3 |
-| `dedup` | File and record deduplication, dry run by default | 3 |
-| `plugin` | Install, enable, disable, configure, list | 3 |
-| `graph` | Build edges, run a deep dive, export a network | 5 |
-| `sr` | Systematic review: search runs, screening, extraction, PRISMA | 7 |
+| `serve` | Start the server | **works** |
+| `import zotero` | A whole Zotero library, with the verification report | **works** |
+| `import bibtex\|biblatex\|ris\|csl-json` | A bibliography file | **works** |
+| `export bibtex\|biblatex\|csl-json\|ris` | A selection, in an interchange format | **works** |
+| `backup` / `restore` | Consistent snapshot and verified recovery | **works** |
+| `token` | Create, list and revoke scoped API tokens | Phase 1 |
+| `job` | List, follow, retry and cancel jobs | Phase 1 |
+| `ingest` | Push files in, manage sources, work the review queue | Phase 2 |
+| `check` | Run the verification engine over a scope or a reference list | Phase 3 |
+| `dedup` | File and record deduplication, dry run by default | Phase 3 |
+| `plugin` | Install, enable, disable, configure, list | Phase 3 |
+| `graph` | Build edges, run a deep dive, export a network | Phase 5 |
+| `sr` | Systematic review: search runs, screening, extraction, PRISMA | Phase 7 |
 
-A placeholder fails rather than succeeding quietly, because a script that pipes `recueil export`
-into a `.bib` file must not receive an empty file and a zero exit code. There is no partial
+A placeholder fails rather than succeeding quietly, because a script that pipes `recueil dedup`
+into something must not receive an empty result and a zero exit code. There is no partial
 implementation behind any of them and no flag that turns one on.
 
 ```console
@@ -39,11 +48,97 @@ $ recueil check bibliography --file refs.txt
 error `recueil check` is not implemented yet.
 
   It arrives in Phase 3 — Enrichment, checks, dedup (CONCEPT.md §7).
-  This build is Phase 0, which ships `recueil serve` and nothing else.
+  This build is Phase 1, and ships: serve, import, export, backup, restore.
 ...
 $ echo $?
 1
 ```
+
+## `recueil import`
+
+```sh
+recueil import zotero ~/Zotero/zotero.sqlite --linked-base ~/Documents/Papers
+recueil import zotero ~/Zotero/zotero.sqlite --dry-run
+recueil import zotero ~/Zotero/zotero.sqlite --resume
+recueil import bibtex refs.bib
+recueil import ris endnote-export.ris
+recueil import csl-json library.json
+```
+
+`import zotero` runs the migrator in [`@recueil/import-zotero`](../../packages/import-zotero),
+writes `report.json`, `report.md` and `_REVIEW/` to `--report` (default `./zotero-import`), and
+prints the parity table and the named checks. The source library is never written to.
+
+| Exit | Means |
+|---|---|
+| `0` | Imported, and every check passed |
+| `4` | Imported, but entries were routed to `_REVIEW/` and need a decision |
+| `5` | The parity check failed — do not delete anything |
+
+`--dry-run` is a real run against a *consistent copy* of the library, taken with the SQLite backup
+API, and a store that hashes its bytes and discards them. It therefore accounts for what has already
+been imported, which a scratch database could not, and it costs one pass over the files rather than
+a second copy of the library.
+
+`--resume` is required to continue an import that stopped part way. Without it, an interrupted run
+is reported rather than silently continued; resuming is safe because every write the importer makes
+is keyed by something Zotero owns (P9).
+
+The bibliography importers keep the entry key as the item's citation key **and** as its source id,
+so `\cite{}` keeps resolving (ADR-0016) and re-importing the same file updates the same items
+rather than doubling them (P9). A key or a DOI a live item already holds is dropped and reported,
+never reassigned (P3). Files named in a `file` field are reported, not fetched — that is the
+ingestion pipeline's job and it arrives in Phase 2.
+
+## `recueil export`
+
+```sh
+recueil export bibtex --collection 01J8ZK… --out chapter3.bib
+recueil export csl-json --search "climate danube"
+recueil export ris --ids 01J8ZK…,01J8ZM…
+recueil export biblatex --all --out library.bib
+```
+
+Exactly one of `--collection`, `--search`, `--ids` and `--all`. The document goes to stdout unless
+`--out` is given; the losses and the counts go to stderr, so redirecting stdout produces a file the
+format can read.
+
+`--all` exists here and not on the export endpoint, and the asymmetry is deliberate: an accidental
+`GET /export/bibtex` must not serialise fifty thousand entries, while a person who typed `--all`
+meant it, and P10 requires the library to be exportable in full.
+
+## `recueil backup` and `recueil restore`
+
+```sh
+recueil backup --out /var/backups/recueil
+recueil backup --out /var/backups/recueil --force        # nightly, copying only what changed
+recueil backup --out /var/backups/index --no-blobs       # store backed up separately
+recueil restore /var/backups/recueil --into /srv/recueil
+recueil restore /var/backups/recueil --verify-only
+```
+
+A snapshot is a **directory of ordinary files**, documented in
+[`packages/core/src/backup/FORMAT.md`](../../packages/core/src/backup/FORMAT.md):
+
+```
+manifest.json        the index — every file, with the digest it must hash to
+checksums.txt        sha256sum -c input, so it can be verified without Recueil
+database/            the database, taken with SQLite's online backup API
+config/recueil.json  the RECUEIL_* environment, credentials redacted
+storage/<aa>/<bb>/…  the content-addressed store, in its own layout
+```
+
+The database is copied page by page through SQLite itself, so a running server does not have to be
+stopped and what lands is the database as of one instant; it is then opened and integrity-checked
+before the snapshot is completed. Writing over yesterday's snapshot with `--force` verifies and
+reuses the blobs that have not changed and prunes the ones the library no longer holds — that, and
+the content-addressed layout, are what make it restic-friendly (CONCEPT.md §5.15).
+
+A restore refuses a target that is not empty unless `--force` is given, hashes every file as it
+copies it and checks it against the manifest, and removes what it had written if one file does not
+match. It then integrity-checks the restored database and compares its table counts with the
+manifest's. `--verify-only` does the checking half and writes nothing, which is the thing to put in
+a monthly cron job.
 
 ## `recueil serve`
 
@@ -129,10 +224,15 @@ the reason rather than reporting green for something it never ran.
 
 ### Where the phase table lives
 
-[`src/catalogue.ts`](src/catalogue.ts) holds every command, its summary and its phase. Help output,
-the placeholder messages and the tests all render from it, so they cannot disagree. A command whose
-phase has arrived but that has no implementation registered makes `buildProgram` throw at start-up:
-the table cannot claim something ships while the placeholder silently answers for it.
+[`src/catalogue.ts`](src/catalogue.ts) holds every command, its summary, its phase and whether this
+build implements it. Help output, the placeholder messages and the tests all render from it, so they
+cannot disagree. The phase and the implementation flag are separate facts on purpose — Phase 1
+delivers `token` and `job` too, and until those exist a table that inferred one from the other would
+have to claim either that the phase had not started or that the commands worked.
+
+`buildProgram` checks the table against the registered implementations in both directions and throws
+at start-up on either mismatch: a command marked as shipping with nothing behind it, and an
+implementation the help text still calls unimplemented, are both a CLI that lies about itself.
 
 ## Licence
 

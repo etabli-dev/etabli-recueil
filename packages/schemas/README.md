@@ -19,7 +19,7 @@ are the same source, so they cannot drift.
 | `src/entities/` | Document, Item and its two facets, Attachment, Collection, Tag, CustomField/FieldValue, Note, Annotation, Creator |
 | `src/envelopes/` | Cursor pagination, RFC 9457 problem documents, bulk operations with idempotency keys, the health response |
 | `src/openapi/` | The component registry, the path items and the document builder |
-| `src/bin/write-openapi.ts` | Writes `spec/openapi.yaml` |
+| `src/bin/write-openapi.ts` | Writes this package's document to a named file (not the committed contract — see below) |
 
 ## Scripts
 
@@ -27,12 +27,19 @@ are the same source, so they cannot drift.
 pnpm --filter @recueil/schemas run build      # tsc → dist/, with declarations
 pnpm --filter @recueil/schemas run typecheck  # tsc --noEmit, sources and tests
 pnpm --filter @recueil/schemas run test       # vitest
-pnpm --filter @recueil/schemas run openapi    # regenerate spec/openapi.yaml
+pnpm --filter @recueil/schemas run openapi -- /tmp/schemas.yaml   # this package's document alone
 ```
 
-`spec/openapi.yaml` is a generated file and must never be hand-edited. A test asserts that the
-committed copy matches what the generator produces, so an edit fails the build rather than quietly
-surviving.
+**The committed contract is written elsewhere.** `spec/openapi.yaml` is produced by
+`pnpm --filter @recueil/server run openapi`, because only the server knows which operations it
+answers: that writer builds the document below and merges the path items declared beside the
+handlers in `apps/server/src/routes` over it. This package's writer therefore takes a mandatory
+destination, so that running it cannot quietly replace the contract with one that has no routes.
+
+`spec/openapi.yaml` is a generated file and must never be hand-edited. `apps/server` asserts that
+the committed copy is byte-for-byte what the server renders, and a test here asserts that every
+component in it is the component these schemas generate, so an edit fails the build rather than
+quietly surviving.
 
 ## Conventions
 

@@ -1,0 +1,6 @@
+# Playwright's own output. Traces, screenshots and the HTML report are artefacts of a run, not of
+# the source tree; the root .gitignore covers `dist/` and `node_modules/` but knows nothing of these.
+test-results/
+playwright-report/
+blob-report/
+.playwright/

@@ -22,12 +22,14 @@ import {
 } from '@recueil/schemas';
 import type { OpenApiDocument } from '@recueil/schemas';
 import type { ZodOpenApiPathsObject } from 'zod-openapi';
+import { stringify } from 'yaml';
 
 import { ServerHealthResponseSchema } from './health.js';
+import { apiPaths } from './routes/index.js';
 import { OPENAPI_PATH, SystemInfoSchema } from './system.js';
 
-/** The path items this server adds to, or widens in, the package's document. */
-export const serverPaths: ZodOpenApiPathsObject = {
+/** The unversioned operations this server answers: health, identity, the contract itself. */
+const systemPaths: ZodOpenApiPathsObject = {
   '/health': {
     get: {
       operationId: 'getHealth',
@@ -97,6 +99,22 @@ export const serverPaths: ZodOpenApiPathsObject = {
   },
 };
 
+/**
+ * Every path item this server adds to the package's document.
+ *
+ * The system operations plus the whole `/api/v1` surface and the connector endpoints, collected
+ * from the route modules that serve them (`routes/index.ts`). `@recueil/schemas` declares the
+ * shared contract's `/health`; this widens it and adds everything Phase 1 implements, so the served
+ * document is exactly what the server answers (P6).
+ */
+export const serverPaths: ZodOpenApiPathsObject = Object.entries(apiPaths).reduce<ZodOpenApiPathsObject>(
+  (merged, [path, item]) => {
+    merged[path] = { ...(merged[path] ?? {}), ...item };
+    return merged;
+  },
+  { ...systemPaths },
+);
+
 export interface BuildOpenApiDocumentOptions {
   /** The release this document describes. */
   readonly version?: string;
@@ -113,3 +131,31 @@ export const buildOpenApiDocument = (options: BuildOpenApiDocumentOptions = {}):
       : { servers: [{ url: options.baseUrl, description: 'This deployment' }] }),
     paths: serverPaths,
   });
+
+/** The header of the committed `spec/openapi.yaml`, so nobody edits the file by hand. */
+const YAML_HEADER = [
+  '# Recueil — OpenAPI 3.1 contract.',
+  '#',
+  '# GENERATED FILE. Do not edit by hand.',
+  '# Regenerate with: pnpm --filter @recueil/server run openapi',
+  '#',
+  '# The source of truth is the Zod schemas in packages/schemas/src — the same schemas the server',
+  '# validates with — plus the path items declared beside the handlers in apps/server/src/routes',
+  '# (P6, docs/api.qmd).',
+  '',
+].join('\n');
+
+/**
+ * The served document as YAML, in the form `spec/openapi.yaml` is committed in.
+ *
+ * Exported rather than left inside the writer so that a test can assert the committed file is the
+ * one this code produces, without the writer's side effect of overwriting it.
+ */
+export const renderSpecYaml = (options: BuildOpenApiDocumentOptions = {}): string => {
+  const body = stringify(buildOpenApiDocument(options), {
+    lineWidth: 100,
+    singleQuote: true,
+    aliasDuplicateObjects: false,
+  });
+  return `${YAML_HEADER}${body}`;
+};

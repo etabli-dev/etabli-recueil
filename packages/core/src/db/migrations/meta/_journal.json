@@ -8,6 +8,27 @@
       "when": 1787391907991,
       "tag": "0000_core",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1787395469765,
+      "tag": "0001_provenance",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1787395470765,
+      "tag": "0002_search",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1787397028723,
+      "tag": "0003_trash_merge_scope",
+      "breakpoints": true
     }
   ]
 }

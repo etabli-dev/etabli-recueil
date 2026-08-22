@@ -1,0 +1,24 @@
+{
+  "//": [
+    "The web client is bundled, not emitted by tsc, so it departs from tsconfig.base.json in the",
+    "three places a browser bundle has to: module resolution is the bundler's, the library is the",
+    "DOM rather than Node's, and JSX is compiled. Everything else — and in particular the",
+    "strictness — is inherited unchanged (ADR-0002)."
+  ],
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "types": ["vite/client"],
+    "jsx": "react-jsx",
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts", "test/**/*.tsx", "vite.config.ts", "vitest.config.ts"]
+}

@@ -15,6 +15,9 @@
   "exclude": ["test/**/*.ts", "vitest.config.ts", "**/*.test.ts"],
   "references": [
     { "path": "../../packages/core/tsconfig.build.json" },
+    { "path": "../../packages/formats/tsconfig.build.json" },
+    { "path": "../../packages/import-zotero/tsconfig.build.json" },
+    { "path": "../../packages/schemas/tsconfig.build.json" },
     { "path": "../server/tsconfig.build.json" }
   ]
 }

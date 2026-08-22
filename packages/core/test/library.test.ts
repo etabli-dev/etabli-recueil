@@ -328,3 +328,99 @@ describe('LibraryService — audit trail (P5)', () => {
     expect(rows[0]?.actorType).toBe('system');
   });
 });
+
+describe('LibraryService — filtering (Phase 1)', () => {
+  const seed = () => {
+    const sepsis = library.library.createItem(
+      { itemType: 'article', bibliographic: { title: 'Early antibiotics in sepsis' } },
+      library.actor,
+    ).item;
+    const fluids = library.library.createItem(
+      { itemType: 'article', bibliographic: { title: 'Fluid resuscitation revisited' } },
+      library.actor,
+    ).item;
+    const invoice = library.library.createItem(
+      { itemType: 'invoice', office: { correspondent: 'Stadtwerke Ulm' } },
+      library.actor,
+    ).item;
+
+    const reading = library.collections.create({ name: 'To read' }, library.actor);
+    library.collections.addItems(reading.id, [sepsis.id, invoice.id], library.actor);
+    const tag = library.tags.assignByName(sepsis.id, 'critical care', library.actor);
+
+    return { sepsis, fluids, invoice, reading, tag };
+  };
+
+  it('filters by collection, by tag and by item type', () => {
+    const { sepsis, invoice, reading, tag } = seed();
+
+    expect(
+      library.library.listItems({ collectionId: reading.id }).data.map((row) => row.id).sort(),
+    ).toEqual([sepsis.id, invoice.id].sort());
+    expect(library.library.listItems({ tagId: tag.id }).data.map((row) => row.id)).toEqual([
+      sepsis.id,
+    ]);
+    expect(library.library.listItems({ itemType: 'invoice' }).data.map((row) => row.id)).toEqual([
+      invoice.id,
+    ]);
+  });
+
+  it('composes filters, and counts what it lists', () => {
+    const { sepsis, reading, tag } = seed();
+
+    const options = { collectionId: reading.id, tagId: tag.id, itemType: 'article' };
+    expect(library.library.listItems(options).data.map((row) => row.id)).toEqual([sepsis.id]);
+    expect(library.library.countItems(options)).toBe(1);
+
+    // A combination nothing satisfies returns an empty page rather than a broken query.
+    const empty = { collectionId: reading.id, tagId: tag.id, itemType: 'invoice' };
+    expect(library.library.listItems(empty).data).toEqual([]);
+    expect(library.library.countItems(empty)).toBe(0);
+  });
+
+  it('filters by text through the full-text index, and pages the result', () => {
+    const { sepsis } = seed();
+
+    expect(library.library.listItems({ text: 'sepsis' }).data.map((row) => row.id)).toEqual([
+      sepsis.id,
+    ]);
+    expect(library.library.countItems({ text: 'sepsis' })).toBe(1);
+    // A query matching nothing short-circuits to an empty page.
+    expect(library.library.listItems({ text: 'zzzznothing' }).data).toEqual([]);
+    expect(library.library.countItems({ text: 'zzzznothing' })).toBe(0);
+
+    // A text filter composes with the others, and the order stays (date_modified, id) so the
+    // cursor keeps working.
+    const paged = library.library.listItems({ text: 'resuscitation OR sepsis', limit: 1 });
+    expect(paged.data).toHaveLength(1);
+    expect(paged.page.hasMore).toBe(true);
+    const next = library.library.listItems({
+      text: 'resuscitation OR sepsis',
+      limit: 1,
+      cursor: paged.page.nextCursor as string,
+    });
+    expect(next.data).toHaveLength(1);
+    expect(next.data[0]?.id).not.toBe(paged.data[0]?.id);
+  });
+
+  it('falls back to a title LIKE when the library has no index', () => {
+    const withoutIndex = makeLibrary({ indexOnWrite: false });
+    try {
+      withoutIndex.library.createItem(
+        { itemType: 'article', bibliographic: { title: 'Early antibiotics in sepsis' } },
+        withoutIndex.actor,
+      );
+      withoutIndex.library.createItem(
+        { itemType: 'article', bibliographic: { title: 'Fluid resuscitation' } },
+        withoutIndex.actor,
+      );
+
+      // The fallback is a substring match over the title only, and is deliberately narrower.
+      expect(withoutIndex.library.listItems({ text: 'SEPSIS' }).data).toHaveLength(1);
+      expect(withoutIndex.library.listItems({ text: 'antibiotics in' }).data).toHaveLength(1);
+      expect(withoutIndex.library.listItems({ text: 'nothing here' }).data).toHaveLength(0);
+    } finally {
+      withoutIndex.dispose();
+    }
+  });
+});

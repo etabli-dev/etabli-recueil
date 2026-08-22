@@ -1,0 +1,8 @@
+# The repository root ignores `*.sqlite`, which is right for a working data directory and wrong
+# here: the whole point of `fixtures/zotero/` is that the SQLite files are committed artefacts.
+# A .gitignore deeper in the tree overrides a shallower one, so these two lines re-include them.
+#
+# The root pattern should probably be narrowed to `/data/*.sqlite` instead; that file is not ours
+# to edit, so this negation stands in for it.
+!*.sqlite
+!*.sqlite-journal

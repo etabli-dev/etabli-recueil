@@ -20,6 +20,7 @@ const PHASE_ONE_TABLES = [
   'document_provenance',
   'items',
   'item_bibliographic',
+  'field_provenance',
   'item_office',
   'attachments',
   'collections',
@@ -37,6 +38,9 @@ const PHASE_ONE_TABLES = [
   'job_logs',
   'audit_log',
   'trash',
+  // The dialect-specific search index (§9, ADR-0011), added by `0002_search`.
+  'search_entries',
+  'search_index',
 ];
 
 const temporaryRoots: string[] = [];
@@ -64,6 +68,76 @@ describe('migrate', () => {
       .map((row) => (row as { name: string }).name);
 
     for (const table of PHASE_ONE_TABLES) expect(tables).toContain(table);
+    connection.close();
+  });
+
+  it('gives the search index a working FTS5 table, not just a name in sqlite_master', () => {
+    const { db, connection } = openDatabase({ databaseUrl: temporaryDatabase() });
+    migrate(db);
+
+    connection
+      .prepare(
+        `insert into search_entries (entity_type, entity_id, item_id, indexed_at)
+         values ('item', '01J8F3Z9K4ABCDEFGHJKMNPQR1', null, '2026-08-22T09:00:00.000Z')`,
+      )
+      .run();
+    const rowid = (
+      connection.prepare('select id from search_entries').get() as { id: number }
+    ).id;
+    connection
+      .prepare(
+        `insert into search_index (rowid, title, creators, container, identifiers, tags, body, text)
+         values (?, 'Sepsis in the ICU', '', '', '', '', '', '')`,
+      )
+      .run(rowid);
+
+    const hit = connection
+      .prepare('select rowid from search_index where search_index match ?')
+      .get('sepsis') as { rowid: number } | undefined;
+    expect(hit?.rowid).toBe(rowid);
+
+    // `remove_diacritics 2` is the tokenizer setting the migration asks for, and it is the reason
+    // a German or Scandinavian author name is findable as typed on a British keyboard.
+    connection
+      .prepare(
+        `insert into search_entries (entity_type, entity_id, item_id, indexed_at)
+         values ('item', '01J8F3Z9K4ABCDEFGHJKMNPQR2', null, '2026-08-22T09:00:00.000Z')`,
+      )
+      .run();
+    const second = (
+      connection
+        .prepare("select id from search_entries where entity_id = '01J8F3Z9K4ABCDEFGHJKMNPQR2'")
+        .get() as { id: number }
+    ).id;
+    connection
+      .prepare(
+        `insert into search_index (rowid, title, creators, container, identifiers, tags, body, text)
+         values (?, '', 'Müller', '', '', '', '', '')`,
+      )
+      .run(second);
+    const folded = connection
+      .prepare('select rowid from search_index where search_index match ?')
+      .get('muller') as { rowid: number } | undefined;
+    expect(folded?.rowid).toBe(second);
+
+    connection.close();
+  });
+
+  it('scopes ck_trash_merge to item merges, so a tag merge may be recorded as one', () => {
+    const { db, connection } = openDatabase({ databaseUrl: temporaryDatabase() });
+    migrate(db);
+
+    const insert = connection.prepare(
+      `insert into trash (id, entity_type, entity_id, trashed_at, reason, restore_payload)
+       values (?, ?, ?, '2026-08-22T09:00:00.000Z', 'merge', '{}')`,
+    );
+
+    // A tag merge has no winning *item*, and is allowed.
+    expect(() => insert.run('01J8F3Z9K4ABCDEFGHJKMNPQR1', 'tag', 'x')).not.toThrow();
+    expect(() => insert.run('01J8F3Z9K4ABCDEFGHJKMNPQR2', 'creator', 'y')).not.toThrow();
+    // An item merge must still name its winner, exactly as §6.6 requires.
+    expect(() => insert.run('01J8F3Z9K4ABCDEFGHJKMNPQR3', 'item', 'z')).toThrow(/ck_trash_merge/u);
+
     connection.close();
   });
 

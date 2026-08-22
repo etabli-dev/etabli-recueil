@@ -79,8 +79,10 @@ describe('GET /health on a fresh library', () => {
       const health = ServerHealthResponseSchema.parse(body);
 
       const names = health.components.map((component) => component.name).sort();
-      expect(names).toEqual(['database', 'storage']);
-      expect(health.components.every((component) => component.required)).toBe(true);
+      expect(names).toEqual(['database', 'search', 'storage']);
+      // The two the library cannot serve without are required; the index is not (ADR-0011).
+      const required = health.components.filter((component) => component.required).map((c) => c.name);
+      expect(required.sort()).toEqual(['database', 'storage']);
       expect(health.components.every((component) => component.status === 'ok')).toBe(true);
     } finally {
       await h.close();
@@ -156,6 +158,43 @@ describe('GET /health when a required component is down', () => {
       expect(health.components.find((component) => component.name === 'database')?.status).toBe('error');
     } finally {
       await h.app.close();
+    }
+  });
+});
+
+describe('GET /health — the Phase 1 additions', () => {
+  it('reports the full-text index as an optional component', async () => {
+    const h = await harness();
+    try {
+      const response = await h.app.inject({ method: 'GET', url: '/health' });
+      const health = response.json() as Record<string, any>;
+
+      expect(health.search).toEqual({ available: true, backend: 'fts5' });
+      const search = (health.components as { name: string; required: boolean; status: string }[]).find(
+        (component) => component.name === 'search',
+      );
+      expect(search).toBeDefined();
+      // Optional: no index would be `degraded`, never `error`.
+      expect(search?.required).toBe(false);
+      expect(search?.status).toBe('ok');
+      // And an optional component being up leaves the whole response `ok`.
+      expect(health.status).toBe('ok');
+    } finally {
+      await h.close();
+    }
+  });
+
+  it('reports what the API surface is doing', async () => {
+    const h = await harness({ env: { RECUEIL_REQUIRE_AUTH: 'true' } });
+    try {
+      const health = (await h.app.inject({ method: 'GET', url: '/health' })).json() as Record<string, any>;
+      expect(health.api).toEqual({
+        basePath: '/api/v1',
+        eventSubscribers: 0,
+        authRequired: true,
+      });
+    } finally {
+      await h.close();
     }
   });
 });

@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { createRecueil } from '../src/index.js';
-import type { Recueil } from '../src/index.js';
+import type { CreateRecueilOptions, Recueil } from '../src/index.js';
 
 export interface TestLibrary extends Recueil {
   root: string;
@@ -20,12 +20,14 @@ export interface TestLibrary extends Recueil {
 }
 
 /** A library on disk, in a directory that cleans itself up. */
-export const makeLibrary = (): TestLibrary => {
+export const makeLibrary = (
+  options: Partial<Omit<CreateRecueilOptions, 'databaseUrl' | 'storagePath'>> = {},
+): TestLibrary => {
   const root = mkdtempSync(join(tmpdir(), 'recueil-core-'));
   const databaseFile = join(root, 'library.sqlite');
   const storageRoot = join(root, 'store');
 
-  const recueil = createRecueil({ databaseUrl: databaseFile, storagePath: storageRoot });
+  const recueil = createRecueil({ ...options, databaseUrl: databaseFile, storagePath: storageRoot });
 
   return {
     ...recueil,

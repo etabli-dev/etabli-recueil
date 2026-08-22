@@ -1,0 +1,54 @@
+% Recueil fixture — deliberately broken BibTeX.
+%
+% This file does not parse cleanly and is not supposed to. It exists so that the importer's error
+% path has something real to run against: the question a test asks of it is not "does it parse"
+% but "does it recover, and does it say precisely what it could not read".
+%
+% There are 5 `@` blocks. On a lenient parser 3 are recoverable — the first `ok-first`, the second
+% (duplicate) `ok-first`, and `ok-last` — and 2 are not. The faults, in the order they appear:
+%
+%   1. `unclosed-brace` — the title's brace is never closed, so the entry swallows the rest of the
+%                         file unless the parser balances braces field by field.
+%   2. `missing-comma`  — no comma after `author`, and none after `title`.
+%   3. `ok-first` again — a second block reusing a key the first block already took.
+%   4. `ok-last`        — an unbraced value containing `@`, which a naive block splitter reads as
+%                         the start of a new entry.
+%   5. trailing text    — prose after the last block that belongs to no entry.
+
+@article{ok-first,
+  author  = {M{\"u}ller, Anna-Lena},
+  title   = {A perfectly ordinary entry},
+  journal = {Hydrologie und Wasserbewirtschaftung},
+  year    = {2019}
+}
+
+@article{unclosed-brace,
+  author  = {Wei{\ss}, J{\"u}rgen},
+  title   = {A title whose brace never closes,
+  journal = {Wasser und Abfall},
+  year    = {2015}
+}
+
+@article{missing-comma,
+  author  = {Okonkwo, Chidinma}
+  title   = {No comma before this field}
+  journal = {Journal of Information Science},
+  year    = {2021}
+}
+
+@article{ok-first,
+  author  = {Bianchi, Lorenzo},
+  title   = {The same key as the first entry},
+  journal = {Journal of Data and Information Science},
+  year    = {2023}
+}
+
+@article{ok-last,
+  author  = {Iversen, Tone},
+  title   = {Preregistration in hydrological modelling},
+  journal = {Hydrology and Earth System Sciences},
+  year    = {2022},
+  note    = an@unbraced@value
+}
+
+This trailing text belongs to no entry and must not become one.

@@ -3,7 +3,7 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { COMMANDS, CURRENT_PHASE } from '../src/catalogue.js';
+import { COMMANDS, isImplemented } from '../src/catalogue.js';
 import { commandEntry, PACKAGE_ROOT, runCli } from './support.js';
 
 const manifest = JSON.parse(readFileSync(join(PACKAGE_ROOT, 'package.json'), 'utf8')) as {
@@ -32,15 +32,19 @@ describe('recueil --help', () => {
 
   it('marks the unimplemented commands as such', async () => {
     const { stdout } = await runCli(['--help']);
-    for (const spec of COMMANDS.filter((candidate) => candidate.phase > CURRENT_PHASE)) {
+    for (const spec of COMMANDS.filter((candidate) => !isImplemented(candidate))) {
       const entry = commandEntry(stdout, spec.name);
       expect(entry, `\`${spec.name}\` should be flagged as unimplemented`).toContain('not implemented');
     }
   });
 
-  it('does not mark `serve` as unimplemented, because it is not', async () => {
+  it('does not mark the commands it ships as unimplemented, because they are not', async () => {
     const { stdout } = await runCli(['--help']);
-    expect(commandEntry(stdout, 'serve')).not.toContain('not implemented');
+    const shipped = COMMANDS.filter(isImplemented);
+    expect(shipped.map((spec) => spec.name)).toEqual(['serve', 'import', 'export', 'backup', 'restore']);
+    for (const spec of shipped) {
+      expect(commandEntry(stdout, spec.name), `\`${spec.name}\` works`).not.toContain('not implemented');
+    }
   });
 
   it('documents the global flags and the exit codes', async () => {

@@ -22,7 +22,7 @@ export const openApiRoutes: FastifyPluginAsync = async (app) => {
     ...(config.baseUrl === undefined ? {} : { baseUrl: config.baseUrl }),
   });
 
-  app.get(OPENAPI_PATH, async (_request, reply) =>
+  app.get(OPENAPI_PATH, { config: { public: true } }, async (_request, reply) =>
     reply.type('application/json; charset=utf-8').send(document),
   );
 };

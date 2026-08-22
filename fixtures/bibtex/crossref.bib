@@ -1,0 +1,61 @@
+% Recueil fixture — cross-references.
+% 6 `@` blocks: two containers, one `@xdata` block and three children. Two children inherit
+% through `crossref` (BibTeX's mechanism, field by field) and one through `xdata` (biblatex's,
+% whose block is not an entry a bibliography may cite). The forward reference is deliberate:
+% `bs-alpine` names its parent before the parent appears, which a single-pass resolver gets wrong.
+
+@incollection{bs-alpine,
+  crossref     = {bk-hydrologie-3},
+  author       = {M{\"u}ller, Anna-Lena},
+  title        = {Wasserhaushaltsmodellierung im alpinen Raum},
+  pages        = {412--458}
+}
+
+@book{bk-hydrologie-3,
+  author       = {Baumgartner, Albrecht and Liebscher, Hans-J{\"u}rgen},
+  title        = {Lehrbuch der Hydrologie},
+  booktitle    = {Lehrbuch der Hydrologie},
+  edition      = {3},
+  publisher    = {Gebr{\"u}der Borntraeger},
+  address      = {Stuttgart},
+  year         = {2019},
+  isbn         = {978-3-443-01067-6},
+  langid       = {german}
+}
+
+@inproceedings{cp-jcdl,
+  crossref     = {proc-jcdl-2022},
+  author       = {Bianchi, Lorenzo and Dlamini, Nomsa},
+  title        = {Reference extraction from born-digital theses: a shared task report},
+  pages        = {1--10},
+  doi          = {10.1145/3529372.3530933}
+}
+
+@proceedings{proc-jcdl-2022,
+  editor       = {van der Berg, Willem J.},
+  title        = {Proceedings of the 22nd {ACM/IEEE} Joint Conference on Digital Libraries},
+  booktitle    = {Proceedings of the 22nd {ACM/IEEE} Joint Conference on Digital Libraries},
+  eventtitle   = {JCDL 2022},
+  venue        = {Cologne, Germany},
+  publisher    = {ACM},
+  address      = {New York, NY},
+  year         = {2022},
+  isbn         = {978-1-4503-9345-4}
+}
+
+@xdata{shared-funding,
+  note         = {Funded by the Deutsche Forschungsgemeinschaft, project 4711},
+  langid       = {english}
+}
+
+@article{ja-inherits-xdata,
+  xdata        = {shared-funding},
+  author       = {Bianchi, Lorenzo},
+  title        = {Citation networks as evidence: a critical appraisal},
+  journal      = {Quantitative Science Studies},
+  volume       = {5},
+  number       = {1},
+  pages        = {112--140},
+  year         = {2024},
+  doi          = {10.1162/qss_a_00281}
+}

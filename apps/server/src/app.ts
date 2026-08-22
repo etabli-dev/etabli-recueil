@@ -26,16 +26,21 @@
 import { newId } from '@recueil/core';
 import type { Recueil } from '@recueil/core';
 import cors from '@fastify/cors';
+import multipart from '@fastify/multipart';
 import sensible from '@fastify/sensible';
 import Fastify from 'fastify';
 import type { FastifyError, FastifyInstance, FastifyServerOptions } from 'fastify';
 
+import { authPlugin } from './auth.js';
 import type { ServerConfig } from './config.js';
+import { EventBus } from './events.js';
 import { ensureStoragePath } from './health.js';
-import { sendProblem, toProblem } from './problem.js';
+import { ApiError, sendProblem, toProblem } from './problem.js';
+import { apiRoutes } from './routes/index.js';
 import { healthRoutes } from './routes/health.js';
 import { openApiRoutes } from './routes/openapi.js';
 import { systemRoutes } from './routes/system.js';
+import { TokenService } from './tokens.js';
 import { resolveVersion } from './version.js';
 
 /**
@@ -54,6 +59,10 @@ export interface RecueilContext {
   readonly version: string;
   /** When this instance was built, which is what `uptimeSeconds` counts from. */
   readonly startedAt: Date;
+  /** Scoped API tokens: minting, hashing at rest, verification (`spec/data-model.md` §3.2). */
+  readonly tokens: TokenService;
+  /** The lifecycle event bus behind `GET /api/v1/events` (`spec/hooks.md` §7). */
+  readonly events: EventBus;
 }
 
 declare module 'fastify' {
@@ -62,8 +71,15 @@ declare module 'fastify' {
   }
 }
 
-/** The maximum JSON body Phase 0 accepts. Uploads are multipart and arrive with Phase 1. */
-const DEFAULT_BODY_LIMIT = 1_048_576;
+/**
+ * The maximum JSON body.
+ *
+ * Sixteen megabytes rather than Fastify's one, because a bulk create of a thousand items with
+ * abstracts is a legitimate request on this API (`BULK_MAX_OPERATIONS` is 1000) and a Zotero
+ * import posts exactly that. File bytes never travel as JSON — they are multipart, and bounded
+ * separately by `RECUEIL_MAX_UPLOAD_BYTES`.
+ */
+const DEFAULT_BODY_LIMIT = 16 * 1_048_576;
 
 export interface BuildAppDeps {
   readonly config: ServerConfig;
@@ -126,9 +142,27 @@ export const buildApp = (deps: BuildAppDeps): FastifyInstance => {
     ...deps.fastify,
   });
 
-  app.decorate('recueil', { config, library: recueil, version, startedAt } satisfies RecueilContext);
+  const events = new EventBus((error, envelope) => {
+    app.log.error({ err: error, event: envelope.type }, 'an event subscriber threw');
+  });
+  const tokens = new TokenService(recueil.db, recueil.audit, recueil.user.id);
+
+  app.decorate('recueil', {
+    config,
+    library: recueil,
+    version,
+    startedAt,
+    tokens,
+    events,
+  } satisfies RecueilContext);
 
   app.register(sensible);
+  // Uploads are streamed and hashed on the way past (`routes/documents.ts`), so the only limit
+  // that matters here is the ceiling on a single file. `files: 1` is deliberate: one upload is one
+  // document, and a request carrying five files would have five hashes and one response.
+  app.register(multipart, {
+    limits: { fileSize: config.maxUploadBytes, files: 1, fields: 32, fieldSize: 1_048_576 },
+  });
   app.register(cors, {
     origin: config.corsOrigin,
     credentials: config.corsOrigin !== true && config.corsOrigin !== false,
@@ -167,6 +201,12 @@ export const buildApp = (deps: BuildAppDeps): FastifyInstance => {
       request.log.warn({ err: error, statusCode: status }, 'request refused');
     }
 
+    // An `ApiError` may carry headers the status is meaningless without — `WWW-Authenticate` on a
+    // 401 is the whole difference between "denied" and "denied, and here is how to authenticate".
+    if (error instanceof ApiError && error.headers !== undefined) {
+      for (const [name, value] of Object.entries(error.headers)) reply.header(name, value);
+    }
+
     return sendProblem(
       request,
       reply,
@@ -178,9 +218,16 @@ export const buildApp = (deps: BuildAppDeps): FastifyInstance => {
     );
   });
 
+  app.register(authPlugin, {
+    tokens,
+    localUserId: recueil.user.id,
+    requireAuth: config.requireAuth,
+  });
+
   app.register(healthRoutes);
   app.register(systemRoutes);
   app.register(openApiRoutes);
+  app.register(apiRoutes);
 
   // The store root is created when the application becomes ready rather than in a probe: a health
   // check should observe, not repair, and a first run should not report `degraded` until somebody

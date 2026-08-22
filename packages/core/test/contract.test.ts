@@ -40,6 +40,7 @@ describe('closed vocabularies', () => {
     ['OA_STATUSES', schema.OA_STATUSES, contract.OA_STATUSES],
     ['RETRACTION_STATUSES', schema.RETRACTION_STATUSES, contract.RETRACTION_STATUSES],
     ['VERIFICATION_STATUSES', schema.VERIFICATION_STATUSES, contract.VERIFICATION_STATUSES],
+    ['PROVENANCE_ENTITY_TYPES', schema.PROVENANCE_ENTITY_TYPES, contract.PROVENANCE_ENTITY_TYPES],
   ];
 
   it.each(pairs)('%s matches @recueil/schemas', (_name, storage, wire) => {

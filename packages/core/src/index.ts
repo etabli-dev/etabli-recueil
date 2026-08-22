@@ -8,6 +8,7 @@
  */
 export * from './errors.js';
 export * from './ids.js';
+export * from './markdown.js';
 export * from './mime.js';
 export * from './normalise.js';
 export * from './time.js';
@@ -25,6 +26,7 @@ export type { MigrateOptions } from './db/migrate.js';
 
 export * from './storage/index.js';
 export * from './services/index.js';
+export * from './backup/index.js';
 
 import { openDatabase } from './db/client.js';
 import type { RecueilDatabase, SqliteConnection } from './db/client.js';
@@ -32,8 +34,16 @@ import { migrate } from './db/migrate.js';
 import { LocalFsBackend } from './storage/local-fs.js';
 import type { StorageBackend } from './storage/backend.js';
 import { AuditService } from './services/audit.js';
+import { CollectionService } from './services/collections.js';
+import { CreatorService } from './services/creators.js';
+import { CustomFieldService } from './services/custom-fields.js';
 import { DocumentService } from './services/documents.js';
 import { LibraryService } from './services/library.js';
+import { NoteService } from './services/notes.js';
+import { ProvenanceService } from './services/provenance.js';
+import { SearchService } from './services/search.js';
+import { TagService } from './services/tags.js';
+import { TrashService } from './services/trash.js';
 import { ensureLocalUser } from './services/users.js';
 import type { UserRow } from './db/schema.js';
 import { userActor } from './services/actor.js';
@@ -50,6 +60,13 @@ export interface CreateRecueilOptions {
   storage?: StorageBackend;
   /** The username of the single local account (§1.4). */
   username?: string;
+  /**
+   * Keep the full-text index in step with every write. Default true.
+   *
+   * Off is for a bulk importer that will call `search.rebuild()` once at the end, which is far
+   * cheaper than re-aggregating an item's indexed document on each of fifty thousand writes.
+   */
+  indexOnWrite?: boolean;
 }
 
 /** Everything a server, a CLI or a test needs, wired together and ready to use. */
@@ -60,6 +77,17 @@ export interface Recueil {
   audit: AuditService;
   library: LibraryService;
   documents: DocumentService;
+  collections: CollectionService;
+  tags: TagService;
+  notes: NoteService;
+  customFields: CustomFieldService;
+  creators: CreatorService;
+  /** Per-field provenance and the manual locks (P4, §3.6). */
+  provenance: ProvenanceService;
+  /** The FTS5 index (ADR-0011). `search.available` is false where there is none. */
+  search: SearchService;
+  /** The bin, across every entity (P5, §6.6). */
+  trash: TrashService;
   /** The single local account every owned record belongs to in v1. */
   user: UserRow;
   /** An actor for that account, for callers that have no request context of their own. */
@@ -85,8 +113,29 @@ export const createRecueil = (options: CreateRecueilOptions): Recueil => {
   const storage = options.storage ?? new LocalFsBackend({ root: options.storagePath });
   const audit = new AuditService(db);
   const user = ensureLocalUser(db, audit, { username: options.username });
-  const library = new LibraryService(db, audit, user.id);
+
+  // The index is constructed first because every writing service holds it; it takes only the
+  // database, so there is no cycle to break. `indexOnWrite: false` hands the services nothing,
+  // which turns each sync call into a no-op rather than into a conditional at each call site.
+  const search = new SearchService(db);
+  const indexer = options.indexOnWrite === false ? undefined : search;
+
+  const provenance = new ProvenanceService(db, audit);
+  const library = new LibraryService(db, audit, user.id, { provenance, search: indexer });
   const documents = new DocumentService(db, storage, audit);
+  const collections = new CollectionService(db, audit, user.id, indexer);
+  const tags = new TagService(db, audit, user.id, indexer);
+  const notes = new NoteService(db, audit, user.id, indexer);
+  const customFields = new CustomFieldService(db, audit);
+  const creators = new CreatorService(db, audit, indexer);
+  const trash = new TrashService(db, audit, {
+    library,
+    collections,
+    tags,
+    notes,
+    creators,
+    documents,
+  });
 
   let closed = false;
   return {
@@ -96,6 +145,14 @@ export const createRecueil = (options: CreateRecueilOptions): Recueil => {
     audit,
     library,
     documents,
+    collections,
+    tags,
+    notes,
+    customFields,
+    creators,
+    provenance,
+    search,
+    trash,
     user,
     actor: userActor(user.id),
     close: () => {

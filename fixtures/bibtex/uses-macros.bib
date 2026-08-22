@@ -1,0 +1,41 @@
+% Recueil fixture — 4 entries whose journal names are macros defined in `macros.bib`.
+% Parsed alone, every `journal` value is an undefined macro: a parser may keep the macro name, may
+% blank the field, or may fail, but it must not silently invent a journal title. Parsed after
+% `macros.bib` (concatenate the two, in that order) all four resolve.
+
+@article{aqua-entry,
+  author  = {Gon{\c c}alves, Rita},
+  title   = {Headwater microbial turnover},
+  journal = aqua,
+  volume  = {85},
+  pages   = {12},
+  year    = {2023}
+}
+
+@article{hp-entry,
+  author  = {Eriksen, Sindre and Jokinen, Ville},
+  title   = {Tipping-bucket undercatch at low intensities},
+  journal = hp,
+  volume  = {34},
+  number  = {2},
+  pages   = {e14012},
+  year    = {2020}
+}
+
+@article{sotc-entry,
+  author  = {V{\'a}squez, Mar{\'\i}a Fernanda},
+  title   = {Trace elements as conservative tracers in karst aquifers},
+  journal = sotc,
+  volume  = {742},
+  pages   = {140533},
+  year    = {2020}
+}
+
+@article{concat-entry,
+  author  = {Haddad, Layla},
+  title   = {Recharge from gravimetry},
+  journal = jawr # { (Special Issue)},
+  volume  = {57},
+  pages   = {1--18},
+  year    = {2021}
+}

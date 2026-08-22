@@ -6,8 +6,14 @@
  * whose declared operations are the operations this server actually answers — because a contract
  * that describes a route nobody serves, or omits one everybody calls, is worse than no contract.
  */
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { describe, expect, it } from 'vitest';
 
+import { renderSpecYaml } from '../src/openapi.js';
+import { PACKAGE_VERSION } from '../src/version.js';
 import { harness } from './helpers.js';
 
 /** Walk the document and collect every `$ref` string, wherever it is nested. */
@@ -170,5 +176,150 @@ describe('GET /api/v1/system/info', () => {
     } finally {
       await h.close();
     }
+  });
+});
+
+/* ============================================================================================== */
+/* The contract covers what the server serves                                                       */
+/* ============================================================================================== */
+
+/**
+ * Fastify's `:param` becomes OpenAPI's `{param}`.
+ *
+ * The two spellings are the only difference between the route table and the path list, so this is
+ * all it takes to compare them — and comparing them is the whole point of the tests below (P6).
+ */
+const toTemplate = (url: string): string => url.replace(/:([A-Za-z0-9_]+)/gu, '{$1}');
+
+/** The methods a route may declare that the document need not describe. */
+const IMPLICIT_METHODS = new Set(['HEAD', 'OPTIONS']);
+
+describe('the document and the route table', () => {
+  it('declares every route the server registers', async () => {
+    const h = await harness();
+    try {
+      const document = (await h.app.inject({ method: 'GET', url: '/openapi.json' })).json() as Record<
+        string,
+        any
+      >;
+
+      const undeclared: string[] = [];
+      for (const route of h.routes) {
+        if (IMPLICIT_METHODS.has(route.method)) continue;
+        const template = toTemplate(route.url);
+        const item = document.paths[template] as Record<string, unknown> | undefined;
+        if (item === undefined || item[route.method.toLowerCase()] === undefined) {
+          undeclared.push(`${route.method} ${template}`);
+        }
+      }
+
+      expect(undeclared).toEqual([]);
+      // A guard against the check passing because the route table was empty.
+      expect(h.routes.filter((route) => !IMPLICIT_METHODS.has(route.method)).length).toBeGreaterThan(60);
+    } finally {
+      await h.close();
+    }
+  });
+
+  it('serves no operation the router does not answer', async () => {
+    const h = await harness();
+    try {
+      const document = (await h.app.inject({ method: 'GET', url: '/openapi.json' })).json() as Record<
+        string,
+        any
+      >;
+
+      const registered = new Set(
+        h.routes.map((route) => `${route.method} ${toTemplate(route.url)}`),
+      );
+
+      const unserved: string[] = [];
+      for (const [path, item] of Object.entries(document.paths as Record<string, any>)) {
+        for (const method of Object.keys(item)) {
+          if (!HTTP_METHODS.includes(method)) continue;
+          if (!registered.has(`${method.toUpperCase()} ${path}`)) {
+            unserved.push(`${method.toUpperCase()} ${path}`);
+          }
+        }
+      }
+
+      expect(unserved).toEqual([]);
+    } finally {
+      await h.close();
+    }
+  });
+
+  it('gives every operation a unique operationId', async () => {
+    const h = await harness();
+    try {
+      const document = (await h.app.inject({ method: 'GET', url: '/openapi.json' })).json() as Record<
+        string,
+        any
+      >;
+
+      const seen = new Map<string, string>();
+      const duplicates: string[] = [];
+      for (const [path, item] of Object.entries(document.paths as Record<string, any>)) {
+        for (const [method, operation] of Object.entries(item)) {
+          if (!HTTP_METHODS.includes(method)) continue;
+          const id = (operation as { operationId: string }).operationId;
+          const previous = seen.get(id);
+          if (previous !== undefined) duplicates.push(`${id}: ${previous} and ${method} ${path}`);
+          seen.set(id, `${method} ${path}`);
+        }
+      }
+
+      expect(duplicates).toEqual([]);
+      expect(seen.size).toBeGreaterThan(60);
+    } finally {
+      await h.close();
+    }
+  });
+
+  it('describes the Phase 1 resource groups', async () => {
+    const h = await harness();
+    try {
+      const document = (await h.app.inject({ method: 'GET', url: '/openapi.json' })).json() as Record<
+        string,
+        any
+      >;
+
+      for (const path of [
+        '/api/v1/items',
+        '/api/v1/items/{id}',
+        '/api/v1/documents',
+        '/api/v1/documents/{id}/content',
+        '/api/v1/attachments/{id}',
+        '/api/v1/collections/tree',
+        '/api/v1/collections/{id}/bibliography.bib',
+        '/api/v1/saved-searches/{id}/bibliography.bib',
+        '/api/v1/tags',
+        '/api/v1/notes',
+        '/api/v1/fields',
+        '/api/v1/creators',
+        '/api/v1/search',
+        '/api/v1/export/{format}',
+        '/api/v1/trash',
+        '/api/v1/tokens',
+        '/api/v1/events',
+        '/connector/ping',
+        '/connector/saveItems',
+      ]) {
+        expect(document.paths[path], `the document does not declare ${path}`).toBeDefined();
+      }
+    } finally {
+      await h.close();
+    }
+  });
+});
+
+describe('spec/openapi.yaml', () => {
+  it('is the document this server generates', async () => {
+    const committed = readFileSync(
+      join(fileURLToPath(new URL('../../..', import.meta.url)), 'spec', 'openapi.yaml'),
+      'utf8',
+    );
+    // The committed file is rendered at the package version, which is what the writer uses.
+    expect(committed).toBe(renderSpecYaml({ version: PACKAGE_VERSION }));
   });
 });

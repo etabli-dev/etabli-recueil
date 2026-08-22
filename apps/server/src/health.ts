@@ -65,8 +65,39 @@ export const StorageHealthSchema = z
     description: 'The state of the file store (ADR-0004).',
   });
 
+export const SearchHealthSchema = z
+  .strictObject({
+    available: z
+      .boolean()
+      .meta({
+        description:
+          'Whether this database has an FTS5 index. False on a build of SQLite without the module, ' +
+          'which ADR-0011 anticipates: the library serves, `/api/v1/search` answers 503.',
+      }),
+    backend: z.enum(['fts5', 'meilisearch', 'none']),
+  })
+  .meta({
+    id: 'SearchHealth',
+    title: 'SearchHealth',
+    description: 'The state of the full-text index (ADR-0011).',
+  });
+
+export const ApiHealthSchema = z
+  .strictObject({
+    basePath: z.string().max(64),
+    /** Open Server-Sent Event streams. Useful when a UI stops updating and nobody knows why. */
+    eventSubscribers: z.number().int().min(0),
+    /** Whether an unauthenticated call to `/api/v1` is refused (`RECUEIL_REQUIRE_AUTH`). */
+    authRequired: z.boolean(),
+  })
+  .meta({
+    id: 'ApiHealth',
+    title: 'ApiHealth',
+    description: 'What the REST surface is currently doing.',
+  });
+
 /**
- * The contract's health response, widened by the two objects above.
+ * The contract's health response, widened by the objects above.
  *
  * `.extend` keeps the strictness of the base object, so an unknown key is still a failure; the new
  * `id` is what stops it colliding with `HealthResponse` in the components section.
@@ -74,16 +105,20 @@ export const StorageHealthSchema = z
 export const ServerHealthResponseSchema = HealthResponseSchema.extend({
   database: DatabaseHealthSchema,
   storage: StorageHealthSchema,
+  search: SearchHealthSchema,
+  api: ApiHealthSchema,
 }).meta({
   id: 'ServerHealthResponse',
   title: 'ServerHealthResponse',
   description:
     'The response of `GET /health` as this server sends it: every member of `HealthResponse`, ' +
-    'plus `database` and `storage`.',
+    'plus `database`, `storage`, `search` and `api`.',
 });
 
 export type DatabaseHealth = z.infer<typeof DatabaseHealthSchema>;
 export type StorageHealth = z.infer<typeof StorageHealthSchema>;
+export type SearchHealth = z.infer<typeof SearchHealthSchema>;
+export type ApiHealth = z.infer<typeof ApiHealthSchema>;
 export type ServerHealthResponse = z.infer<typeof ServerHealthResponseSchema>;
 
 /**
@@ -96,6 +131,17 @@ export type ServerHealthResponse = z.infer<typeof ServerHealthResponseSchema>;
  */
 export const ensureStoragePath = async (path: string): Promise<void> => {
   await mkdir(path, { recursive: true });
+};
+
+/**
+ * Probe the full-text index.
+ *
+ * Optional, not required: a library with no FTS5 module is degraded rather than down (ADR-0011).
+ * `search.available` probes once and caches, so this is free after the first call.
+ */
+export const checkSearch = (recueil: Recueil): SearchHealth => {
+  const available = recueil.search.available;
+  return { available, backend: available ? 'fts5' : 'none' };
 };
 
 /** Probe the database: one trivial query, then the migration ledger. */
