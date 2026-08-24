@@ -46,7 +46,7 @@
     "@recueil/rules": "workspace:*",
     "@recueil/schemas": "workspace:*",
     "@recueil/storage-backends": "workspace:*",
-    "drizzle-orm": "^0.44.6",
+    "drizzle-orm": "^0.45.2",
     "fastify": "^5.6.1",
     "fastify-plugin": "^5.1.0",
     "pino": "^9.13.1",
