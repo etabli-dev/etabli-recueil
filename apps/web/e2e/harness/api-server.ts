@@ -14,17 +14,31 @@
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import type { Readable } from 'node:stream';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { repositoryRoot } from './paths.js';
+
+export interface ApiServerOptions {
+  /**
+   * Extra environment for the server process.
+   *
+   * The ingestion suite needs `RECUEIL_INGEST_ALLOWED_ROOTS` and a low confidence gate, and both
+   * are deployment configuration rather than something a client can ask for — a folder root arrives
+   * in a request body, and the server checks it against this list precisely because a request body
+   * is hostile until it has been checked against something.
+   */
+  readonly env?: Readonly<Record<string, string>>;
+}
 
 export interface ApiServer {
   /** `http://127.0.0.1:<port>` — the origin the SPA server proxies to. */
   readonly url: string;
   /** The temporary directory holding the database and the blob store. */
   readonly dataDirectory: string;
+  /** A directory inside `dataDirectory` that a watched-folder source may be pointed at. */
+  readonly consumeDirectory: string;
   /** Everything the server wrote to stdout and stderr, for a failure report. */
   readonly log: () => string;
   readonly stop: () => Promise<void>;
@@ -36,8 +50,10 @@ const STARTUP_TIMEOUT_MS = 30_000;
 /** Spawned with both streams piped, which `ChildProcess` alone does not promise the compiler. */
 type ServerProcess = ChildProcess & { stdout: Readable; stderr: Readable };
 
-export const startApiServer = async (): Promise<ApiServer> => {
+export const startApiServer = async (options: ApiServerOptions = {}): Promise<ApiServer> => {
   const dataDirectory = await mkdtemp(join(tmpdir(), 'recueil-e2e-'));
+  const consumeDirectory = join(dataDirectory, 'consume');
+  await mkdir(consumeDirectory, { recursive: true });
   const entrypoint = join(repositoryRoot, 'apps', 'server', 'dist', 'server.js');
 
   const child = spawn(process.execPath, [entrypoint], {
@@ -52,6 +68,9 @@ export const startApiServer = async (): Promise<ApiServer> => {
       // request log is the first thing worth reading when a browser assertion fails.
       RECUEIL_LOG_LEVEL: 'info',
       RECUEIL_REQUIRE_AUTH: 'false',
+      // The one directory a folder source in this suite is allowed to watch.
+      RECUEIL_INGEST_ALLOWED_ROOTS: consumeDirectory,
+      ...options.env,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   }) as ServerProcess;
@@ -70,7 +89,7 @@ export const startApiServer = async (): Promise<ApiServer> => {
 
   try {
     const url = await waitForAddress(child, lines);
-    return { url, dataDirectory, log, stop };
+    return { url, dataDirectory, consumeDirectory, log, stop };
   } catch (cause) {
     await stop();
     throw new Error(`The Recueil server did not start.\n${log()}`, { cause });

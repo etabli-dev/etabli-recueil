@@ -1,0 +1,161 @@
+{
+  "version": 1,
+  "name": "precedence",
+  "rules": [
+    {
+      "id": "disabled-catch-all",
+      "priority": 999,
+      "enabled": false,
+      "stop": true,
+      "match": {
+        "all": [
+          {
+            "mime": {
+              "prefix": "application/"
+            }
+          }
+        ]
+      },
+      "actions": [
+        {
+          "set_item_type": "other"
+        },
+        {
+          "add_tag": "Unsortiert"
+        }
+      ]
+    },
+    {
+      "id": "invoice-stadtwerke",
+      "priority": 100,
+      "stop": true,
+      "match": {
+        "all": [
+          {
+            "source": "mail"
+          },
+          {
+            "sender": {
+              "equals": "rechnung@stadtwerke-ulm.example"
+            }
+          },
+          {
+            "text": {
+              "regex": "Rechnungsnummer:?\\s+(?<reference>\\d{4}-\\d{6})"
+            }
+          }
+        ],
+        "none": [
+          {
+            "tag": "Storno"
+          }
+        ]
+      },
+      "actions": [
+        {
+          "set_item_type": "invoice"
+        },
+        {
+          "add_tag": "Rechnung"
+        },
+        {
+          "set_office": {
+            "correspondent": "Stadtwerke Ulm",
+            "office_document_type": "invoice",
+            "reference_number": "{{ reference }}"
+          }
+        },
+        {
+          "add_to_collection": "Rechnungen/2023"
+        }
+      ]
+    },
+    {
+      "id": "tie-vertrag-a",
+      "priority": 60,
+      "match": {
+        "all": [
+          {
+            "text": {
+              "regex": "Mietvertrag",
+              "flags": "i"
+            }
+          }
+        ]
+      },
+      "actions": [
+        {
+          "set_item_type": "contract"
+        },
+        {
+          "add_tag": "Vertrag"
+        }
+      ]
+    },
+    {
+      "id": "tie-vertrag-b",
+      "priority": 60,
+      "match": {
+        "all": [
+          {
+            "text": {
+              "regex": "Lagerraum"
+            }
+          }
+        ]
+      },
+      "actions": [
+        {
+          "set_item_type": "letter"
+        },
+        {
+          "add_tag": "Vertrag"
+        }
+      ]
+    },
+    {
+      "id": "invoice-generic",
+      "priority": 50,
+      "match": {
+        "any": [
+          {
+            "text": {
+              "regex": "\\bRechnung(snummer)?\\b"
+            }
+          },
+          {
+            "subject": {
+              "contains": "Rechnung"
+            }
+          }
+        ]
+      },
+      "actions": [
+        {
+          "set_item_type": "invoice"
+        },
+        {
+          "add_tag": "Rechnung"
+        }
+      ]
+    },
+    {
+      "id": "catch-all-pdf",
+      "priority": 10,
+      "match": {
+        "all": [
+          {
+            "mime": {
+              "equals": "application/pdf"
+            }
+          }
+        ]
+      },
+      "actions": [
+        {
+          "add_tag": "Posteingang"
+        }
+      ]
+    }
+  ]
+}

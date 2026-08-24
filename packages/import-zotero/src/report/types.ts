@@ -18,6 +18,27 @@
 /** The `schema` field of the JSON report. Bumped when the shape changes incompatibly. */
 export const REPORT_SCHEMA = 'recueil.zotero-import-report/1';
 
+/**
+ * One library found in the source file, imported or not.
+ *
+ * The importer reads a single library. Every reader in `reader/zotero-library.ts` filters on it,
+ * which means a Zotero group library is invisible to both sides of every count and the delta
+ * between them is structurally zero. This is the row that makes the exclusion visible: it is built
+ * from an unfiltered query over `items`, so a group library with five items in it says so.
+ */
+export interface SourceLibrarySummary {
+  libraryID: number;
+  /** `user` or `group`, from `libraries`. Null when there is no row for the id. */
+  libraryType: string | null;
+  /** True for the one library this run read. */
+  imported: boolean;
+  /** Items that are library records in their own right: everything but note, attachment, annotation. */
+  regularItems: number;
+  notes: number;
+  attachments: number;
+  annotations: number;
+}
+
 /** Where the report's numbers came from. */
 export interface ReportSource {
   databasePath: string;
@@ -29,6 +50,10 @@ export interface ReportSource {
   sourceUnchanged: boolean;
   libraryId: number;
   libraryType: string | null;
+  /** Every library in the file, with what each holds. Imported or not. */
+  libraries: SourceLibrarySummary[];
+  /** Regular items in libraries this run did not read. Non-zero is a blocking failure. */
+  itemsInOtherLibraries: number;
   localUserKey: string | null;
   zoteroUserdataVersion: number | null;
   zoteroGlobalSchemaVersion: number | null;
@@ -51,24 +76,48 @@ export interface ReportRun {
   resumedFromStage: string | null;
 }
 
-/** One row of the per-type parity table, which is what "100% item count" is measured on. */
+/**
+ * One row of the per-type parity table, which is what "100% item count" is measured on.
+ *
+ * Both sides are queries. The Zotero side comes from `items` joined to `itemTypesCombined` in
+ * `zotero.sqlite`; the Recueil side comes from `items` in the target, counted by the `item_type`
+ * the target actually stores. Bucketing the target side by the importer's own mapping output —
+ * which is what this table used to do — makes the comparison an identity: it holds however the
+ * rows were written, and an adversarial reviewer proved it by rewriting every stored `item_type`
+ * to `article` and watching the check pass.
+ */
 export interface ItemTypeParity {
   zoteroType: string;
+  /** What `mapZoteroItemType` says this Zotero type becomes, recomputed from the source type. */
   recueilType: string;
   zoteroLive: number;
   zoteroTrashed: number;
   zoteroTotal: number;
   recueilLive: number;
   recueilTrashed: number;
+  /** Rows in the target whose `source_id` matches and whose stored `item_type` is `recueilType`. */
   recueilTotal: number;
+  /**
+   * Rows in the target whose `source_id` matches and whose stored `item_type` is something else.
+   *
+   * Counted apart rather than folded into `recueilTotal`, because "the item is there but it is the
+   * wrong type" and "the item is not there" are different faults with different repairs.
+   */
+  recueilMistyped: number;
   /** `recueilTotal - zoteroTotal`. Zero on every row is the exit criterion. */
   delta: number;
 }
 
 export interface ItemCounts {
   byType: ItemTypeParity[];
+  /** Regular items in the read library, counted in `zotero.sqlite`. */
   zoteroRegularTotal: number;
+  /** Target rows whose `source_id` is one of those items and whose stored type is the mapped one. */
   recueilRegularTotal: number;
+  /** Target rows that are there under the wrong stored `item_type`. Non-zero is a blocking failure. */
+  recueilMistyped: number;
+  /** Regular items in the source with no row in the target at all. */
+  missingInRecueil: number;
   delta: number;
   /**
    * Items Recueil created that have no Zotero regular item behind them — currently one per
@@ -115,7 +164,16 @@ export interface AttachmentCoverage {
   hashMismatches: number;
   /** Distinct SHA-256 digests, which is the number of Documents the import created or reused. */
   distinctDocuments: number;
+  /**
+   * Rows found in the target's `attachments` table, one per Zotero attachment, by query.
+   *
+   * Not a count of the importer's own log entries — that number cannot disagree with itself. The
+   * correspondence is rebuilt from `document_provenance.source_ref`, `url` and `linked_path`
+   * (`src/reconcile.ts`), which are facts in the target database.
+   */
   recueilAttachments: number;
+  /** Zotero attachment keys with no corresponding row in the target. */
+  recueilAttachmentsMissing: string[];
   entries: AttachmentReportEntry[];
 }
 

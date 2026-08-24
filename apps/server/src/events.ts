@@ -42,11 +42,25 @@ export const LIFECYCLE_EVENT_TYPES = [
 export type LifecycleEventType = (typeof LIFECYCLE_EVENT_TYPES)[number];
 
 /**
- * The subset of the twelve this Phase 1 surface can actually cause.
+ * The subset of the twelve this surface can actually cause.
  *
  * Published so that a test can assert the stream only ever emits what the REST surface is in a
- * position to know about: annotations, checks and jobs arrive with the phases that implement them,
- * and an endpoint that emitted `check.completed` today would be lying.
+ * position to know about, and so that `GET /api/v1/events` can say so in its own description
+ * rather than implying the whole catalogue.
+ *
+ * Phase 2 adds the ingestion lifecycle: `job.started`, `job.finished` and `job.failed`, emitted by
+ * every ingestion run — an upload, a source poll, a retry — and a `document.ingested` that now
+ * carries a real `pipelineRunId` and, when the confidence gate routed the document to a person, a
+ * `reviewQueueEntryId` (§7.3).
+ *
+ * What is deliberately *not* here: an `ingest.*` type. `@recueil/ingest` has its own richer
+ * vocabulary internally, and `spec/hooks.md` §8 says there are no events beyond the twelve, so the
+ * pipeline's `ingest.review_queued` and `ingest.candidate_failed` are carried by
+ * `document.ingested.reviewQueueEntryId` and by `job.failed` rather than invented on the wire.
+ * `item.created` stays off the list for a pipeline commit as well, for the honest reason that the
+ * commit happens inside `@recueil/ingest` and this server is not in a position to build §7.3's
+ * payload for it without re-querying every item the run touched; the run's `job.finished` result
+ * carries the counts, and `document.ingested.itemIds` names the items.
  */
 export const EMITTED_EVENT_TYPES: readonly LifecycleEventType[] = [
   'item.created',
@@ -55,6 +69,9 @@ export const EMITTED_EVENT_TYPES: readonly LifecycleEventType[] = [
   'item.restored',
   'document.ingested',
   'attachment.added',
+  'job.started',
+  'job.finished',
+  'job.failed',
 ];
 
 export interface EventEnvelope<TPayload = Record<string, unknown>> {

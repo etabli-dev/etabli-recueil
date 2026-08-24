@@ -23,7 +23,7 @@ import { access, mkdir } from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
 
 import type { Recueil } from '@recueil/core';
-import { schema } from '@recueil/core';
+import { LocalFsBackend, schema } from '@recueil/core';
 import { HealthResponseSchema } from '@recueil/schemas';
 import { isNull } from 'drizzle-orm';
 import * as z from 'zod';
@@ -57,6 +57,20 @@ export const StorageHealthSchema = z
     ok: z.boolean().meta({ description: 'Whether the content-addressed store exists and is writable.' }),
     path: z.string().max(4096).meta({ description: 'The store root, as the server resolved it.' }),
     backend: z.enum(['local', 'webdav', 's3']),
+    strayTempFiles: z
+      .number()
+      .int()
+      .min(0)
+      .optional()
+      .meta({
+        description:
+          'Partial writes left in the store\'s `.tmp` directory by an interrupted upload. They are ' +
+          'not blobs and are never restored or backed up, so nothing else would ever mention them ' +
+          '— and a store quietly accumulating half-written scans until the disk fills is a fault ' +
+          'nobody can diagnose. A non-zero count is not itself unhealthy: a `.part` file a few ' +
+          'seconds old belongs to an upload still in flight. Local backend only.',
+      }),
+    strayTempBytes: z.number().int().min(0).optional(),
     detail: z.string().max(1024).optional(),
   })
   .meta({
@@ -195,10 +209,22 @@ export const checkStorage = async (recueil: Recueil, path: string): Promise<Stor
 
   try {
     await access(path, fsConstants.W_OK | fsConstants.X_OK);
-    return { ok: true, path, backend };
   } catch (error) {
     return { ok: false, path, backend, detail: describe(error) };
   }
+
+  // Surfaced, not swept: this is a health probe, and a probe observes rather than repairs. The
+  // sweep is `LocalFsBackend.sweepTempFiles`, for an operator or a maintenance job to call.
+  const stray =
+    recueil.storage instanceof LocalFsBackend ? await recueil.storage.listStrayTempFiles() : [];
+
+  return {
+    ok: true,
+    path,
+    backend,
+    strayTempFiles: stray.length,
+    strayTempBytes: stray.reduce((sum, file) => sum + file.size, 0),
+  };
 };
 
 /** The live record counts. Trashed rows are excluded: the trash is not the library (P5). */

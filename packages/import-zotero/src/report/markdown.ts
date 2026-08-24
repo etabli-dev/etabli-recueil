@@ -52,21 +52,53 @@ export const renderReportMarkdown = (report: ZoteroImportReport): string => {
   for (const check of report.checks) line(`- \`${check.name}\` — ${check.description}`);
   line();
 
+  line('## Libraries in the source file');
+  line();
+  line('| Library | Type | Imported | Regular items | Notes | Attachments |');
+  line('|---:|---|---|---:|---:|---:|');
+  for (const row of report.source.libraries) {
+    line(
+      `| ${row.libraryID} | ${row.libraryType ?? '—'} | ${row.imported ? 'yes' : '**no**'} | ` +
+        `${row.regularItems} | ${row.notes} | ${row.attachments} |`,
+    );
+  }
+  line();
+  if (report.source.itemsInOtherLibraries > 0) {
+    line(
+      `**${report.source.itemsInOtherLibraries} regular items live in a library this run did not ` +
+        'read and were not imported.** Recueil is single-library, so a Zotero group library has ' +
+        'nowhere to go; `_REVIEW/` names each one.',
+    );
+    line();
+  }
+
   line('## Items');
   line();
-  line('| Zotero type | Recueil type | Zotero (live/trash) | Recueil (live/trash) | Δ |');
-  line('|---|---|---:|---:|---:|');
+  line('| Zotero type | Recueil type | Zotero (live/trash) | Recueil (live/trash) | Mistyped | Δ |');
+  line('|---|---|---:|---:|---:|---:|');
   for (const row of report.items.byType) {
     line(
       `| \`${row.zoteroType}\` | \`${row.recueilType}\` | ${row.zoteroTotal} (${row.zoteroLive}/${row.zoteroTrashed}) ` +
-        `| ${row.recueilTotal} (${row.recueilLive}/${row.recueilTrashed}) | ${signed(row.delta)} |`,
+        `| ${row.recueilTotal} (${row.recueilLive}/${row.recueilTrashed}) | ${row.recueilMistyped} | ${signed(row.delta)} |`,
     );
   }
   line(
     `| **total** | | **${report.items.zoteroRegularTotal}** | **${report.items.recueilRegularTotal}** | ` +
-      `**${signed(report.items.delta)}** |`,
+      `**${report.items.recueilMistyped}** | **${signed(report.items.delta)}** |`,
   );
   line();
+  if (report.items.recueilMistyped > 0) {
+    line(
+      `**${report.items.recueilMistyped} imported items are stored under an \`item_type\` other ` +
+        'than the one their Zotero type maps to.** They are in the library and they are the wrong ' +
+        'kind of record.',
+    );
+    line();
+  }
+  if (report.items.missingInRecueil > 0) {
+    line(`**${report.items.missingInRecueil} Zotero items have no Recueil row at all.**`);
+    line();
+  }
   if (report.items.derived > 0) {
     line(
       `${report.items.derived} further item${report.items.derived === 1 ? ' was' : 's were'} created and is ` +
@@ -90,7 +122,8 @@ export const renderReportMarkdown = (report: ZoteroImportReport): string => {
   line(`| Bookmarks (linked URL) | ${report.attachments.bookmarks} |`);
   line(`| **Hash coverage** | **${report.attachments.hashCoveragePercent}%** |`);
   line(`| Distinct documents | ${report.attachments.distinctDocuments} |`);
-  line(`| Attachment records in Recueil | ${report.attachments.recueilAttachments} |`);
+  line(`| Attachment records found in Recueil | ${report.attachments.recueilAttachments} |`);
+  line(`| Attachment records not found | ${report.attachments.recueilAttachmentsMissing.length} |`);
   line(`| Files whose bytes no longer match Zotero's MD5 | ${report.attachments.hashMismatches} |`);
   line();
 

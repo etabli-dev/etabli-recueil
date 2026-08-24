@@ -1,0 +1,69 @@
+{
+  "count": 5,
+  "next": null,
+  "previous": null,
+  "all": [
+    1,
+    2,
+    3,
+    4,
+    5
+  ],
+  "results": [
+    {
+      "id": 1,
+      "slug": "rechnung",
+      "name": "Rechnung",
+      "match": "",
+      "matching_algorithm": 6,
+      "is_insensitive": true,
+      "document_count": 4,
+      "owner": 1,
+      "user_can_change": true
+    },
+    {
+      "id": 2,
+      "slug": "vertrag",
+      "name": "Vertrag",
+      "match": "",
+      "matching_algorithm": 6,
+      "is_insensitive": true,
+      "document_count": 1,
+      "owner": 1,
+      "user_can_change": true
+    },
+    {
+      "id": 3,
+      "slug": "bescheid",
+      "name": "Bescheid",
+      "match": "bescheid",
+      "matching_algorithm": 3,
+      "is_insensitive": true,
+      "document_count": 1,
+      "owner": 1,
+      "user_can_change": true
+    },
+    {
+      "id": 4,
+      "slug": "beleg",
+      "name": "Beleg",
+      "match": "",
+      "matching_algorithm": 6,
+      "is_insensitive": true,
+      "document_count": 1,
+      "owner": 1,
+      "user_can_change": true
+    },
+    {
+      "id": 5,
+      "slug": "protokoll",
+      "name": "Protokoll",
+      "match": "",
+      "matching_algorithm": 6,
+      "is_insensitive": true,
+      "document_count": 2,
+      "owner": 1,
+      "user_can_change": true
+    }
+  ]
+}

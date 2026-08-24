@@ -1,0 +1,85 @@
+# Recueil ingestion rules — precedence.
+#
+# Evaluated by priority descending, then id ascending. A disabled rule is not evaluated at all; a
+# fired rule with stop: true ends evaluation. Two fired rules that set the same field to different
+# values produce a rule_conflict review entry and neither value.
+#
+# The JSON twin of this file is precedence.json. Loading both must produce the same structure.
+
+version: 1
+name: precedence
+
+rules:
+  # Highest priority in the file, and disabled. A loader that sorts before it filters, or that
+  # treats a missing "enabled" as false, turns every document in the corpus into "other".
+  - id: disabled-catch-all
+    priority: 999
+    enabled: false
+    stop: true
+    match:
+      all:
+        - mime: { prefix: application/ }
+    actions:
+      - set_item_type: other
+      - add_tag: Unsortiert
+
+  # The specific rule. It stops, so nothing below it runs for a Stadtwerke invoice — not even the
+  # generic invoice rule that would also have matched.
+  - id: invoice-stadtwerke
+    priority: 100
+    stop: true
+    match:
+      all:
+        - source: mail
+        - sender: { equals: rechnung@stadtwerke-ulm.example }
+        - text: { regex: 'Rechnungsnummer:?\s+(?<reference>\d{4}-\d{6})' }
+      none:
+        - tag: Storno
+    actions:
+      - set_item_type: invoice
+      - add_tag: Rechnung
+      - set_office:
+          correspondent: Stadtwerke Ulm
+          office_document_type: invoice
+          reference_number: '{{ reference }}'
+      - add_to_collection: Rechnungen/2023
+
+  # Two rules, equal priority, disagreeing about item_type. Neither value is applied.
+  - id: tie-vertrag-a
+    priority: 60
+    match:
+      all:
+        - text: { regex: 'Mietvertrag', flags: i }
+    actions:
+      - set_item_type: contract
+      - add_tag: Vertrag
+
+  - id: tie-vertrag-b
+    priority: 60
+    match:
+      all:
+        - text: { regex: 'Lagerraum' }
+    actions:
+      - set_item_type: letter
+      - add_tag: Vertrag
+
+  # The generic invoice rule. Reached only when the specific one did not fire.
+  - id: invoice-generic
+    priority: 50
+    match:
+      any:
+        - text: { regex: '\bRechnung(snummer)?\b' }
+        - subject: { contains: Rechnung }
+    actions:
+      - set_item_type: invoice
+      - add_tag: Rechnung
+
+  # The floor. Fires for any PDF that reached it, which is the point: it must not be reached when
+  # something above it stopped.
+  - id: catch-all-pdf
+    priority: 10
+    match:
+      all:
+        - mime: { equals: application/pdf }
+    actions:
+      - add_tag: Posteingang

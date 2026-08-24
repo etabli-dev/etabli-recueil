@@ -18,9 +18,15 @@ import { customFieldPaths, customFieldRoutes } from './custom-fields.js';
 import { documentPaths, documentRoutes } from './documents.js';
 import { eventPaths, eventRoutes } from './events.js';
 import { exportPaths, exportRoutes } from './export.js';
+import { ingestionQueuePaths, ingestionQueueRoutes } from './ingestion-queue.js';
+import { ingestionReviewPaths, ingestionReviewRoutes } from './ingestion-review.js';
+import { ingestionSourcePaths, ingestionSourceRoutes } from './ingestion-sources.js';
+import { ingestionUploadPaths, ingestionUploadRoutes } from './ingestion-upload.js';
 import { itemPaths, itemRoutes } from './items.js';
 import { notePaths, noteRoutes } from './notes.js';
+import { rulePaths, ruleRoutes } from './rules.js';
 import { searchPaths, searchRoutes } from './search.js';
+import { storageBackendPaths, storageBackendRoutes } from './storage.js';
 import { tagPaths, tagRoutes } from './tags.js';
 import { tokenPaths, tokenRoutes } from './tokens.js';
 import { trashPaths, trashRoutes } from './trash.js';
@@ -41,6 +47,14 @@ const GROUPS: readonly { plugin: FastifyPluginAsync; paths: ZodOpenApiPathsObjec
   { plugin: tokenRoutes, paths: tokenPaths },
   { plugin: eventRoutes, paths: eventPaths },
   { plugin: connectorRoutes, paths: connectorPaths },
+  // Phase 2. Sources before the queue and the review queue because that is the order a person
+  // meets them: configure a place, watch what it produced, decide what the gate could not.
+  { plugin: ingestionSourceRoutes, paths: ingestionSourcePaths },
+  { plugin: ingestionQueueRoutes, paths: ingestionQueuePaths },
+  { plugin: ingestionReviewRoutes, paths: ingestionReviewPaths },
+  { plugin: ingestionUploadRoutes, paths: ingestionUploadPaths },
+  { plugin: ruleRoutes, paths: rulePaths },
+  { plugin: storageBackendRoutes, paths: storageBackendPaths },
 ];
 
 /**

@@ -56,6 +56,7 @@ import {
   wholeList,
 } from '../http.js';
 import { loadItemView, renderItemView } from '../item-view.js';
+import { asnOfItem, assertAsnFree, itemWithAsn, withAsnConflict } from '../office.js';
 import { replayOrRecord } from '../idempotency.js';
 import {
   idPath,
@@ -67,7 +68,7 @@ import {
   problems,
   publicIdPath,
 } from '../openapi-kit.js';
-import { toProblem } from '../problem.js';
+import { notFound, toProblem } from '../problem.js';
 import { attachmentsFor, itemTagsFor, noteIdsFor, summariseItems } from '../queries.js';
 import {
   publishItemCreated,
@@ -260,9 +261,11 @@ export const itemRoutes: FastifyPluginAsync = async (app) => {
 
   app.post(BASE, { config: { scope: 'items:write' } }, async (request, reply) => {
     const body = parseOrThrow(ItemCreateSchema, request.body, 'body');
-    const record = recueil.library.createItem(
-      toCreateInput(body, request.principal.userId),
-      request.actor,
+    // §3.7: an ASN is unique across live items. Checked before the write for the message, and
+    // translated after it for the race — see `office.ts`.
+    assertAsnFree(recueil, body.office?.asn);
+    const record = withAsnConflict(recueil, body.office?.asn, () =>
+      recueil.library.createItem(toCreateInput(body, request.principal.userId), request.actor),
     );
     applyItemAssociations(recueil, record.item.id, body, request.actor);
 
@@ -331,9 +334,12 @@ export const itemRoutes: FastifyPluginAsync = async (app) => {
     const body = parseOrThrow(ItemUpdateSchema, request.body, 'body');
     const expectedVersion = ifMatchVersion(request);
 
-    const record = recueil.library.updateItem(id, withMirroredTitle(recueil, id, body), request.actor, {
-      ...(expectedVersion === undefined ? {} : { expectedVersion }),
-    });
+    assertAsnFree(recueil, body.office?.asn, id);
+    const record = withAsnConflict(recueil, body.office?.asn, () =>
+      recueil.library.updateItem(id, withMirroredTitle(recueil, id, body), request.actor, {
+        ...(expectedVersion === undefined ? {} : { expectedVersion }),
+      }),
+    );
 
     if (body.tagNames !== undefined) setItemTags(recueil, id, body.tagNames, request.actor);
     if (body.collectionIds !== undefined) setItemCollections(recueil, id, body.collectionIds, request.actor);
@@ -343,6 +349,26 @@ export const itemRoutes: FastifyPluginAsync = async (app) => {
 
     reply.header('etag', versionEtag(fresh.item.version));
     return sendJson(reply, ItemSchema, renderItemView(recueil, fresh, { withProvenance: true }));
+  });
+
+  /* ---- the office facet's own handle: the archive serial number ------------------------- */
+
+  /**
+   * `GET /items/by-asn/{asn}` — the physical filing number, as a lookup.
+   *
+   * The ASN is what is written on the paper in the drawer, so "which record is 4711?" is the query
+   * an office user makes most and the one that has no answer through a filter over a facet. Live
+   * items only: the number is free again once its item is trashed (§3.7).
+   */
+  app.get(`${BASE}/by-asn/:asn`, { config: { scope: 'items:read' } }, async (request, reply) => {
+    const { asn } = parseOrThrow(
+      z.object({ asn: z.coerce.number().int().min(1) }),
+      request.params,
+      'path',
+    );
+    const holder = itemWithAsn(recueil, asn);
+    if (holder === null) throw notFound(`No live item holds archive serial number ${String(asn)}.`);
+    return sendJson(reply, ItemSchema, renderItemView(recueil, recueil.library.getItem(holder.itemId)));
   });
 
   /* ---- facet writes -------------------------------------------------------------------- */
@@ -378,16 +404,20 @@ export const itemRoutes: FastifyPluginAsync = async (app) => {
     const body = parseOrThrow(OfficeWriteRequestSchema, request.body, 'body');
     const expectedVersion = ifMatchVersion(request);
 
-    const written = recueil.library.writeOffice(
-      id,
-      body.values as Parameters<Recueil['library']['writeOffice']>[1],
-      request.actor,
-      {
-        ...(expectedVersion === undefined ? {} : { expectedVersion }),
-        ...(body.provenance === undefined
-          ? {}
-          : { provenance: { ...body.provenance, ...(body.provenance.locked === undefined ? {} : { lock: body.provenance.locked }) } }),
-      },
+    const asn = (body.values as { asn?: number | null }).asn;
+    assertAsnFree(recueil, asn, id);
+    const written = withAsnConflict(recueil, asn, () =>
+      recueil.library.writeOffice(
+        id,
+        body.values as Parameters<Recueil['library']['writeOffice']>[1],
+        request.actor,
+        {
+          ...(expectedVersion === undefined ? {} : { expectedVersion }),
+          ...(body.provenance === undefined
+            ? {}
+            : { provenance: { ...body.provenance, ...(body.provenance.locked === undefined ? {} : { lock: body.provenance.locked }) } }),
+        },
+      ),
     );
 
     publishItemUpdated(events, recueil, written.record, request.actor, written.applied);
@@ -463,7 +493,11 @@ export const itemRoutes: FastifyPluginAsync = async (app) => {
 
   app.post(`${BASE}/:id/restore`, { config: { scope: 'items:write' } }, async (request, reply) => {
     const id = itemIdParam(request);
-    const record = recueil.library.restoreItem(id, request.actor);
+    // A restore can break the ASN index as surely as a write can: the number this item held may
+    // have been reused while it was in the trash. `withAsnConflict` is passed the item's own ASN so
+    // the refusal can name it (§3.7).
+    const asn = asnOfItem(recueil, id);
+    const record = withAsnConflict(recueil, asn, () => recueil.library.restoreItem(id, request.actor));
     publishItemRestored(events, record, request.actor, cascadeOf(recueil, id));
     return sendJson(reply, ItemSchema, renderItemView(recueil, record));
   });
@@ -783,11 +817,42 @@ export const itemPaths: ZodOpenApiPathsObject = {
       },
     }),
   },
+  [`${BASE}/by-asn/{asn}`]: {
+    get: operation({
+      operationId: 'getItemByAsn',
+      summary: 'The item holding an archive serial number',
+      description:
+        'The ASN is the number written on the paper in the drawer, so this is the lookup an office ' +
+        'user makes most. Live items only: trashing an item frees its number again, and a 404 here ' +
+        'means the number is available (§3.7).',
+      tags: ITEM_TAGS,
+      scope: 'items:read',
+      requestParams: {
+        path: z.object({
+          asn: z.coerce
+            .number()
+            .int()
+            .min(1)
+            .meta({ description: 'The archive serial number, a positive integer.' }),
+        }),
+      },
+      responses: {
+        '200': jsonResponse('The item.', ItemSchema),
+        ...problems('401', '403', '404', '422'),
+      },
+    }),
+  },
   [`${BASE}/{id}/office`]: {
     patch: operation({
       operationId: 'writeOfficeFacet',
       summary: 'Write office fields with provenance',
-      description: 'The office facet counterpart of `PATCH /items/{id}/bibliographic` (§3.7).',
+      description:
+        'The office facet counterpart of `PATCH /items/{id}/bibliographic` (§3.7): correspondent, ' +
+        'document date, ASN, amount, reference number, due date and period.\n\n' +
+        'The ASN is unique across live items and the constraint is a partial unique index in the ' +
+        'schema, not a convention: a number already held by another live item is a 409 naming that ' +
+        'item, and the same 409 is produced if two writes race past the check. An amount needs a ' +
+        'currency and a currency needs an amount (`ck_item_office_amount`).',
       tags: ITEM_TAGS,
       scope: 'items:write',
       requestParams: { path: idPath(), header: z.object({ 'if-match': z.string().optional() }) },

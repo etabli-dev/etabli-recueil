@@ -99,9 +99,12 @@ the audit trail when on ([ADR-0020](adr.qmd)).
 ## Connector endpoint
 
 `/connector/*` implements Zotero's connector protocol, so the existing Zotero Connector extension
-and its translator library work against Recueil unmodified ([ADR-0006](adr.qmd)). Recueil ships its
-own WebExtension in Phase 8, speaking the same protocol with a collection and tag picker,
-office-document capture and page snapshots.
+and its translator library can work against Recueil unmodified ([ADR-0006](adr.qmd)). The protocol
+is undocumented, so the endpoints are written against verbatim excerpts of the upstream sources
+captured at pinned commits, and the server's own responses are run through that captured code in
+CI — see `apps/server/README.md`, "Connector compatibility", for what that establishes and what it
+does not. Recueil ships its own WebExtension in Phase 8, speaking the same protocol with a
+collection and tag picker, office-document capture and page snapshots.
 
 ## Clients
 

@@ -16,6 +16,13 @@
  * exist, and a concurrent ingest can only *add*. The snapshot copies each blob, hashing as it goes,
  * and refuses to record one whose bytes disagree with its name.
  *
+ * **Every run reads every source blob**, including an incremental one written over yesterday's
+ * snapshot. The incremental saving is the write, not the read: a run that skipped the read for a
+ * blob already at the destination would be a run in which rot in the live store is invisible, and
+ * `onCorruptBlob` — whose default is to refuse the backup — could never fire again after the first
+ * night. A nightly snapshot is often the only thing that reads the whole store, so it is also the
+ * thing that finds the rot.
+ *
  * **Restic-friendly** (the other word in §5.15) means: a directory of ordinary files, laid out so
  * that consecutive snapshots overlap almost entirely. Blobs keep their content-addressed path, so
  * an unchanged blob is the identical file at the identical path every night and a deduplicating
@@ -94,7 +101,12 @@ export interface CreateBackupOptions {
   readonly config?: Record<string, unknown> | null;
   /** Replace an existing snapshot at `out`. Never permits writing over anything else. */
   readonly force?: boolean;
-  /** `fail` — the default — refuses to write a snapshot over a store that has rotted. */
+  /**
+   * `fail` — the default — refuses to write a snapshot over a store that has rotted.
+   *
+   * Applies on every run. The live blob is hashed whether or not the destination already holds a
+   * copy of it, so an incremental snapshot detects rot exactly as a first one does.
+   */
   readonly onCorruptBlob?: 'fail' | 'skip';
   /** Count the rows of every table for the manifest. Default true. */
   readonly tableCounts?: boolean;
@@ -285,14 +297,31 @@ export const createBackup = async (options: CreateBackupOptions): Promise<Backup
     let size: number;
 
     if (includeBlobs) {
-      // A blob already at the destination with the same size is verified rather than re-copied:
-      // that is what makes a nightly snapshot over yesterday's cheap, and it still hashes the
-      // destination file, so a rotted backup is caught rather than trusted.
+      // The **source** is hashed on every run, incremental or not.
+      //
+      // The reuse below saves the write, which is what makes a nightly snapshot over yesterday's
+      // cheap; it must not save the read. An earlier version hashed only the destination and, on a
+      // match, never opened the live file — so from the second snapshot onward rot in the live
+      // store was invisible and `onCorruptBlob: 'fail'` could not fire, which is the one thing this
+      // loop exists to do. Detecting rot in a store means reading the store.
+      const sourceHash = await hashFile(blob.absolutePath);
+
+      // The destination is hashed too when it is already there, because a backup that rotted is as
+      // useless as a library that did. It is only reused when both sides agree with the name.
       const existingHash = existsSync(target) ? await hashFile(target) : null;
-      if (existingHash !== null && existingHash.sha256 === blob.sha256) {
+      if (
+        sourceHash.sha256 === blob.sha256 &&
+        existingHash !== null &&
+        existingHash.sha256 === blob.sha256
+      ) {
         digest = existingHash.sha256;
         size = existingHash.size;
         reused += 1;
+      } else if (sourceHash.sha256 !== blob.sha256) {
+        // Corrupt at the source. Reported below from the source's own digest; never copied, and
+        // never left standing at the destination from a previous run either.
+        digest = sourceHash.sha256;
+        size = sourceHash.size;
       } else {
         const written = await copyFileHashing(blob.absolutePath, target);
         digest = written.sha256;

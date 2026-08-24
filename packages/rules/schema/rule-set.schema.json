@@ -1,0 +1,1349 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://recueil.etabli.dev/schema/rule-set.schema.json",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/IngestionRuleSet"
+    },
+    {
+      "$ref": "#/$defs/DedupRuleSet"
+    }
+  ],
+  "title": "Recueil rule set",
+  "description": "A versioned, declarative set of rules, in YAML or JSON. `kind: ingestion` drives CONCEPT.md §5.3 stage 8; `kind: dedup` drives §5.6. Both share the envelope, the precedence and the trace.",
+  "$defs": {
+    "IngestionRuleSet": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "$ref": "#/$defs/RuleFormatVersion"
+        },
+        "kind": {
+          "type": "string",
+          "const": "ingestion"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "mode": {
+          "$ref": "#/$defs/RuleMode"
+        },
+        "limits": {
+          "$ref": "#/$defs/RuleLimits"
+        },
+        "rules": {
+          "maxItems": 2000,
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/IngestionRule"
+          }
+        }
+      },
+      "required": [
+        "version",
+        "kind",
+        "rules"
+      ],
+      "additionalProperties": false
+    },
+    "RuleFormatVersion": {
+      "type": "number",
+      "const": 1,
+      "description": "The rule format version. Bumped only for a change a version-1 reader cannot handle."
+    },
+    "RuleMode": {
+      "type": "string",
+      "enum": [
+        "first-match",
+        "all-match"
+      ],
+      "description": "`all-match`: every rule whose condition holds contributes, in precedence order, and a later rule overwrites a scalar an earlier one set (the overwrite is recorded as a conflict). `first-match`: evaluation stops at the first rule whose condition holds."
+    },
+    "RuleLimits": {
+      "type": "object",
+      "properties": {
+        "maxSteps": {
+          "description": "Simulation steps allowed for one pattern against one value.",
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 200000000
+        },
+        "timeoutMs": {
+          "description": "Wall-clock milliseconds allowed for one pattern against one value.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 60000
+        },
+        "maxTextLength": {
+          "description": "Longest extracted text a `text` condition will read. Beyond it the text is truncated and the trace says so, because a silent truncation is a wrong answer.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000000
+        }
+      },
+      "additionalProperties": false
+    },
+    "IngestionRule": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RuleId"
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 1024
+        },
+        "enabled": {
+          "description": "Default true. A disabled rule is traced as skipped, not omitted.",
+          "type": "boolean"
+        },
+        "priority": {
+          "description": "Higher runs first. Default 0. Rules of equal priority run in the order they are written, so a rule set with no priorities at all is still deterministic.",
+          "type": "integer",
+          "minimum": -1000000,
+          "maximum": 1000000
+        },
+        "when": {
+          "$ref": "#/$defs/IngestionCondition"
+        },
+        "then": {
+          "minItems": 1,
+          "maxItems": 64,
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/IngestionAction"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "when",
+        "then"
+      ],
+      "additionalProperties": false,
+      "description": "One ingestion rule: a condition tree and the actions to apply when it holds."
+    },
+    "RuleId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-z0-9][a-z0-9_-]*$",
+      "examples": [
+        "acme-invoices",
+        "scanner-inbox"
+      ]
+    },
+    "IngestionCondition": {
+      "anyOf": [
+        {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "source"
+                },
+                "match": {
+                  "$ref": "#/$defs/Matcher"
+                }
+              },
+              "required": [
+                "type",
+                "match"
+              ],
+              "additionalProperties": false,
+              "description": "The ingestion source kind: upload, folder, webdav, imap, scanner, …"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "sender"
+                },
+                "match": {
+                  "$ref": "#/$defs/Matcher"
+                }
+              },
+              "required": [
+                "type",
+                "match"
+              ],
+              "additionalProperties": false,
+              "description": "The mail sender, or the scanner or share identity that supplied the file."
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "recipient"
+                },
+                "match": {
+                  "$ref": "#/$defs/Matcher"
+                }
+              },
+              "required": [
+                "type",
+                "match"
+              ],
+              "additionalProperties": false,
+              "description": "Any one of the recipients. Matches when at least one does."
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "subject"
+                },
+                "match": {
+                  "$ref": "#/$defs/Matcher"
+                }
+              },
+              "required": [
+                "type",
+                "match"
+              ],
+              "additionalProperties": false,
+              "description": "The mail subject line."
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "path"
+                },
+                "match": {
+                  "$ref": "#/$defs/Matcher"
+                }
+              },
+              "required": [
+                "type",
+                "match"
+              ],
+              "additionalProperties": false,
+              "description": "The source path, lexically normalised before matching."
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "filename"
+                },
+                "match": {
+                  "$ref": "#/$defs/Matcher"
+                }
+              },
+              "required": [
+                "type",
+                "match"
+              ],
+              "additionalProperties": false,
+              "description": "The last segment of the source path."
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "mime"
+                },
+                "match": {
+                  "$ref": "#/$defs/Matcher"
+                }
+              },
+              "required": [
+                "type",
+                "match"
+              ],
+              "additionalProperties": false,
+              "description": "The sniffed MIME type, for instance application/pdf."
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "text"
+                },
+                "match": {
+                  "$ref": "#/$defs/Matcher"
+                }
+              },
+              "required": [
+                "type",
+                "match"
+              ],
+              "additionalProperties": false,
+              "description": "The extracted text, from the text layer or from OCR."
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "item-type"
+                },
+                "match": {
+                  "$ref": "#/$defs/Matcher"
+                }
+              },
+              "required": [
+                "type",
+                "match"
+              ],
+              "additionalProperties": false,
+              "description": "The item type as it stands when the rule engine runs."
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "tag"
+                },
+                "match": {
+                  "$ref": "#/$defs/Matcher"
+                }
+              },
+              "required": [
+                "type",
+                "match"
+              ],
+              "additionalProperties": false,
+              "description": "Any tag already on the subject. Matches when at least one does."
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "resolver"
+                },
+                "resolver": {
+                  "description": "Restrict to one resolver, e.g. crossref. Omitted, any resolver satisfies the condition.",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                },
+                "outcome": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/ResolverOutcomeKind"
+                    },
+                    {
+                      "minItems": 1,
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/$defs/ResolverOutcomeKind"
+                      }
+                    }
+                  ]
+                },
+                "minConfidence": {
+                  "description": "Also require the resolution to carry at least this much confidence.",
+                  "$ref": "#/$defs/Confidence"
+                }
+              },
+              "required": [
+                "type",
+                "outcome"
+              ],
+              "additionalProperties": false,
+              "description": "The result of identifier resolution (CONCEPT.md §5.3 stage 7)."
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "always"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": false,
+              "description": "Matches everything. The honest way to write a catch-all or a default."
+            }
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "all": {
+              "minItems": 1,
+              "maxItems": 64,
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/IngestionCondition"
+              }
+            }
+          },
+          "required": [
+            "all"
+          ],
+          "additionalProperties": false,
+          "description": "Every member must match."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "any": {
+              "minItems": 1,
+              "maxItems": 64,
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/IngestionCondition"
+              }
+            }
+          },
+          "required": [
+            "any"
+          ],
+          "additionalProperties": false,
+          "description": "At least one member must match."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "not": {
+              "$ref": "#/$defs/IngestionCondition"
+            }
+          },
+          "required": [
+            "not"
+          ],
+          "additionalProperties": false,
+          "description": "The member must not match."
+        }
+      ],
+      "description": "A condition tree. `all`, `any` and `not` compose the leaves; the leaves read the subject."
+    },
+    "Matcher": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/EqualsMatcher"
+        },
+        {
+          "$ref": "#/$defs/EqualsAnyMatcher"
+        },
+        {
+          "$ref": "#/$defs/ContainsMatcher"
+        },
+        {
+          "$ref": "#/$defs/StartsWithMatcher"
+        },
+        {
+          "$ref": "#/$defs/EndsWithMatcher"
+        },
+        {
+          "$ref": "#/$defs/RegexMatcher"
+        },
+        {
+          "$ref": "#/$defs/GlobMatcher"
+        }
+      ],
+      "description": "One test against one string. Exactly one operator per matcher."
+    },
+    "EqualsMatcher": {
+      "type": "object",
+      "properties": {
+        "equals": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "caseSensitive": {
+          "description": "Default false: matching ignores case unless a rule asks for it.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "equals"
+      ],
+      "additionalProperties": false,
+      "description": "The whole value, exactly."
+    },
+    "EqualsAnyMatcher": {
+      "type": "object",
+      "properties": {
+        "equalsAny": {
+          "minItems": 1,
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          }
+        },
+        "caseSensitive": {
+          "description": "Default false: matching ignores case unless a rule asks for it.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "equalsAny"
+      ],
+      "additionalProperties": false,
+      "description": "The whole value, exactly, against any member of the list."
+    },
+    "ContainsMatcher": {
+      "type": "object",
+      "properties": {
+        "contains": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "caseSensitive": {
+          "description": "Default false: matching ignores case unless a rule asks for it.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "contains"
+      ],
+      "additionalProperties": false
+    },
+    "StartsWithMatcher": {
+      "type": "object",
+      "properties": {
+        "startsWith": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "caseSensitive": {
+          "description": "Default false: matching ignores case unless a rule asks for it.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "startsWith"
+      ],
+      "additionalProperties": false
+    },
+    "EndsWithMatcher": {
+      "type": "object",
+      "properties": {
+        "endsWith": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "caseSensitive": {
+          "description": "Default false: matching ignores case unless a rule asks for it.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "endsWith"
+      ],
+      "additionalProperties": false
+    },
+    "RegexMatcher": {
+      "type": "object",
+      "properties": {
+        "matches": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "caseSensitive": {
+          "description": "Default false: matching ignores case unless a rule asks for it.",
+          "type": "boolean"
+        },
+        "multiline": {
+          "description": "Make `^` and `$` match at every line break. Useful against extracted text.",
+          "type": "boolean"
+        },
+        "dotAll": {
+          "description": "Make `.` match a line break as well.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "matches"
+      ],
+      "additionalProperties": false,
+      "description": "A regular expression, anywhere in the value. Runs on a linear-time engine: backreferences, lookahead and lookbehind are not available, and no pattern can backtrack."
+    },
+    "GlobMatcher": {
+      "type": "object",
+      "properties": {
+        "glob": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "caseSensitive": {
+          "description": "Default false: matching ignores case unless a rule asks for it.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "glob"
+      ],
+      "additionalProperties": false,
+      "description": "A path glob, anchored to the whole value. `*` stays within a segment, `**` crosses them."
+    },
+    "ResolverOutcomeKind": {
+      "type": "string",
+      "enum": [
+        "hit",
+        "miss",
+        "ambiguous",
+        "error",
+        "skipped"
+      ],
+      "description": "What identifier resolution (CONCEPT.md §5.4) came back with for one source. `ambiguous` is the case P3 cares about: several candidates, none decisive."
+    },
+    "Confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "title": "Confidence",
+      "description": "Confidence in a derived fact, from 0 (none) to 1 (certain).",
+      "examples": [
+        0.92
+      ]
+    },
+    "IngestionAction": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "set-item-type"
+            },
+            "itemType": {
+              "$ref": "#/$defs/ItemType"
+            }
+          },
+          "required": [
+            "type",
+            "itemType"
+          ],
+          "additionalProperties": false,
+          "description": "Set the item type. Open vocabulary; a plugin may have registered the value."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "add-to-collection"
+            },
+            "collection": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024,
+              "description": "A collection path with `/` between levels, for instance Office/Invoices/2026."
+            },
+            "create": {
+              "description": "Default true: create the collection, and its parents, when it does not exist.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "type",
+            "collection"
+          ],
+          "additionalProperties": false,
+          "description": "Add the item to a collection."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "add-tags"
+            },
+            "tags": {
+              "minItems": 1,
+              "maxItems": 64,
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1024
+              }
+            }
+          },
+          "required": [
+            "type",
+            "tags"
+          ],
+          "additionalProperties": false,
+          "description": "Add tags. They are recorded with scheme `automatic` and this rule as `rule_ref`."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "set-custom-field"
+            },
+            "field": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[a-z][a-z0-9_]*$"
+            },
+            "value": {
+              "$ref": "#/$defs/RuleFieldValue"
+            }
+          },
+          "required": [
+            "type",
+            "field",
+            "value"
+          ],
+          "additionalProperties": false,
+          "description": "Set one custom field (CONCEPT.md §5.2, CustomField / FieldValue)."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "set-correspondent"
+            },
+            "correspondent": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            }
+          },
+          "required": [
+            "type",
+            "correspondent"
+          ],
+          "additionalProperties": false,
+          "description": "Set the office facet correspondent (spec/data-model.md §3.7)."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "set-confidence"
+            },
+            "confidence": {
+              "$ref": "#/$defs/Confidence"
+            }
+          },
+          "required": [
+            "type",
+            "confidence"
+          ],
+          "additionalProperties": false,
+          "description": "Set the confidence the gate at stage 9 will read."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "route-to-review"
+            },
+            "reasonCode": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[a-z][a-z0-9_]*$",
+              "description": "Open vocabulary; `rule_conflict` and friends come from spec/data-model.md §6.1."
+            },
+            "explanation": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024,
+              "description": "The stored sentence a human will read. Name the evidence."
+            },
+            "severity": {
+              "$ref": "#/$defs/RuleReviewSeverity"
+            },
+            "proposedAction": {
+              "$ref": "#/$defs/RuleReviewProposedAction"
+            }
+          },
+          "required": [
+            "type",
+            "reasonCode",
+            "explanation"
+          ],
+          "additionalProperties": false,
+          "description": "Queue the subject for a human decision (P3, \"flag, never guess\")."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "stop"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": false,
+          "description": "Apply nothing further. Rules after this one are traced as not reached."
+        }
+      ]
+    },
+    "ItemType": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "title": "ItemType",
+      "description": "An item type slug. Open vocabulary: the built-in types are listed in `CoreItemType`, and plugins may register more, so the wire format validates the slug shape rather than a list.",
+      "examples": [
+        "article",
+        "book",
+        "chapter",
+        "report",
+        "thesis",
+        "dataset",
+        "preprint",
+        "webpage",
+        "conference_paper",
+        "software",
+        "standard",
+        "patent",
+        "invoice",
+        "letter",
+        "contract",
+        "receipt",
+        "certificate",
+        "photo",
+        "note",
+        "attachment_only"
+      ]
+    },
+    "RuleFieldValue": {
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 4096
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What a rule may write into a custom field. Interpolation applies to the string form."
+    },
+    "RuleReviewSeverity": {
+      "type": "string",
+      "enum": [
+        "info",
+        "warning",
+        "blocker"
+      ]
+    },
+    "RuleReviewProposedAction": {
+      "type": "string",
+      "enum": [
+        "merge",
+        "link",
+        "create_item",
+        "set_fields",
+        "discard",
+        "retry",
+        "none"
+      ],
+      "description": "The `proposed_action` vocabulary of `review_queue` (spec/data-model.md §6.1)."
+    },
+    "DedupRuleSet": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "$ref": "#/$defs/RuleFormatVersion"
+        },
+        "kind": {
+          "type": "string",
+          "const": "dedup"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "mode": {
+          "$ref": "#/$defs/RuleMode"
+        },
+        "limits": {
+          "$ref": "#/$defs/RuleLimits"
+        },
+        "rules": {
+          "maxItems": 2000,
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DedupRule"
+          }
+        }
+      },
+      "required": [
+        "version",
+        "kind",
+        "rules"
+      ],
+      "additionalProperties": false
+    },
+    "DedupRule": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RuleId"
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 1024
+        },
+        "enabled": {
+          "description": "Default true. A disabled rule is traced as skipped, not omitted.",
+          "type": "boolean"
+        },
+        "priority": {
+          "description": "Higher runs first. Default 0. Rules of equal priority run in the order they are written, so a rule set with no priorities at all is still deterministic.",
+          "type": "integer",
+          "minimum": -1000000,
+          "maximum": 1000000
+        },
+        "when": {
+          "$ref": "#/$defs/DedupCondition"
+        },
+        "then": {
+          "minItems": 1,
+          "maxItems": 64,
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DedupAction"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "when",
+        "then"
+      ],
+      "additionalProperties": false,
+      "description": "One deduplication rule: a condition over a candidate pair and the decision it proposes."
+    },
+    "DedupCondition": {
+      "anyOf": [
+        {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "identifier-match"
+                },
+                "identifier": {
+                  "description": "doi, pmid, pmcid, arxiv, isbn, … Omitted, any shared identifier satisfies the condition.",
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 32
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": false,
+              "description": "Both sides carry the same value for an identifier. Compared with `=`, because invariant B1 (spec/data-model.md §3.5) stores identifiers normalised; this rule engine does not re-normalise and would be wrong to, since it cannot see whether the caller honoured B1."
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "identifier-conflict"
+                },
+                "identifier": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 32
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": false,
+              "description": "Both sides carry the same identifier key with different values — strong evidence against a merge."
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "file-hash-match"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": false,
+              "description": "The two sides share a document hash: the file layer of §5.6, byte-identical."
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "title-similarity"
+                },
+                "atLeast": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                }
+              },
+              "required": [
+                "type",
+                "atLeast"
+              ],
+              "additionalProperties": false,
+              "description": "Trigram Jaccard similarity of the normalised titles is at least this."
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "venue-similarity"
+                },
+                "atLeast": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                }
+              },
+              "required": [
+                "type",
+                "atLeast"
+              ],
+              "additionalProperties": false,
+              "description": "Trigram Jaccard similarity of the normalised venues is at least this."
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "creator-similarity"
+                },
+                "atLeast": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "firstOnly": {
+                  "description": "Compare only the first creator, which is the §5.6 fuzzy rule.",
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "type",
+                "atLeast"
+              ],
+              "additionalProperties": false,
+              "description": "Overlap of the normalised creator names."
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "year-within"
+                },
+                "years": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 50
+                }
+              },
+              "required": [
+                "type",
+                "years"
+              ],
+              "additionalProperties": false,
+              "description": "The two years differ by at most this. §5.6 uses ± 1."
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "field"
+                },
+                "field": {
+                  "$ref": "#/$defs/DedupField"
+                },
+                "side": {
+                  "$ref": "#/$defs/DedupSide"
+                },
+                "match": {
+                  "$ref": "#/$defs/Matcher"
+                }
+              },
+              "required": [
+                "type",
+                "field",
+                "match"
+              ],
+              "additionalProperties": false,
+              "description": "Match one field on one or both sides. `side` defaults to `either`."
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "same-field"
+                },
+                "field": {
+                  "$ref": "#/$defs/DedupField"
+                }
+              },
+              "required": [
+                "type",
+                "field"
+              ],
+              "additionalProperties": false,
+              "description": "The two sides agree on a field, compared after case and whitespace normalisation."
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "always"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": false,
+              "description": "Matches every pair."
+            }
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "all": {
+              "minItems": 1,
+              "maxItems": 64,
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/DedupCondition"
+              }
+            }
+          },
+          "required": [
+            "all"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "any": {
+              "minItems": 1,
+              "maxItems": 64,
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/DedupCondition"
+              }
+            }
+          },
+          "required": [
+            "any"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "not": {
+              "$ref": "#/$defs/DedupCondition"
+            }
+          },
+          "required": [
+            "not"
+          ],
+          "additionalProperties": false
+        }
+      ],
+      "description": "A condition tree. `all`, `any` and `not` compose the leaves; the leaves read the pair."
+    },
+    "DedupField": {
+      "type": "string",
+      "enum": [
+        "source",
+        "item-type",
+        "title",
+        "venue",
+        "correspondent",
+        "container"
+      ]
+    },
+    "DedupSide": {
+      "type": "string",
+      "enum": [
+        "left",
+        "right",
+        "either",
+        "both"
+      ],
+      "description": "`left` is the candidate, `right` is the record already in the library."
+    },
+    "DedupAction": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "merge"
+            },
+            "winner": {
+              "$ref": "#/$defs/MergeWinner"
+            }
+          },
+          "required": [
+            "type",
+            "winner"
+          ],
+          "additionalProperties": false,
+          "description": "Propose a merge. The loser goes to trash with a reversible merge record; this rule set does not do that."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "link"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": false,
+          "description": "Propose attaching the candidate document to the existing item rather than creating a second one."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "flag"
+            },
+            "reasonCode": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[a-z][a-z0-9_]*$"
+            },
+            "explanation": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            },
+            "severity": {
+              "$ref": "#/$defs/RuleReviewSeverity"
+            }
+          },
+          "required": [
+            "type",
+            "explanation"
+          ],
+          "additionalProperties": false,
+          "description": "Route the pair to the review queue with a stored explanation, deciding nothing."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "ignore"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": false,
+          "description": "Declare the pair not a duplicate, so a later pass does not raise it again."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "set-confidence"
+            },
+            "confidence": {
+              "$ref": "#/$defs/Confidence"
+            }
+          },
+          "required": [
+            "type",
+            "confidence"
+          ],
+          "additionalProperties": false,
+          "description": "Attach a confidence to the decision."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "stop"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": false,
+          "description": "Apply nothing further."
+        }
+      ]
+    },
+    "MergeWinner": {
+      "type": "string",
+      "enum": [
+        "newest",
+        "oldest",
+        "most-complete",
+        "left",
+        "right"
+      ],
+      "description": "The winner rule of CONCEPT.md §5.6: newest dateAdded, oldest, most complete, or a named side."
+    }
+  }
+}

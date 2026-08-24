@@ -7,7 +7,7 @@
  * behind that looks like a blob.
  */
 import { createHash } from 'node:crypto';
-import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 
@@ -58,14 +58,15 @@ describe('LocalFsBackend', () => {
     expect(await store.getBuffer(result.sha256)).toEqual(whole);
   });
 
-  it('does not rewrite a blob it already holds', async () => {
+  it('does not rewrite a blob it already holds and has verified', async () => {
     const store = backend();
     const bytes = Buffer.from('the same bytes twice', 'utf8');
 
     const first = await store.put(bytes);
     const beforeMtime = statSync(store.path(first.sha256)).mtimeMs;
 
-    // Mark the stored file so that a rewrite would be visible: the store must not touch it.
+    // Mark the stored file so that a rewrite would be visible. The marker is the same length, so
+    // the default `size` verification is satisfied and the store must leave the file alone.
     const marker = Buffer.from('TAMPERED bytes twice', 'utf8');
     expect(marker.byteLength).toBe(bytes.byteLength);
     writeFileSync(store.path(first.sha256), marker);
@@ -73,9 +74,69 @@ describe('LocalFsBackend', () => {
     const second = await store.put(bytes);
 
     expect(second.created).toBe(false);
+    expect(second.repaired).toBe(false);
     expect(second.sha256).toBe(first.sha256);
     expect(readFileSync(store.path(first.sha256))).toEqual(marker);
     expect(statSync(store.path(first.sha256)).mtimeMs).toBeGreaterThanOrEqual(beforeMtime);
+  });
+
+  /**
+   * The C1 regression.
+   *
+   * A file at the digest path is an assertion, not evidence. Before the fix, `put` took the
+   * assertion for proof: re-putting the correct bytes over a truncated blob discarded them, said
+   * `created: false`, and reported the corrupt file's size — silent data loss of exactly the kind
+   * ADR-0004 says cannot happen here.
+   */
+  it('repairs a truncated blob from the bytes of a later put rather than discarding them', async () => {
+    const store = backend();
+    const bytes = Buffer.from('X'.repeat(1800), 'utf8');
+
+    const first = await store.put(bytes);
+    expect(first.created).toBe(true);
+
+    // Rot: the bytes go, the name that asserts their digest stays.
+    writeFileSync(store.path(first.sha256), Buffer.from('TRUNCATED', 'utf8'));
+    expect(statSync(store.path(first.sha256)).size).toBe(9);
+
+    const second = await store.put(bytes);
+
+    expect(second.repaired).toBe(true);
+    expect(second.created).toBe(true);
+    expect(second.size).toBe(1800);
+    expect(readFileSync(store.path(first.sha256))).toEqual(bytes);
+    expect(await store.getBuffer(first.sha256)).toEqual(bytes);
+    expect(await store.verify(first.sha256)).toBe(true);
+  });
+
+  it('catches rot that kept the length, when asked to verify the digest', async () => {
+    const store = backend();
+    const bytes = Buffer.from('the same bytes twice', 'utf8');
+    const rotted = Buffer.from('the sane bytes twice', 'utf8');
+    expect(rotted.byteLength).toBe(bytes.byteLength);
+
+    const first = await store.put(bytes);
+    writeFileSync(store.path(first.sha256), rotted);
+
+    const second = await store.put(bytes, { verify: 'digest' });
+
+    expect(second.repaired).toBe(true);
+    expect(readFileSync(store.path(first.sha256))).toEqual(bytes);
+  });
+
+  it('verifies the digest on every put when the backend is built that way', async () => {
+    const temp = makeTempDirectory();
+    directories.push(temp);
+    const store = new LocalFsBackend({ root: temp.path, verifyOnPut: 'digest' });
+
+    const bytes = Buffer.from('rot me in place', 'utf8');
+    const first = await store.put(bytes);
+    const rotted = Buffer.from('rot me in plaice'.slice(0, bytes.byteLength), 'utf8');
+    expect(rotted.byteLength).toBe(bytes.byteLength);
+    writeFileSync(store.path(first.sha256), rotted);
+
+    expect((await store.put(bytes)).repaired).toBe(true);
+    expect(readFileSync(store.path(first.sha256))).toEqual(bytes);
   });
 
   it('answers has, stat and get, and reports a missing blob rather than inventing one', async () => {
@@ -125,6 +186,35 @@ describe('LocalFsBackend', () => {
     // The root holds the temp directory and nothing that looks like a blob.
     expect(readdirSync(store.root)).toEqual(['.tmp']);
     expect(readdirSync(join(store.root, '.tmp'))).toEqual([]);
+  });
+
+  /** m1: an interrupted write leaves a `.part` file, and a store that never says so fills a disk. */
+  it('reports the partial writes left in .tmp, and sweeps the ones that are old enough', async () => {
+    const store = backend();
+    await store.put(Buffer.from('a real blob', 'utf8'));
+
+    const failing = new Readable({
+      read() {
+        this.push(Buffer.from('half a file', 'utf8'));
+        this.destroy(new Error('scanner went away'));
+      },
+    });
+    await expect(store.put(failing)).rejects.toThrow(/scanner went away/u);
+    // That one cleaned up after itself; a killed process does not, so simulate the leftover.
+    const abandoned = join(store.root, '.tmp', '01JABANDONEDABANDONEDABANDO.part');
+    writeFileSync(abandoned, Buffer.from('half a scan', 'utf8'));
+    utimesSync(abandoned, new Date(Date.now() - 7_200_000), new Date(Date.now() - 7_200_000));
+    const fresh = join(store.root, '.tmp', '01JFRESHFRESHFRESHFRESHFRE.part');
+    writeFileSync(fresh, Buffer.from('still uploading', 'utf8'));
+
+    const stray = await store.listStrayTempFiles();
+    expect(stray.map((file) => file.path).sort()).toEqual([abandoned, fresh].sort());
+    expect(stray.find((file) => file.path === abandoned)?.size).toBe(11);
+
+    const swept = await store.sweepTempFiles();
+    expect(swept).toEqual({ removed: 1, bytes: 11 });
+    expect(existsSync(abandoned)).toBe(false);
+    expect(existsSync(fresh)).toBe(true);
   });
 
   it('refuses anything that is not a digest before it reaches a path join', () => {

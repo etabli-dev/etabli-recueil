@@ -1,0 +1,35 @@
+{
+  "count": 2,
+  "next": null,
+  "previous": null,
+  "all": [
+    1,
+    2
+  ],
+  "results": [
+    {
+      "id": 1,
+      "slug": "nach-jahr-und-korrespondent",
+      "name": "Nach Jahr und Korrespondent",
+      "path": "{created_year}/{correspondent}",
+      "match": "",
+      "matching_algorithm": 6,
+      "is_insensitive": true,
+      "document_count": 5,
+      "owner": 1,
+      "user_can_change": true
+    },
+    {
+      "id": 2,
+      "slug": "steuerunterlagen",
+      "name": "Steuerunterlagen",
+      "path": "steuer/{created_year}",
+      "match": "",
+      "matching_algorithm": 6,
+      "is_insensitive": true,
+      "document_count": 1,
+      "owner": 1,
+      "user_can_change": true
+    }
+  ]
+}

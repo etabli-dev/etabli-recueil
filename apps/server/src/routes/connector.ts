@@ -9,10 +9,15 @@
  * no modification.
  *
  * The consequence the ADR also states: **the protocol is undocumented and may change.** Everything
- * below is written against the shapes the extension sends and expects as of Zotero Connector 5.0.x
- * and the Zotero 7 client's `connector/server_connector.js`. Where the shape could not be confirmed
- * from a specification — because there is none — the reading is stated in the comment above the
- * handler rather than presented as fact. See `apps/server/README.md`, "Connector compatibility".
+ * below is written against the shapes the extension sends and expects, read out of verbatim
+ * excerpts of the upstream sources captured at pinned commits — `zotero/zotero-connectors` at
+ * `c279ccc` and `zotero/zotero` at `f2a42be`, in `fixtures/zotero-connector/`.
+ * `test/connector-upstream.test.ts` runs that captured code over these handlers' real responses,
+ * so the compatibility claims here are checked against the client rather than against our reading
+ * of it. What that still does not establish — that a capture completes end to end in a browser —
+ * is stated in `apps/server/README.md`, "Connector compatibility". Where a shape could not be
+ * confirmed even from the source, the reading is stated in the comment above the handler rather
+ * than presented as fact.
  *
  * ## Where it listens
  *
@@ -46,7 +51,6 @@ import {
   ConnectorCollectionResponseSchema,
   ConnectorPingResponseSchema,
   ConnectorSaveItemsResponseSchema,
-  ConnectorSessionProgressResponseSchema,
 } from '../schemas.js';
 import { parseOrThrow } from '../validate.js';
 
@@ -56,10 +60,22 @@ import { parseOrThrow } from '../validate.js';
  * Recorded here and in the README because ADR-0006 pins versions deliberately: when the protocol
  * moves, the thing that tells a maintainer what to diff against is this string.
  */
-export const MATCHED_CONNECTOR_VERSION = 'Zotero Connector 5.0.x / Zotero 7 client protocol';
+export const MATCHED_CONNECTOR_VERSION =
+  'zotero-connectors@c279ccc / zotero@f2a42be (see fixtures/zotero-connector/)';
 
 /** What the connector advertises itself as. Echoed so the extension believes it found a client. */
-const ANNOUNCED_ZOTERO_VERSION = '7.0.0';
+export const ANNOUNCED_ZOTERO_VERSION = '7.0.0';
+
+/**
+ * The one library the connector can see.
+ *
+ * Recueil is single-library (CONCEPT §1.4), so there is one save target and its numeric id is 1 —
+ * the same number Zotero gives the personal library. `treeViewID` is the string form the extension
+ * uses to identify a target: `L<libraryID>` for a library, `C<collectionID>` for a collection.
+ */
+const CONNECTOR_LIBRARY_ID = 1;
+const CONNECTOR_LIBRARY_NAME = 'Recueil';
+const CONNECTOR_LIBRARY_TREE_VIEW_ID = `L${CONNECTOR_LIBRARY_ID}`;
 
 /* -------------------------------------------------------------------------------------------- */
 /* Request shapes                                                                                  */
@@ -128,8 +144,6 @@ const SaveSnapshotSchema = z.looseObject({
   pdf: z.boolean().optional(),
   singleFile: z.boolean().optional(),
 });
-
-const SessionProgressSchema = z.looseObject({ sessionID: z.string().max(128) });
 
 /* -------------------------------------------------------------------------------------------- */
 /* Zotero's vocabulary, mapped                                                                     */
@@ -260,53 +274,6 @@ const buildExtra = (item: Record<string, unknown>, mappedType: string): string |
 };
 
 /* -------------------------------------------------------------------------------------------- */
-/* Sessions                                                                                        */
-/* -------------------------------------------------------------------------------------------- */
-
-/**
- * What one capture produced, remembered so `sessionProgress` can answer.
- *
- * In memory and not in the database: a session lives for the few seconds between the browser
- * starting a save and the progress popup closing, and a row per capture would be a table nobody
- * reads afterwards. The map is bounded and swept, so a browser that never asks for progress cannot
- * grow it without limit.
- */
-interface ConnectorSession {
-  readonly startedAt: number;
-  readonly entries: { id: string; title: string; itemType: string; progress: number }[];
-  done: boolean;
-}
-
-const SESSION_TTL_MS = 10 * 60_000;
-const MAX_SESSIONS = 256;
-
-class SessionStore {
-  private readonly sessions = new Map<string, ConnectorSession>();
-
-  record(sessionId: string, session: ConnectorSession): void {
-    this.sweep();
-    this.sessions.set(sessionId, session);
-  }
-
-  get(sessionId: string): ConnectorSession | undefined {
-    this.sweep();
-    return this.sessions.get(sessionId);
-  }
-
-  private sweep(): void {
-    const cutoff = Date.now() - SESSION_TTL_MS;
-    for (const [id, session] of this.sessions) {
-      if (session.startedAt < cutoff) this.sessions.delete(id);
-    }
-    while (this.sessions.size > MAX_SESSIONS) {
-      const oldest = this.sessions.keys().next();
-      if (oldest.done === true) break;
-      this.sessions.delete(oldest.value as string);
-    }
-  }
-}
-
-/* -------------------------------------------------------------------------------------------- */
 /* Saving                                                                                          */
 /* -------------------------------------------------------------------------------------------- */
 
@@ -427,13 +394,6 @@ const saveZoteroItem = (
 
 export const connectorRoutes: FastifyPluginAsync = async (app) => {
   const { library: recueil, events } = app.recueil;
-  const sessions = new SessionStore();
-
-  // The client the connector is looking for announces itself on every response.
-  app.addHook('onSend', async (request, reply, payload) => {
-    if (request.url.startsWith('/connector/')) reply.header('x-zotero-version', ANNOUNCED_ZOTERO_VERSION);
-    return payload;
-  });
 
   /**
    * `/connector/ping` — the handshake.
@@ -477,21 +437,44 @@ export const connectorRoutes: FastifyPluginAsync = async (app) => {
    * itself sends when nothing but the library is selected. The extension renders "Saving to My
    * Library".
    *
-   * `targets` — the list the connector's collection picker shows — is **not** sent. The field is
-   * optional in the responses observed, and offering a picker whose choices this implementation
-   * would then ignore would be worse than not offering one. Recorded as a known limitation rather
-   * than presented as compatibility.
+   * **`targets` is not optional.** The extension's progress window does
+   * `response.targets.filter(…)` with no guard —
+   * `src/common/inject/progressWindow_inject.js` line 153 at `c279ccc`, captured verbatim in
+   * `fixtures/zotero-connector/` — so a response without it throws a `TypeError` on every capture.
+   * An earlier comment here claimed the field was optional; it was wrong, and the fixture is the
+   * reason this one is not a claim.
+   *
+   * Exactly one target is offered, the library root, because exactly one place exists for a save to
+   * land: `saveItems` files into the library and not into a collection. Offering the collection
+   * tree would be offering choices this implementation ignores, which is the one thing worse than a
+   * short list. `id` is Zotero's `treeViewID` form — `L<libraryID>` for a library, `C<id>` for a
+   * collection — because that is what the extension compares against `recentSaveTargets`.
+   *
+   * `tags` is sent because `ping` advertises `supportsTagsAutocomplete`. It is keyed by the same
+   * `treeViewID` and holds `{ tag }` objects, which is the shape the connector unwraps. Empty for
+   * now: autocompleting against the whole tag table is a query this endpoint should not run
+   * synchronously on every capture, and an empty list degrades to "no suggestions" rather than to
+   * a crash.
    */
   app.post('/connector/getSelectedCollection', { config: { public: true } }, async (_request, reply) =>
     reply.type('application/json; charset=utf-8').send(
       ConnectorCollectionResponseSchema.parse({
-        libraryID: 1,
-        libraryName: 'Recueil',
+        libraryID: CONNECTOR_LIBRARY_ID,
+        libraryName: CONNECTOR_LIBRARY_NAME,
         libraryEditable: true,
         editable: true,
         filesEditable: true,
         id: null,
-        name: 'Recueil',
+        name: CONNECTOR_LIBRARY_NAME,
+        targets: [
+          {
+            id: CONNECTOR_LIBRARY_TREE_VIEW_ID,
+            name: CONNECTOR_LIBRARY_NAME,
+            filesEditable: true,
+            level: 0,
+          },
+        ],
+        tags: { [CONNECTOR_LIBRARY_TREE_VIEW_ID]: [] },
       }),
     ),
   );
@@ -499,9 +482,10 @@ export const connectorRoutes: FastifyPluginAsync = async (app) => {
   /**
    * `/connector/saveItems` — the capture itself.
    *
-   * The body carries `items` (the translator's output), `uri` (the page) and `sessionID` (which
-   * `sessionProgress` then polls). The client answers 201 with `{ items: [...] }`, and that is what
-   * is answered here.
+   * The body carries `items` (the translator's output), `uri` (the page) and `sessionID`. The
+   * client answers 201 with `{ items: [...] }`, and that is what is answered here. `sessionID` is
+   * accepted and ignored: it exists so that a later `updateSession` can revise a save, and Recueil
+   * does not answer that endpoint.
    *
    * Every item is saved with `connector` provenance and left unlocked, so a later resolver run may
    * improve a field the translator guessed at (P4-1). Attachments named in the payload are *not*
@@ -510,7 +494,6 @@ export const connectorRoutes: FastifyPluginAsync = async (app) => {
    */
   app.post('/connector/saveItems', { config: { public: true } }, async (request, reply) => {
     const body = parseOrThrow(SaveItemsSchema, request.body, 'body');
-    const sessionId = body.sessionID ?? newId();
 
     const saved = body.items.map((item) => saveZoteroItem(recueil, item, request.actor, body.uri));
 
@@ -523,12 +506,6 @@ export const connectorRoutes: FastifyPluginAsync = async (app) => {
         'connector',
       );
     }
-
-    sessions.record(sessionId, {
-      startedAt: Date.now(),
-      entries: saved.map((entry) => ({ ...entry, progress: 100 })),
-      done: true,
-    });
 
     return reply
       .code(201)
@@ -561,7 +538,6 @@ export const connectorRoutes: FastifyPluginAsync = async (app) => {
    */
   app.post('/connector/saveSnapshot', { config: { public: true } }, async (request, reply) => {
     const body = parseOrThrow(SaveSnapshotSchema, request.body, 'body');
-    const sessionId = body.sessionID ?? newId();
     const title = body.title ?? body.url;
 
     const record = recueil.library.createItem(
@@ -579,44 +555,12 @@ export const connectorRoutes: FastifyPluginAsync = async (app) => {
 
     publishItemCreated(events, recueil, recueil.library.getItem(record.item.id), request.actor, 'connector');
 
-    sessions.record(sessionId, {
-      startedAt: Date.now(),
-      entries: [{ id: record.item.id, title, itemType: 'webpage', progress: 100 }],
-      done: true,
-    });
-
     return reply
       .code(201)
       .type('application/json; charset=utf-8')
       .send({ id: record.item.id, key: record.item.publicId, title });
   });
 
-  /**
-   * `/connector/sessionProgress` — what the browser's progress popup polls.
-   *
-   * Recueil's saves are synchronous — the item is committed before `saveItems` answers — so a
-   * session is always complete by the time this is asked, and every entry reports 100. The endpoint
-   * exists because the extension polls it regardless and treats a 404 as a failed save.
-   *
-   * An unknown session is answered as done with no items rather than as an error, because the
-   * alternative is a progress popup that spins for ever after a server restart.
-   */
-  app.post('/connector/sessionProgress', { config: { public: true } }, async (request, reply) => {
-    const body = parseOrThrow(SessionProgressSchema, request.body, 'body');
-    const session = sessions.get(body.sessionID);
-
-    return reply.type('application/json; charset=utf-8').send(
-      ConnectorSessionProgressResponseSchema.parse({
-        items: (session?.entries ?? []).map((entry) => ({
-          id: entry.id,
-          title: entry.title,
-          itemType: entry.itemType,
-          progress: entry.progress,
-        })),
-        done: session?.done ?? true,
-      }),
-    );
-  });
 };
 
 /* -------------------------------------------------------------------------------------------- */
@@ -708,25 +652,6 @@ export const connectorPaths: ZodOpenApiPathsObject = {
       ),
       responses: {
         '201': jsonResponse('The created item.', z.looseObject({ id: z.string(), key: z.string(), title: z.string() })),
-        ...problems('422'),
-      },
-    }),
-  },
-  '/connector/sessionProgress': {
-    post: operation({
-      operationId: 'connectorSessionProgress',
-      summary: 'Progress of a capture session',
-      description:
-        "Recueil's saves are synchronous, so a session is complete by the time this is asked and " +
-        'every entry reports 100. An unknown session answers `done: true` with no items, because ' +
-        'the alternative is a progress popup that spins for ever after a restart.' + connectorNote,
-      tags: CONNECTOR_TAGS,
-      security: [],
-      requestBody: jsonBody(
-        z.looseObject({ sessionID: z.string() }).meta({ id: 'ConnectorSessionProgressRequest', unusedIO: 'input' }),
-      ),
-      responses: {
-        '200': jsonResponse('The session state.', ConnectorSessionProgressResponseSchema),
         ...problems('422'),
       },
     }),

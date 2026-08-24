@@ -1,0 +1,46 @@
+{
+  "name": "@recueil/rules",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The ingestion and deduplication rule engine: one declarative, versioned rule format in YAML or JSON, a linear-time regular-expression engine, deterministic precedence, an explicable trace and a dry run that changes nothing.",
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./rule-set.schema.json": "./schema/rule-set.schema.json",
+    "./package.json": "./package.json"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "schema",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc --build tsconfig.build.json",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --build tsconfig.build.json && tsc --noEmit -p tsconfig.json",
+    "test": "tsc --build tsconfig.build.json && vitest run",
+    "test:watch": "vitest",
+    "json-schema": "pnpm run build && node scripts/write-json-schema.mjs"
+  },
+  "dependencies": {
+    "@recueil/schemas": "workspace:*",
+    "yaml": "^2.9.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.11"
+  }
+}

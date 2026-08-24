@@ -76,7 +76,15 @@ const manifest = measure(built, {
 manifest.formats = measureTextFixtures(FIXTURES);
 
 if (options.counts && isDefaultOut) {
-  writeManifest(path.join(FIXTURES, 'expected-counts.json'), manifest);
+  const countsFile = path.join(FIXTURES, 'expected-counts.json');
+  // `fixtures/make-ingest.mjs` owns the `ingest` key of this file and this generator owns `zotero`
+  // and `formats`. Each carries the other's work forward rather than rewriting the whole document,
+  // so the two can be run in either order and neither deletes what the other measured.
+  if (fs.existsSync(countsFile)) {
+    const committed = JSON.parse(fs.readFileSync(countsFile, 'utf8'));
+    if (committed.ingest) manifest.ingest = committed.ingest;
+  }
+  writeManifest(countsFile, manifest);
 }
 
 if (!options.quiet) {

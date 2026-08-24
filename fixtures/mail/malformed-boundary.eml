@@ -1,0 +1,25 @@
+Date: Thu, 26 Oct 2023 13:58:02 +0200
+From: Praxis Dr. Lindqvist <praxis@lindqvist.example>
+To: Archiv Recueil <archiv@recueil.invalid>
+Subject: Befund vom 26.10.2023
+Message-ID: <lindqvist.20231026.1358@lindqvist.example>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary=--=_Part_9182_1839
+
+This is a multi-part message in MIME format.
+----=_Part_9182_1839
+Content-Type: text/plain; charset=us-ascii
+Content-Transfer-Encoding: 7bit
+
+Guten Tag,
+
+anbei der Befund. Bitte um Rueckmeldung.
+
+--=_Part_9182_1839
+Content-Type: application/pdf; name="Befund.pdf"
+Content-Disposition: attachment; filename="Befund.pdf"
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjQKJUNvcnJ1cHRlZCBhdHRhY2htZW50IC0gdGhlIGRlbGltaXRlciBhYm92ZSBp
+cyB0d28gaHlwaGVucyBzaG9ydCwgc28gdGhpcyBpcyBub3QgYSBwYXJ0LiBUaGVyZSBpcyBh
+bHNvIG5vIGNsb3NpbmcgZGVsaW1pdGVyLgo=

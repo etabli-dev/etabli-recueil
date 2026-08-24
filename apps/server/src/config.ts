@@ -105,6 +105,34 @@ export const ServerEnvSchema = z.object({
    * is attributable in the audit log in both modes (P4, AL3).
    */
   RECUEIL_REQUIRE_AUTH: withDefault(booleanish, 'false'),
+  /**
+   * The key that encrypts stored ingestion-source and storage-backend credentials.
+   *
+   * 32 bytes, as base64 or as 64 hex characters. Unset means this server will not store a
+   * credential at all: a source with a password is refused with a 409 naming this variable, and a
+   * source without one is configured as usual. There is deliberately no derived fallback — see
+   * `ingestion/secrets.ts` (CONCEPT.md §5.15).
+   */
+  RECUEIL_SECRET_KEY: optionalString.optional(),
+  /**
+   * Directories a watched-folder source may be pointed at, comma-separated and absolute.
+   *
+   * Unset means "no allow-list", and a root is then any absolute directory that exists. Set it on
+   * a deployment where the token holder and the machine owner are not the same person: a folder
+   * root arrives in a request body, and a request body is hostile until it has been resolved and
+   * checked against something.
+   */
+  RECUEIL_INGEST_ALLOWED_ROOTS: optionalString.optional(),
+  /** Where the ingestion pipeline makes its scratch directories. Defaults to the OS temporary directory. */
+  RECUEIL_INGEST_SCRATCH_PATH: optionalString.optional(),
+  /** The stage-9 confidence gate (CONCEPT.md §5.3). At or above it an item is created. */
+  RECUEIL_INGEST_CONFIDENCE_THRESHOLD: withDefault(
+    z
+      .string()
+      .regex(/^(?:0(?:\.\d+)?|1(?:\.0+)?)$/u, { message: 'expected a number between 0 and 1' })
+      .transform((value) => Number.parseFloat(value)),
+    '0.75',
+  ),
   /** The largest single uploaded file. Default 512 MiB — a large scan, not a disk image. */
   RECUEIL_MAX_UPLOAD_BYTES: withDefault(
     z
@@ -138,6 +166,14 @@ export interface ServerConfig {
   readonly requireAuth: boolean;
   /** Upload ceiling, in bytes, per file. */
   readonly maxUploadBytes: number;
+  /** The credential-encryption key, unparsed. Absent when this server stores no credentials. */
+  readonly secretKey?: string;
+  /** Absolute directories a folder source may watch. Empty means no allow-list is configured. */
+  readonly ingestAllowedRoots: readonly string[];
+  /** Scratch root for the ingestion pipeline, when one was configured. */
+  readonly ingestScratchPath?: string;
+  /** The stage-9 confidence gate. */
+  readonly ingestConfidenceThreshold: number;
 }
 
 /**
@@ -201,5 +237,28 @@ export const loadConfig = (env: NodeJS.ProcessEnv = process.env): ServerConfig =
     version: parsed.RECUEIL_VERSION,
     requireAuth: parsed.RECUEIL_REQUIRE_AUTH,
     maxUploadBytes: parsed.RECUEIL_MAX_UPLOAD_BYTES,
+    secretKey: parsed.RECUEIL_SECRET_KEY,
+    ingestAllowedRoots: Object.freeze(parseRootList(parsed.RECUEIL_INGEST_ALLOWED_ROOTS)),
+    ingestScratchPath:
+      parsed.RECUEIL_INGEST_SCRATCH_PATH === undefined
+        ? undefined
+        : resolve(parsed.RECUEIL_INGEST_SCRATCH_PATH),
+    ingestConfidenceThreshold: parsed.RECUEIL_INGEST_CONFIDENCE_THRESHOLD,
   });
 };
+
+/**
+ * The allow-list, resolved to absolute paths.
+ *
+ * A relative entry is resolved against the process's working directory rather than rejected,
+ * because an operator who wrote `./consume` in a compose file meant a directory and not a mistake —
+ * but it is resolved *here*, once, so that every later comparison is between two absolute paths.
+ */
+const parseRootList = (value: string | undefined): string[] =>
+  value === undefined
+    ? []
+    : value
+        .split(',')
+        .map((entry) => entry.trim())
+        .filter((entry) => entry !== '')
+        .map((entry) => resolve(entry));

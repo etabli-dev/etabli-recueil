@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Recueil">
+  <title>Recueil</title>
+  <rect width="512" height="512" rx="96" fill="#16181d"/>
+  <!-- Three sheets gathered: the one-liner is "gathers documents from anywhere". -->
+  <g fill="none" stroke="#7fb3f0" stroke-width="20" stroke-linejoin="round">
+    <rect x="120" y="96"  width="220" height="150" rx="12" transform="rotate(-8 230 171)"/>
+    <rect x="150" y="180" width="220" height="150" rx="12" transform="rotate(4 260 255)"/>
+  </g>
+  <rect x="172" y="266" width="220" height="150" rx="12" fill="#7fb3f0"/>
+  <text x="282" y="376" font-family="Georgia, 'Times New Roman', serif" font-size="120" font-weight="700"
+        text-anchor="middle" fill="#16181d">R</text>
+</svg>

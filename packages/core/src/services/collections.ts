@@ -409,9 +409,21 @@ export class CollectionService {
       }
 
       const now = nowTimestamp();
+
+      // `position` orders siblings, and the collection is about to have different ones. Keeping
+      // the old number lands it on top of whichever sibling already holds it, which makes the
+      // sidebar order depend on the row order of a tie-break rather than on anything a person
+      // chose. Moved collections go to the end of their new parent, which is where a person who
+      // has just filed something expects to find it; a caller who wants it elsewhere calls
+      // `update` with a position afterwards.
+      const position =
+        parentId === current.parentId
+          ? current.position
+          : this.nextPosition(tx, current.ownerUserId, parentId);
+
       try {
         tx.update(collections)
-          .set({ parentId, parentKey: parentId ?? '', depth, updatedAt: now })
+          .set({ parentId, parentKey: parentId ?? '', depth, position, updatedAt: now })
           .where(eq(collections.id, id))
           .run();
       } catch (error) {
@@ -437,13 +449,13 @@ export class CollectionService {
           action: 'collection.moved',
           entityType: 'collection',
           entityId: id,
-          before: { parentId: current.parentId, depth: current.depth },
-          after: { parentId, depth },
+          before: { parentId: current.parentId, depth: current.depth, position: current.position },
+          after: { parentId, depth, position },
         },
         tx,
       );
 
-      return { ...current, parentId, parentKey: parentId ?? '', depth, updatedAt: now };
+      return { ...current, parentId, parentKey: parentId ?? '', depth, position, updatedAt: now };
     });
   }
 

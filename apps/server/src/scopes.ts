@@ -43,6 +43,12 @@ export const SCOPE_RESOURCES = [
   'export',
   'events',
   'trash',
+  // Phase 2. `ingestion` covers the sources, the work queue and the review queue: they are one
+  // job to a person, and a token that may configure a mailbox may certainly see what it produced.
+  // `storage` is separate because a backend configuration holds credentials for a remote store.
+  'ingestion',
+  'rules',
+  'storage',
   'connector',
   'tokens',
   'system',

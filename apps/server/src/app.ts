@@ -24,6 +24,7 @@
  *    database out from under it.
  */
 import { newId } from '@recueil/core';
+import { ensureIngestSchema } from '@recueil/ingest';
 import type { Recueil } from '@recueil/core';
 import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
@@ -35,8 +36,17 @@ import { authPlugin } from './auth.js';
 import type { ServerConfig } from './config.js';
 import { EventBus } from './events.js';
 import { ensureStoragePath } from './health.js';
+import { ensureIngestionConfigSchema } from './ingestion/install.js';
+import { QueueService } from './ingestion/queue.js';
+import { ReviewService } from './ingestion/review.js';
+import { RuleStore } from './ingestion/rules-store.js';
+import { IngestionRunner } from './ingestion/runner.js';
+import { SecretBox } from './ingestion/secrets.js';
+import { IngestionSourceService } from './ingestion/sources.js';
+import { StorageBackendService } from './ingestion/storage.js';
 import { ApiError, sendProblem, toProblem } from './problem.js';
 import { apiRoutes } from './routes/index.js';
+import { ANNOUNCED_ZOTERO_VERSION } from './routes/connector.js';
 import { healthRoutes } from './routes/health.js';
 import { openApiRoutes } from './routes/openapi.js';
 import { systemRoutes } from './routes/system.js';
@@ -63,6 +73,20 @@ export interface RecueilContext {
   readonly tokens: TokenService;
   /** The lifecycle event bus behind `GET /api/v1/events` (`spec/hooks.md` §7). */
   readonly events: EventBus;
+  /** Phase 2: the configured sources, the queue, the review queue, the rules and the backends. */
+  readonly ingestion: IngestionContext;
+}
+
+/** Everything `/api/v1/ingestion`, `/api/v1/rules` and `/api/v1/storage` are served from. */
+export interface IngestionContext {
+  readonly sources: IngestionSourceService;
+  readonly queue: QueueService;
+  readonly review: ReviewService;
+  readonly rules: RuleStore;
+  readonly storage: StorageBackendService;
+  readonly runner: IngestionRunner;
+  /** False when no `RECUEIL_SECRET_KEY` is configured: a credential cannot then be stored. */
+  readonly secretsAvailable: boolean;
 }
 
 declare module 'fastify' {
@@ -96,6 +120,13 @@ export interface BuildAppDeps {
   readonly closeLibraryOnShutdown?: boolean;
   /** Extra Fastify options, merged last. Escape hatch for the desktop sidecar and for tests. */
   readonly fastify?: FastifyServerOptions;
+  /**
+   * The `fetch` the WebDAV source and the WebDAV storage backend use.
+   *
+   * Injected so a test can point a connection check at an in-process fake server without a socket
+   * or a container. Production leaves it unset and the global `fetch` is used.
+   */
+  readonly fetch?: typeof fetch;
 }
 
 export const buildApp = (deps: BuildAppDeps): FastifyInstance => {
@@ -147,6 +178,47 @@ export const buildApp = (deps: BuildAppDeps): FastifyInstance => {
   });
   const tokens = new TokenService(recueil.db, recueil.audit, recueil.user.id);
 
+  // The Phase 2 configuration tables are installed here rather than in a migration, for the reason
+  // `ingestion/install.ts` gives: they are not in `spec/data-model.md` and core's migration series
+  // is not this package's to extend. Idempotent, so a restart is free.
+  ensureIngestionConfigSchema(recueil.connection);
+  // `review_queue` and `ingest_checkpoints` belong to `@recueil/ingest`, which installs them from
+  // its own DDL. Calling it here means the review endpoints work before the first ingestion run
+  // rather than 404-ing until one has happened.
+  ensureIngestSchema(recueil.connection);
+
+  const secrets = SecretBox.fromConfig(config.secretKey);
+  const sources = new IngestionSourceService({
+    recueil,
+    secrets,
+    allowedRoots: config.ingestAllowedRoots,
+    ...(deps.fetch === undefined ? {} : { fetch: deps.fetch }),
+  });
+  const rules = new RuleStore(recueil);
+  const ingestion: IngestionContext = {
+    sources,
+    rules,
+    queue: new QueueService(recueil),
+    review: new ReviewService(recueil),
+    storage: new StorageBackendService({
+      recueil,
+      secrets,
+      ...(deps.fetch === undefined ? {} : { fetch: deps.fetch }),
+      ...(config.ingestScratchPath === undefined ? {} : { scratchDirectory: config.ingestScratchPath }),
+    }),
+    runner: new IngestionRunner({
+      recueil,
+      config,
+      events,
+      rules,
+      sources,
+      log: (level, message, data) => {
+        app.log[level]({ ...data }, message);
+      },
+    }),
+    secretsAvailable: secrets.available,
+  };
+
   app.decorate('recueil', {
     config,
     library: recueil,
@@ -154,6 +226,7 @@ export const buildApp = (deps: BuildAppDeps): FastifyInstance => {
     startedAt,
     tokens,
     events,
+    ingestion,
   } satisfies RecueilContext);
 
   app.register(sensible);
@@ -172,6 +245,17 @@ export const buildApp = (deps: BuildAppDeps): FastifyInstance => {
   // Echo the request id on every response, success or failure.
   app.addHook('onSend', async (request, reply, payload) => {
     if (!reply.hasHeader('x-request-id')) reply.header('x-request-id', request.id);
+    // The connector's transport reads `X-Zotero-Version` off every response and, on any status of
+    // 400 or more that lacks it, sets a *global* `isOnline = false` — see
+    // `fixtures/zotero-connector/connector.callMethod.online-state.js`, captured verbatim from
+    // `src/common/connector.js` at `c279ccc`. So one unimplemented `/connector/*` sub-call
+    // answering a bare 404 would take browser capture offline entirely rather than failing
+    // locally. The hook is registered here, on the root instance, and not inside the connector
+    // plugin: Fastify's encapsulation means a plugin's `onSend` never runs for the root
+    // `notFoundHandler`, which is exactly the response that most needs the header.
+    if (request.url.startsWith('/connector/')) {
+      reply.header('x-zotero-version', ANNOUNCED_ZOTERO_VERSION);
+    }
     return payload;
   });
 
@@ -242,6 +326,11 @@ export const buildApp = (deps: BuildAppDeps): FastifyInstance => {
   });
 
   app.addHook('onClose', async (instance) => {
+    // Ingestion runs continue after the response that started them, so a shutdown aborts them and
+    // waits: closing the database out from under a pipeline mid-commit is the one way an ingest can
+    // lose a document it has already told a source it had.
+    instance.log.info('draining ingestion runs');
+    await ingestion.runner.drain();
     instance.log.info('closing the library');
     if (deps.closeLibraryOnShutdown === true) recueil.close();
   });

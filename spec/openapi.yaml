@@ -256,6 +256,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Item'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
         '401':
           description: No usable credential was presented.
           content:
@@ -270,6 +276,12 @@ paths:
                 $ref: '#/components/schemas/ProblemDetails'
         '409':
           description: The write is refused by a uniqueness rule, a state rule or a data-model invariant.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
           content:
             application/problem+json:
               schema:
@@ -318,6 +330,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BulkResult'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
         '401':
           description: No usable credential was presented.
           content:
@@ -332,6 +350,12 @@ paths:
                 $ref: '#/components/schemas/ProblemDetails'
         '409':
           description: The write is refused by a uniqueness rule, a state rule or a data-model invariant.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
           content:
             application/problem+json:
               schema:
@@ -526,6 +550,12 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
         '422':
           description: The request is well-formed and its content is not valid. `errors` names each field.
           content:
@@ -607,6 +637,66 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/items/by-asn/{asn}:
+    get:
+      operationId: getItemByAsn
+      summary: The item holding an archive serial number
+      description: >-
+        The ASN is the number written on the paper in the drawer, so this is the lookup an office
+        user makes most. Live items only: trashing an item frees its number again, and a 404 here
+        means the number is available (§3.7).
+
+
+        **Scope:** `items:read`.
+      tags:
+        - Library
+      parameters:
+        - in: path
+          name: asn
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 9007199254740991
+            description: The archive serial number, a positive integer.
+          required: true
+          description: The archive serial number, a positive integer.
+      responses:
+        '200':
+          description: The item.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Item'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
         '422':
           description: The request is well-formed and its content is not valid. `errors` names each field.
           content:
@@ -617,8 +707,16 @@ paths:
     patch:
       operationId: writeOfficeFacet
       summary: Write office fields with provenance
-      description: |-
-        The office facet counterpart of `PATCH /items/{id}/bibliographic` (§3.7).
+      description: >-
+        The office facet counterpart of `PATCH /items/{id}/bibliographic` (§3.7): correspondent,
+        document date, ASN, amount, reference number, due date and period.
+
+
+        The ASN is unique across live items and the constraint is a partial unique index in the
+        schema, not a convention: a number already held by another live item is a 409 naming that
+        item, and the same 409 is produced if two writes race past the check. An amount needs a
+        currency and a currency needs an amount (`ck_item_office_amount`).
+
 
         **Scope:** `items:write`.
       tags:
@@ -680,6 +778,12 @@ paths:
                 $ref: '#/components/schemas/ProblemDetails'
         '412':
           description: The `If-Match` version is stale. Re-read and retry; nothing was merged (P1).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
           content:
             application/problem+json:
               schema:
@@ -774,6 +878,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ItemProvenance'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
         '401':
           description: No usable credential was presented.
           content:
@@ -788,6 +898,12 @@ paths:
                 $ref: '#/components/schemas/ProblemDetails'
         '404':
           description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
           content:
             application/problem+json:
               schema:
@@ -890,6 +1006,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Item'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
         '401':
           description: No usable credential was presented.
           content:
@@ -910,6 +1032,12 @@ paths:
                 $ref: '#/components/schemas/ProblemDetails'
         '409':
           description: The write is refused by a uniqueness rule, a state rule or a data-model invariant.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
           content:
             application/problem+json:
               schema:
@@ -1063,6 +1191,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Attachment'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
         '401':
           description: No usable credential was presented.
           content:
@@ -1083,6 +1217,12 @@ paths:
                 $ref: '#/components/schemas/ProblemDetails'
         '409':
           description: The write is refused by a uniqueness rule, a state rule or a data-model invariant.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
           content:
             application/problem+json:
               schema:
@@ -1175,6 +1315,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ItemCreatorPage'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
         '401':
           description: No usable credential was presented.
           content:
@@ -1195,6 +1341,12 @@ paths:
                 $ref: '#/components/schemas/ProblemDetails'
         '409':
           description: The write is refused by a uniqueness rule, a state rule or a data-model invariant.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
           content:
             application/problem+json:
               schema:
@@ -1286,6 +1438,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ItemTagPage'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
         '401':
           description: No usable credential was presented.
           content:
@@ -1300,6 +1458,12 @@ paths:
                 $ref: '#/components/schemas/ProblemDetails'
         '404':
           description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
           content:
             application/problem+json:
               schema:
@@ -1396,6 +1560,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DocumentUploadResult'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
         '401':
           description: No usable credential was presented.
           content:
@@ -1563,16 +1733,16 @@ paths:
             type: string
       responses:
         '200':
-          description: The whole document.
+          description: The whole document, in its own MIME type.
           content:
-            application/octet-stream:
+            '*/*':
               schema:
                 type: string
                 format: binary
         '206':
-          description: The requested byte range.
+          description: The requested byte range, in the document's own MIME type.
           content:
-            application/octet-stream:
+            '*/*':
               schema:
                 type: string
                 format: binary
@@ -1642,6 +1812,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Document'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
         '401':
           description: No usable credential was presented.
           content:
@@ -1662,6 +1838,12 @@ paths:
                 $ref: '#/components/schemas/ProblemDetails'
         '409':
           description: The write is refused by a uniqueness rule, a state rule or a data-model invariant.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
           content:
             application/problem+json:
               schema:
@@ -1761,6 +1943,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AttachmentPage'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
         '401':
           description: No usable credential was presented.
           content:
@@ -1775,6 +1963,12 @@ paths:
                 $ref: '#/components/schemas/ProblemDetails'
         '404':
           description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
           content:
             application/problem+json:
               schema:
@@ -1867,6 +2061,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Attachment'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
         '401':
           description: No usable credential was presented.
           content:
@@ -1887,6 +2087,12 @@ paths:
                 $ref: '#/components/schemas/ProblemDetails'
         '409':
           description: The write is refused by a uniqueness rule, a state rule or a data-model invariant.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
           content:
             application/problem+json:
               schema:
@@ -2047,6 +2253,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Collection'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
         '401':
           description: No usable credential was presented.
           content:
@@ -2061,6 +2273,12 @@ paths:
                 $ref: '#/components/schemas/ProblemDetails'
         '409':
           description: The write is refused by a uniqueness rule, a state rule or a data-model invariant.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
           content:
             application/problem+json:
               schema:
@@ -2199,6 +2417,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Collection'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
         '401':
           description: No usable credential was presented.
           content:
@@ -2219,6 +2443,12 @@ paths:
                 $ref: '#/components/schemas/ProblemDetails'
         '409':
           description: The write is refused by a uniqueness rule, a state rule or a data-model invariant.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
           content:
             application/problem+json:
               schema:
@@ -2262,6 +2492,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Collection'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
         '401':
           description: No usable credential was presented.
           content:
@@ -2282,6 +2518,12 @@ paths:
                 $ref: '#/components/schemas/ProblemDetails'
         '409':
           description: The write is refused by a uniqueness rule, a state rule or a data-model invariant.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
           content:
             application/problem+json:
               schema:
@@ -2403,6 +2645,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MembershipResult'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
         '401':
           description: No usable credential was presented.
           content:
@@ -2423,6 +2671,12 @@ paths:
                 $ref: '#/components/schemas/ProblemDetails'
         '409':
           description: The write is refused by a uniqueness rule, a state rule or a data-model invariant.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
           content:
             application/problem+json:
               schema:
@@ -2465,6 +2719,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MembershipResult'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
         '401':
           description: No usable credential was presented.
           content:
@@ -2479,6 +2739,12 @@ paths:
                 $ref: '#/components/schemas/ProblemDetails'
         '404':
           description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
           content:
             application/problem+json:
               schema:
@@ -2520,6 +2786,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Collection'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
         '401':
           description: No usable credential was presented.
           content:
@@ -2540,6 +2812,12 @@ paths:
                 $ref: '#/components/schemas/ProblemDetails'
         '409':
           description: The write is refused by a uniqueness rule, a state rule or a data-model invariant.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
           content:
             application/problem+json:
               schema:
@@ -2704,6 +2982,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Tag'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
         '401':
           description: No usable credential was presented.
           content:
@@ -2718,6 +3002,12 @@ paths:
                 $ref: '#/components/schemas/ProblemDetails'
         '409':
           description: The write is refused by a uniqueness rule, a state rule or a data-model invariant.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
           content:
             application/problem+json:
               schema:
@@ -2807,6 +3097,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Tag'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
         '401':
           description: No usable credential was presented.
           content:
@@ -2827,6 +3123,12 @@ paths:
                 $ref: '#/components/schemas/ProblemDetails'
         '409':
           description: The write is refused by a uniqueness rule, a state rule or a data-model invariant.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
           content:
             application/problem+json:
               schema:
@@ -2949,6 +3251,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TagMergeResult'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
         '401':
           description: No usable credential was presented.
           content:
@@ -2969,6 +3277,12 @@ paths:
                 $ref: '#/components/schemas/ProblemDetails'
         '409':
           description: The write is refused by a uniqueness rule, a state rule or a data-model invariant.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
           content:
             application/problem+json:
               schema:
@@ -3010,6 +3324,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Tag'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
         '401':
           description: No usable credential was presented.
           content:
@@ -3030,6 +3350,12 @@ paths:
                 $ref: '#/components/schemas/ProblemDetails'
         '409':
           description: The write is refused by a uniqueness rule, a state rule or a data-model invariant.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
           content:
             application/problem+json:
               schema:
@@ -3213,6 +3539,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Note'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
         '401':
           description: No usable credential was presented.
           content:
@@ -3227,6 +3559,12 @@ paths:
                 $ref: '#/components/schemas/ProblemDetails'
         '404':
           description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
           content:
             application/problem+json:
               schema:
@@ -3350,6 +3688,12 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
         '422':
           description: The request is well-formed and its content is not valid. `errors` names each field.
           content:
@@ -3387,6 +3731,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Note'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
         '401':
           description: No usable credential was presented.
           content:
@@ -3407,6 +3757,12 @@ paths:
                 $ref: '#/components/schemas/ProblemDetails'
         '409':
           description: The write is refused by a uniqueness rule, a state rule or a data-model invariant.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
           content:
             application/problem+json:
               schema:
@@ -3540,6 +3896,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CustomField'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
         '401':
           description: No usable credential was presented.
           content:
@@ -3554,6 +3916,12 @@ paths:
                 $ref: '#/components/schemas/ProblemDetails'
         '409':
           description: The write is refused by a uniqueness rule, a state rule or a data-model invariant.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
           content:
             application/problem+json:
               schema:
@@ -3643,6 +4011,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CustomField'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
         '401':
           description: No usable credential was presented.
           content:
@@ -3663,6 +4037,12 @@ paths:
                 $ref: '#/components/schemas/ProblemDetails'
         '409':
           description: The write is refused by a uniqueness rule, a state rule or a data-model invariant.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
           content:
             application/problem+json:
               schema:
@@ -3815,6 +4195,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FieldValue'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
         '401':
           description: No usable credential was presented.
           content:
@@ -3835,6 +4221,12 @@ paths:
                 $ref: '#/components/schemas/ProblemDetails'
         '409':
           description: The write is refused by a uniqueness rule, a state rule or a data-model invariant.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
           content:
             application/problem+json:
               schema:
@@ -4007,6 +4399,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Creator'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
         '401':
           description: No usable credential was presented.
           content:
@@ -4021,6 +4419,12 @@ paths:
                 $ref: '#/components/schemas/ProblemDetails'
         '409':
           description: The write is refused by a uniqueness rule, a state rule or a data-model invariant.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
           content:
             application/problem+json:
               schema:
@@ -4110,6 +4514,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Creator'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
         '401':
           description: No usable credential was presented.
           content:
@@ -4130,6 +4540,12 @@ paths:
                 $ref: '#/components/schemas/ProblemDetails'
         '409':
           description: The write is refused by a uniqueness rule, a state rule or a data-model invariant.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
           content:
             application/problem+json:
               schema:
@@ -4258,6 +4674,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CreatorMergeResult'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
         '401':
           description: No usable credential was presented.
           content:
@@ -4278,6 +4700,12 @@ paths:
                 $ref: '#/components/schemas/ProblemDetails'
         '409':
           description: The write is refused by a uniqueness rule, a state rule or a data-model invariant.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
           content:
             application/problem+json:
               schema:
@@ -4319,6 +4747,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Creator'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
         '401':
           description: No usable credential was presented.
           content:
@@ -4339,6 +4773,12 @@ paths:
                 $ref: '#/components/schemas/ProblemDetails'
         '409':
           description: The write is refused by a uniqueness rule, a state rule or a data-model invariant.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
           content:
             application/problem+json:
               schema:
@@ -5055,6 +5495,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiTokenCreated'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
         '401':
           description: No usable credential was presented.
           content:
@@ -5069,6 +5515,12 @@ paths:
                 $ref: '#/components/schemas/ProblemDetails'
         '409':
           description: The write is refused by a uniqueness rule, a state rule or a data-model invariant.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
           content:
             application/problem+json:
               schema:
@@ -5190,8 +5642,8 @@ paths:
 
         The twelve types are declared in the catalogue; this Phase 1 surface can cause
         `item.created`, `item.updated`, `item.trashed`, `item.restored`, `document.ingested`,
-        `attachment.added`. The others (`item.merged`, `annotation.created`, `check.completed`,
-        `job.started`, `job.finished`, `job.failed`) arrive with the phases that implement them.
+        `attachment.added`, `job.started`, `job.finished`, `job.failed`. The others (`item.merged`,
+        `annotation.created`, `check.completed`) arrive with the phases that implement them.
 
 
         There is no replay: a subscriber receives events from the moment it subscribes (§7.2). Order
@@ -5252,8 +5704,8 @@ paths:
 
         Part of the Zotero Connector protocol (ADR-0006). Unversioned and unauthenticated, because
         it imitates a loopback client the extension already knows how to talk to. Matched against
-        Zotero Connector 5.0.x / Zotero 7 client protocol; the protocol is undocumented and may
-        change.
+        zotero-connectors@c279ccc / zotero@f2a42be (see fixtures/zotero-connector/); the protocol is
+        undocumented and may change.
       tags:
         - Platform
       security: []
@@ -5275,8 +5727,8 @@ paths:
 
         Part of the Zotero Connector protocol (ADR-0006). Unversioned and unauthenticated, because
         it imitates a loopback client the extension already knows how to talk to. Matched against
-        Zotero Connector 5.0.x / Zotero 7 client protocol; the protocol is undocumented and may
-        change.
+        zotero-connectors@c279ccc / zotero@f2a42be (see fixtures/zotero-connector/); the protocol is
+        undocumented and may change.
       tags:
         - Platform
       security: []
@@ -5299,8 +5751,8 @@ paths:
 
         Part of the Zotero Connector protocol (ADR-0006). Unversioned and unauthenticated, because
         it imitates a loopback client the extension already knows how to talk to. Matched against
-        Zotero Connector 5.0.x / Zotero 7 client protocol; the protocol is undocumented and may
-        change.
+        zotero-connectors@c279ccc / zotero@f2a42be (see fixtures/zotero-connector/); the protocol is
+        undocumented and may change.
       tags:
         - Platform
       security: []
@@ -5324,8 +5776,8 @@ paths:
 
         Part of the Zotero Connector protocol (ADR-0006). Unversioned and unauthenticated, because
         it imitates a loopback client the extension already knows how to talk to. Matched against
-        Zotero Connector 5.0.x / Zotero 7 client protocol; the protocol is undocumented and may
-        change.
+        zotero-connectors@c279ccc / zotero@f2a42be (see fixtures/zotero-connector/); the protocol is
+        undocumented and may change.
       tags:
         - Platform
       security: []
@@ -5342,6 +5794,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ConnectorSaveItemsResponse'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
         '422':
           description: The request is well-formed and its content is not valid. `errors` names each field.
           content:
@@ -5361,8 +5825,8 @@ paths:
 
         Part of the Zotero Connector protocol (ADR-0006). Unversioned and unauthenticated, because
         it imitates a loopback client the extension already knows how to talk to. Matched against
-        Zotero Connector 5.0.x / Zotero 7 client protocol; the protocol is undocumented and may
-        change.
+        zotero-connectors@c279ccc / zotero@f2a42be (see fixtures/zotero-connector/); the protocol is
+        undocumented and may change.
       tags:
         - Platform
       security: []
@@ -5391,42 +5855,1965 @@ paths:
                   - key
                   - title
                 additionalProperties: {}
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
         '422':
           description: The request is well-formed and its content is not valid. `errors` names each field.
           content:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/ProblemDetails'
-  /connector/sessionProgress:
-    post:
-      operationId: connectorSessionProgress
-      summary: Progress of a capture session
+  /api/v1/ingestion/sources:
+    get:
+      operationId: listIngestionSources
+      summary: List configured ingestion sources
       description: >-
-        Recueil's saves are synchronous, so a session is complete by the time this is asked and
-        every entry reports 100. An unknown session answers `done: true` with no items, because the
-        alternative is a progress popup that spins for ever after a restart.
+        Every configured folder, WebDAV share and mailbox. Credentials are not in the response:
+        `secretNames` says which are held and nothing returns their values.
 
 
-        Part of the Zotero Connector protocol (ADR-0006). Unversioned and unauthenticated, because
-        it imitates a loopback client the extension already knows how to talk to. Matched against
-        Zotero Connector 5.0.x / Zotero 7 client protocol; the protocol is undocumented and may
-        change.
+        **Scope:** `ingestion:read`.
       tags:
-        - Platform
-      security: []
+        - Ingestion
+      parameters:
+        - in: query
+          name: kind
+          schema:
+            type: string
+            enum:
+              - folder
+              - webdav
+              - imap
+        - in: query
+          name: enabled
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: The configured sources.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestionSourcePage'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+    post:
+      operationId: createIngestionSource
+      summary: Configure an ingestion source
+      description: >-
+        A folder root is resolved, symlink-followed and — when `RECUEIL_INGEST_ALLOWED_ROOTS` is set
+        — required to be inside it, because a path in a request body is hostile until it has been
+        checked against something. A `secret` is stored encrypted under `RECUEIL_SECRET_KEY`; a
+        server with no key configured refuses rather than storing a credential it cannot protect.
+
+
+        **Scope:** `ingestion:write`.
+      tags:
+        - Ingestion
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ConnectorSessionProgressRequest'
+              $ref: '#/components/schemas/IngestionSourceCreate'
       responses:
-        '200':
-          description: The session state.
+        '201':
+          description: The configured source.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ConnectorSessionProgressResponse'
+                $ref: '#/components/schemas/IngestionSource'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: The write is refused by a uniqueness rule, a state rule or a data-model invariant.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/ingestion/sources/{id}:
+    get:
+      operationId: getIngestionSource
+      summary: Fetch one ingestion source
+      description: |-
+        The configuration, without its credentials.
+
+        **Scope:** `ingestion:read`.
+      tags:
+        - Ingestion
+      parameters:
+        - in: path
+          name: id
+          schema:
+            description: The record id (a ULID).
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: The record id (a ULID).
+      responses:
+        '200':
+          description: The source.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestionSource'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+    patch:
+      operationId: updateIngestionSource
+      summary: Change an ingestion source
+      description: >-
+        The kind cannot change: the state table that records what has already been consumed is keyed
+        by the source, and reinterpreting it under another protocol would be meaningless. Sending
+        `secret` replaces the stored credentials wholesale; `{}` clears them.
+
+
+        **Scope:** `ingestion:write`.
+      tags:
+        - Ingestion
+      parameters:
+        - in: path
+          name: id
+          schema:
+            description: The record id (a ULID).
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: The record id (a ULID).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IngestionSourceUpdate'
+      responses:
+        '200':
+          description: The updated source.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestionSource'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: The write is refused by a uniqueness rule, a state rule or a data-model invariant.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+    delete:
+      operationId: deleteIngestionSource
+      summary: Remove an ingestion source
+      description: >-
+        The configuration goes; nothing it produced is touched. This is the one place P5 does not
+        reach, because a source is configuration rather than library content — and the audit entry
+        carries the whole configuration, so it is recoverable from the log.
+
+
+        **Scope:** `ingestion:write`.
+      tags:
+        - Ingestion
+      parameters:
+        - in: path
+          name: id
+          schema:
+            description: The record id (a ULID).
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: The record id (a ULID).
+      responses:
+        '204':
+          description: Removed.
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/ingestion/sources/{id}/enable:
+    post:
+      operationId: enableIngestionSource
+      summary: Enable a source
+      description: |-
+        A disabled source is never polled and cannot be run.
+
+        **Scope:** `ingestion:write`.
+      tags:
+        - Ingestion
+      parameters:
+        - in: path
+          name: id
+          schema:
+            description: The record id (a ULID).
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: The record id (a ULID).
+      responses:
+        '200':
+          description: The source.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestionSource'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/ingestion/sources/{id}/disable:
+    post:
+      operationId: disableIngestionSource
+      summary: Disable a source
+      description: >-
+        Nothing in flight is stopped — cancel the run for that — and nothing already ingested is
+        touched.
+
+
+        **Scope:** `ingestion:write`.
+      tags:
+        - Ingestion
+      parameters:
+        - in: path
+          name: id
+          schema:
+            description: The record id (a ULID).
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: The record id (a ULID).
+      responses:
+        '200':
+          description: The source.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestionSource'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/ingestion/sources/{id}/test-connection:
+    post:
+      operationId: testIngestionSource
+      summary: Try the source and report what happened
+      description: >-
+        Reaches the far side: a folder is resolved, `stat`ed and read; a WebDAV collection gets an
+        `OPTIONS` and a `PROPFIND`; a mailbox is connected to, logged in to and selected. The
+        response carries one row per check and `ok` is the conjunction of those rows, so a green
+        result names its evidence.
+
+
+        Nothing is written and nothing is consumed. A source that holds a credential this server
+        cannot decrypt reports that as a failed `credentials` check rather than as a 500.
+
+
+        **Scope:** `ingestion:write`.
+      tags:
+        - Ingestion
+      parameters:
+        - in: path
+          name: id
+          schema:
+            description: The record id (a ULID).
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: The record id (a ULID).
+      responses:
+        '200':
+          description: What was tried, and what happened.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestConnectionResult'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/ingestion/sources/{id}/run:
+    post:
+      operationId: runIngestionSource
+      summary: Poll a source now
+      description: >-
+        Starts one poll and returns immediately with the `jobs` row it will write to. The run
+        continues after the response: watch it at `/api/v1/ingestion/queue/{id}`, cancel it there,
+        and read what it decided in `/api/v1/ingestion/review`.
+
+
+        The same `runLabel` resumes an unfinished run rather than starting a second one, which is
+        what makes a retried poll safe (P9).
+
+
+        **Scope:** `ingestion:write`.
+      tags:
+        - Ingestion
+      parameters:
+        - in: path
+          name: id
+          schema:
+            description: The record id (a ULID).
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: The record id (a ULID).
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SourceRunRequest'
+      responses:
+        '202':
+          description: The run has started.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SourceRunAccepted'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: The write is refused by a uniqueness rule, a state rule or a data-model invariant.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/ingestion/queue:
+    get:
+      operationId: listIngestionJobs
+      summary: The ingestion work queue
+      description: >-
+        Cursor-paged over the `jobs` rows this surface owns: `ingest.source` (one poll of one
+        configured source) and `ingest.run` (the pipeline's own batch record). The cursor is the job
+        id, which is a ULID, so a run inserting rows while you page cannot make one appear twice or
+        not at all.
+
+
+        `waiting_review` is not a failure (IK6): the run produced review-queue entries and a person
+        owes them a decision.
+
+
+        **Scope:** `ingestion:read`.
+      tags:
+        - Ingestion
+      parameters:
+        - in: query
+          name: cursor
+          schema:
+            description: Opaque continuation token from the previous page. Never construct one.
+            type: string
+            maxLength: 2048
+          description: Opaque continuation token from the previous page. Never construct one.
+        - in: query
+          name: limit
+          schema:
+            description: Page size, 1 to 200. Defaults to 25.
+            type: integer
+            minimum: 1
+            maximum: 200
+          description: Page size, 1 to 200. Defaults to 25.
+        - in: query
+          name: order
+          schema:
+            description: Sort direction. Defaults to `desc`.
+            type: string
+            enum:
+              - asc
+              - desc
+          description: Sort direction. Defaults to `desc`.
+        - in: query
+          name: state
+          schema:
+            $ref: '#/components/schemas/JobState'
+        - in: query
+          name: jobType
+          schema:
+            type: string
+            enum:
+              - ingest.source
+              - ingest.run
+        - in: query
+          name: sourceId
+          schema:
+            description: Only runs of this configured source.
+            $ref: '#/components/schemas/Id'
+          description: Only runs of this configured source.
+      responses:
+        '200':
+          description: A page of jobs.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestionJobPage'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/ingestion/queue/{id}:
+    get:
+      operationId: getIngestionJob
+      summary: One job, with its stage trace
+      description: >-
+        The job row, the stage checkpoints, the log and the review entries the run raised.
+
+
+        `stages` comes from `ingest_checkpoints` — the rows a *resumed* run reads to decide where to
+        start — rather than from the run's narration, so the trace and the resume point cannot
+        disagree. A finished candidate shows one `commit` row, because the pipeline compacts the
+        intermediate ones once it commits; a candidate that stopped halfway shows where.
+
+
+        `reviewEntryIds` is queried from `review_queue` by job id, not read out of the run's result
+        summary, so the two can be compared.
+
+
+        **Scope:** `ingestion:read`.
+      tags:
+        - Ingestion
+      parameters:
+        - in: path
+          name: id
+          schema:
+            description: The record id (a ULID).
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: The record id (a ULID).
+      responses:
+        '200':
+          description: The job and its trace.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestionJobDetail'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/ingestion/queue/{id}/retry:
+    post:
+      operationId: retryIngestionJob
+      summary: Run a finished job again
+      description: >-
+        Resumes rather than restarts: the job keeps its idempotency key, so the pipeline skips every
+        candidate that already committed and picks up at the first stage that never finished (IK4).
+        A running or queued job is refused with a 409 — cancel it first.
+
+
+        **Scope:** `ingestion:write`.
+      tags:
+        - Ingestion
+      parameters:
+        - in: path
+          name: id
+          schema:
+            description: The record id (a ULID).
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: The record id (a ULID).
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JobRetryRequest'
+      responses:
+        '202':
+          description: The job, as it now stands.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestionJob'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: The write is refused by a uniqueness rule, a state rule or a data-model invariant.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/ingestion/queue/{id}/cancel:
+    post:
+      operationId: cancelIngestionJob
+      summary: Stop a run
+      description: >-
+        A run this process is executing is aborted between candidates and inside its retry loop, and
+        closes its own row: the response is 202 and the state follows within a moment. A row left
+        `running` by a process that died has no signal to deliver, so it is closed here and the
+        response is 200. Nothing already committed is undone — an ingest that reached stage 10 is a
+        document in the library (P5).
+
+
+        **Scope:** `ingestion:write`.
+      tags:
+        - Ingestion
+      parameters:
+        - in: path
+          name: id
+          schema:
+            description: The record id (a ULID).
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: The record id (a ULID).
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JobCancelRequest'
+      responses:
+        '200':
+          description: The job was closed here; no run was reachable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestionJob'
+        '202':
+          description: The abort was delivered to a run in flight.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestionJob'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: The write is refused by a uniqueness rule, a state rule or a data-model invariant.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/ingestion/review:
+    get:
+      operationId: listReviewEntries
+      summary: The review queue
+      description: >-
+        Open entries by default, newest first. Each carries the reason code, the sentence stored
+        when it was raised — not generated at render time, so it still reads correctly in 2029 — the
+        proposed action and the exact payload accepting will execute.
+
+
+        **Scope:** `ingestion:read`.
+      tags:
+        - Ingestion
+      parameters:
+        - in: query
+          name: status
+          schema:
+            description: 'Defaults to `open`: the queue is the open entries.'
+            $ref: '#/components/schemas/ReviewStatus'
+          description: 'Defaults to `open`: the queue is the open entries.'
+        - in: query
+          name: reasonCode
+          schema:
+            type: string
+            maxLength: 64
+        - in: query
+          name: subjectType
+          schema:
+            $ref: '#/components/schemas/ReviewSubjectType'
+        - in: query
+          name: subjectId
+          schema:
+            type: string
+            maxLength: 64
+        - in: query
+          name: jobId
+          schema:
+            $ref: '#/components/schemas/Id'
+        - in: query
+          name: severity
+          schema:
+            type: string
+            enum:
+              - info
+              - warning
+              - blocker
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+        - in: query
+          name: order
+          schema:
+            type: string
+            enum:
+              - asc
+              - desc
+      responses:
+        '200':
+          description: A page of entries.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewEntryPage'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/ingestion/review/accept:
+    post:
+      operationId: bulkAcceptReviewEntries
+      summary: Accept several entries
+      description: >-
+        Each entry is accepted in its own transaction, so one refusal does not roll back the rest
+        and the response says exactly which landed and why each of the others did not. Nothing is
+        silently skipped.
+
+
+        **Scope:** `ingestion:write`.
+      tags:
+        - Ingestion
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewBulkAcceptRequest'
+      responses:
+        '200':
+          description: What landed, and what did not.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewBulkAcceptResult'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/ingestion/review/{id}:
+    get:
+      operationId: getReviewEntry
+      summary: One review entry
+      description: |-
+        With its proposal and, once resolved, what was actually executed.
+
+        **Scope:** `ingestion:read`.
+      tags:
+        - Ingestion
+      parameters:
+        - in: path
+          name: id
+          schema:
+            description: The record id (a ULID).
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: The record id (a ULID).
+      responses:
+        '200':
+          description: The entry.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewEntry'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/ingestion/review/{id}/accept:
+    post:
+      operationId: acceptReviewEntry
+      summary: Accept an entry, optionally with edits
+      description: >-
+        Executes `proposedPayload` (RQ1) in one transaction with the resolution, so a failure
+        anywhere leaves the entry open and nothing created. `edits` changes the proposal before it
+        runs: `fields` and `customFields` are patches where `null` removes a key, everything else
+        replaces wholesale. What actually ran is stored as the resolution payload, so the difference
+        between what was proposed and what was accepted is on the record.
+
+
+        This build can execute `create_item`, `discard` and `none`. Any other proposed action is a
+        409 naming it, rather than an entry marked accepted with nothing done.
+
+
+        **Scope:** `ingestion:write`.
+      tags:
+        - Ingestion
+      parameters:
+        - in: path
+          name: id
+          schema:
+            description: The record id (a ULID).
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: The record id (a ULID).
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewAcceptRequest'
+      responses:
+        '200':
+          description: The resolved entry and what it created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewAcceptResult'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: The write is refused by a uniqueness rule, a state rule or a data-model invariant.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/ingestion/review/{id}/reject:
+    post:
+      operationId: rejectReviewEntry
+      summary: Reject an entry
+      description: >-
+        Nothing is executed and nothing is created. The document stays in the library — it was
+        ingested before the gate ran — and can be filed by hand or discarded through a later entry.
+        The note is stored and audited.
+
+
+        **Scope:** `ingestion:write`.
+      tags:
+        - Ingestion
+      parameters:
+        - in: path
+          name: id
+          schema:
+            description: The record id (a ULID).
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: The record id (a ULID).
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewRejectRequest'
+      responses:
+        '200':
+          description: The rejected entry.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewEntry'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: The write is refused by a uniqueness rule, a state rule or a data-model invariant.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/ingestion/upload:
+    post:
+      operationId: ingestUpload
+      summary: Share a file into the pipeline
+      description: >-
+        Multipart, streamed and hashed on the way past. Unlike `POST /api/v1/documents`, which
+        stores bytes, this runs the whole ingestion pipeline (CONCEPT.md §5.3): duplicate check,
+        archive extraction, type detection, metadata extraction, the stored rules and the confidence
+        gate.
+
+
+        The answer is one of six outcomes and carries the created item or the review entry, so a PWA
+        share target renders a result rather than polling a job. `201` when an item was created,
+        `200` otherwise — including the duplicate case, which is a successful, idempotent re-share
+        (P9).
+
+
+        This build runs no OCR (there is no worker to reach) and no resolvers, so a scan with no
+        text layer will usually arrive in the review queue rather than being filed. The job id in
+        the response leads to the full stage trace.
+
+
+        **Scope:** `ingestion:write`.
+      tags:
+        - Ingestion
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/IngestUpload'
+      responses:
+        '200':
+          description: What the pipeline decided.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestUploadResult'
+        '201':
+          description: An item was created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestUploadResult'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '413':
+          description: The file is larger than `RECUEIL_MAX_UPLOAD_BYTES`. Nothing was stored.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/rules:
+    get:
+      operationId: listRules
+      summary: List rules
+      description: >-
+        In evaluation order: ascending priority then rule id, which is the order the engine uses, so
+        a list a UI renders is a list that predicts precedence.
+
+
+        **Scope:** `rules:read`.
+      tags:
+        - Rules
+      parameters:
+        - in: query
+          name: kind
+          schema:
+            type: string
+            enum:
+              - ingestion
+              - dedup
+        - in: query
+          name: enabled
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: The rules.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RulePage'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+    post:
+      operationId: createRule
+      summary: Create a rule
+      description: >-
+        Validated against `@recueil/rules`' own schema, so what this endpoint accepts and what the
+        engine can run are the same set by construction. `ruleId` is the author's stable handle — it
+        is what a trace names and what `item_tags.rule_ref` points at — and is unique per kind.
+
+
+        No pattern in a rule is run through a backtracking engine: the regular expressions and the
+        globs compile to a linear-time Pike VM with a step budget, because a rule set arrives over
+        the API.
+
+
+        **Scope:** `rules:write`.
+      tags:
+        - Rules
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuleCreate'
+      responses:
+        '201':
+          description: The rule.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Rule'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: The write is refused by a uniqueness rule, a state rule or a data-model invariant.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/rules/dry-run:
+    post:
+      operationId: dryRunRules
+      summary: What would these rules do?
+      description: >-
+        Evaluates a rule set over subjects and writes nothing — structurally, not by a flag: the
+        evaluator is a pure function of the rule set and the subject.
+
+
+        Omit `rules` to run the stored, enabled ingestion rules; supply it to try a rule that has
+        not been saved. The response is the engine's own report: one entry per subject with its full
+        trace of which conditions matched on what evidence, and one row per rule whatever its
+        outcome — a rule that never fires is news.
+
+
+        **Scope:** `rules:read`.
+      tags:
+        - Rules
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuleDryRunRequest'
+      responses:
+        '200':
+          description: The report.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuleDryRunResponse'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/rules/{id}:
+    get:
+      operationId: getRule
+      summary: Fetch one rule
+      description: |-
+        The row, with its condition and actions as stored.
+
+        **Scope:** `rules:read`.
+      tags:
+        - Rules
+      parameters:
+        - in: path
+          name: id
+          schema:
+            description: The record id (a ULID).
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: The record id (a ULID).
+      responses:
+        '200':
+          description: The rule.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Rule'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+    patch:
+      operationId: updateRule
+      summary: Change a rule
+      description: >-
+        The kind cannot change: a condition means one thing under `ingestion` and another under
+        `dedup`, and reinterpreting one as the other silently is exactly the edit that should be a
+        delete and a create. Everything else is re-validated against the engine's schema.
+
+
+        **Scope:** `rules:write`.
+      tags:
+        - Rules
+      parameters:
+        - in: path
+          name: id
+          schema:
+            description: The record id (a ULID).
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: The record id (a ULID).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuleUpdate'
+      responses:
+        '200':
+          description: The updated rule.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Rule'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: The write is refused by a uniqueness rule, a state rule or a data-model invariant.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+    delete:
+      operationId: deleteRule
+      summary: Remove a rule
+      description: >-
+        What the rule already did is untouched: a tag it applied keeps its `rule_ref`, which now
+        names a rule that exists only in the audit log. That is the correct record of history, and
+        the log carries the whole definition.
+
+
+        **Scope:** `rules:write`.
+      tags:
+        - Rules
+      parameters:
+        - in: path
+          name: id
+          schema:
+            description: The record id (a ULID).
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: The record id (a ULID).
+      responses:
+        '204':
+          description: Removed.
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/storage/backends:
+    get:
+      operationId: listStorageBackends
+      summary: List configured storage backends
+      description: >-
+        Every configured WebDAV and S3 store, with the last health check's verdict and whether the
+        running process is writing through one of this kind. Credentials are not returned:
+        `secretNames` says which are held.
+
+
+        **Scope:** `storage:read`.
+      tags:
+        - Storage
+      responses:
+        '200':
+          description: The configured backends.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfiguredStorageBackendPage'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+    post:
+      operationId: createStorageBackend
+      summary: Configure a storage backend
+      description: >-
+        Writes the configuration. It does **not** rebind the running library: the store a process
+        writes through is chosen at boot, because swapping it mid-life would strand every blob
+        written before the swap. Verify with `POST {id}/health`, then point `RECUEIL_STORAGE_*` at
+        it and restart.
+
+
+        **Scope:** `storage:write`.
+      tags:
+        - Storage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfiguredStorageBackendCreate'
+      responses:
+        '201':
+          description: The configuration.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfiguredStorageBackend'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: The write is refused by a uniqueness rule, a state rule or a data-model invariant.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/storage/backends/{id}:
+    get:
+      operationId: getStorageBackend
+      summary: Fetch one storage backend
+      description: |-
+        The configuration, without its credentials.
+
+        **Scope:** `storage:read`.
+      tags:
+        - Storage
+      parameters:
+        - in: path
+          name: id
+          schema:
+            description: The record id (a ULID).
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: The record id (a ULID).
+      responses:
+        '200':
+          description: The backend.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfiguredStorageBackend'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+    patch:
+      operationId: updateStorageBackend
+      summary: Change a storage backend
+      description: |-
+        The kind cannot change. Sending `secret` replaces the stored credentials wholesale.
+
+        **Scope:** `storage:write`.
+      tags:
+        - Storage
+      parameters:
+        - in: path
+          name: id
+          schema:
+            description: The record id (a ULID).
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: The record id (a ULID).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfiguredStorageBackendUpdate'
+      responses:
+        '200':
+          description: The updated backend.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfiguredStorageBackend'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: The write is refused by a uniqueness rule, a state rule or a data-model invariant.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+    delete:
+      operationId: deleteStorageBackend
+      summary: Remove a storage backend configuration
+      description: >-
+        Refused with a 409 while the running process is writing through a backend of this kind:
+        removing the configuration of the live store would leave nobody able to say where the blobs
+        are. Nothing in the store is touched either way.
+
+
+        **Scope:** `storage:write`.
+      tags:
+        - Storage
+      parameters:
+        - in: path
+          name: id
+          schema:
+            description: The record id (a ULID).
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: The record id (a ULID).
+      responses:
+        '204':
+          description: Removed.
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: The write is refused by a uniqueness rule, a state rule or a data-model invariant.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/storage/backends/{id}/health:
+    post:
+      operationId: checkStorageBackend
+      summary: Probe a storage backend
+      description: >-
+        `read` (the default) asks the store for the digest of some random bytes: a complete round
+        trip through authentication and addressing that writes nothing, and whose correct answer is
+        "absent".
+
+
+        `roundtrip` additionally writes a 64-byte probe blob, reads it back through the store's own
+        reader, compares the digest of what came back with the digest of what went in, and deletes
+        it in a `finally`. It is the only mode that proves the store can hold a document and the
+        only one that catches a server that accepts a `PUT` and stores something else.
+
+
+        `status` is the conjunction of the individual checks; `degraded` is reserved for the case
+        where the store worked and the probe blob could not be removed.
+
+
+        **Scope:** `storage:write`.
+      tags:
+        - Storage
+      parameters:
+        - in: path
+          name: id
+          schema:
+            description: The record id (a ULID).
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: The record id (a ULID).
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StorageHealthRequest'
+      responses:
+        '200':
+          description: What was tried, and what happened.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StorageHealthResult'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
         '422':
           description: The request is well-formed and its content is not valid. `errors` names each field.
           content:
@@ -5861,14 +8248,1545 @@ components:
       required:
         - url
       additionalProperties: {}
-    ConnectorSessionProgressRequest:
+    IngestionSourceCreate:
       type: object
       properties:
-        sessionID:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        config:
+          $ref: '#/components/schemas/IngestionSourceConfig'
+        enabled:
+          description: Default true.
+          type: boolean
+        sourceKind:
+          description: 'Defaults to the source kind: a scanner drop directory is a folder source with
+            `scanner` here, which is how CONCEPT.md §5.3 maps the four destinations of an ADS-4700W
+            onto three sources.'
+          $ref: '#/components/schemas/DocumentSourceKind'
+        consume:
+          $ref: '#/components/schemas/ConsumePolicy'
+        secret:
+          $ref: '#/components/schemas/IngestionSecret'
+      required:
+        - name
+        - config
+      additionalProperties: false
+      title: IngestionSourceCreate
+    IngestionSourceConfig:
+      oneOf:
+        - $ref: '#/components/schemas/FolderSourceConfig'
+        - $ref: '#/components/schemas/WebDavSourceConfig'
+        - $ref: '#/components/schemas/ImapSourceConfig'
+      title: IngestionSourceConfig
+      description: Everything about a source that is safe to send back. Credentials are not in here.
+      type: object
+      discriminator:
+        propertyName: kind
+        mapping:
+          folder: '#/components/schemas/FolderSourceConfig'
+          webdav: '#/components/schemas/WebDavSourceConfig'
+          imap: '#/components/schemas/ImapSourceConfig'
+    FolderSourceConfig:
+      type: object
+      properties:
+        kind:
+          type: string
+          const: folder
+        root:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          description: The watched directory. Absolute, existing, and inside RECUEIL_INGEST_ALLOWED_ROOTS when
+            that is set.
+        recursive:
+          type: boolean
+        skipHidden:
+          type: boolean
+        exclude:
+          maxItems: 64
+          type: array
+          items:
+            type: string
+            maxLength: 255
+        minimumAgeMillis:
+          description: How long a file must be unchanged before it is offered. Guards against half-written
+            scans.
+          type: integer
+          minimum: 0
+          maximum: 3600000
+        watch:
+          description: Use filesystem notifications as well as the poll. Default true.
+          type: boolean
+      required:
+        - kind
+        - root
+      additionalProperties: false
+      title: FolderSourceConfig
+    WebDavSourceConfig:
+      type: object
+      properties:
+        kind:
+          type: string
+          const: webdav
+        url:
+          type: string
+          maxLength: 2048
+          format: uri
+          description: The collection to poll, as an absolute http(s) URL.
+        username:
+          type: string
+          maxLength: 255
+        authKind:
+          description: Default `basic` when a username or password is given, `none` otherwise.
+          type: string
+          enum:
+            - basic
+            - bearer
+            - none
+        recursive:
+          type: boolean
+        maxDepth:
+          type: integer
+          minimum: 1
+          maximum: 16
+        timeoutMillis:
+          type: integer
+          minimum: 1000
+          maximum: 600000
+      required:
+        - kind
+        - url
+      additionalProperties: false
+      title: WebDavSourceConfig
+    ImapSourceConfig:
+      type: object
+      properties:
+        kind:
+          type: string
+          const: imap
+        host:
+          type: string
+          minLength: 1
+          maxLength: 255
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        secure:
+          description: Implicit TLS on connect (port 993). Default true.
+          type: boolean
+        username:
+          type: string
+          minLength: 1
+          maxLength: 255
+        mailbox:
+          description: Default `INBOX`.
+          type: string
+          maxLength: 255
+        search:
+          description: The `UID SEARCH` criteria. Default `UNSEEN`.
+          type: string
+          maxLength: 255
+        markSeen:
+          type: boolean
+        batchSize:
+          type: integer
+          minimum: 1
+          maximum: 500
+        timeoutMillis:
+          type: integer
+          minimum: 1000
+          maximum: 600000
+      required:
+        - kind
+        - host
+        - username
+      additionalProperties: false
+      title: ImapSourceConfig
+    ConsumePolicy:
+      type: object
+      properties:
+        mode:
+          type: string
+          enum:
+            - leave
+            - move
+            - delete
+          description: Default `leave`.
+        to:
+          description: 'Required for `move`: a directory for a folder source, a collection for WebDAV, a
+            mailbox for IMAP. Relative to the source root, and never allowed to escape it.'
+          type: string
+          maxLength: 1024
+      required:
+        - mode
+      additionalProperties: false
+      title: ConsumePolicy
+    IngestionSecret:
+      type: object
+      properties:
+        password:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        token:
+          type: string
+          minLength: 1
+          maxLength: 8192
+      additionalProperties: false
+      title: IngestionSecret
+      description: Write-only. Stored encrypted under `RECUEIL_SECRET_KEY`; a server with no key
+        configured refuses the write rather than storing a credential it cannot protect.
+    IngestionSourceUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        config:
+          $ref: '#/components/schemas/IngestionSourceConfig'
+        enabled:
+          type: boolean
+        sourceKind:
+          $ref: '#/components/schemas/DocumentSourceKind'
+        consume:
+          $ref: '#/components/schemas/ConsumePolicy'
+        secret:
+          description: Replaces the stored credentials wholesale. Send `{}` to clear them.
+          $ref: '#/components/schemas/IngestionSecret'
+      additionalProperties: false
+      title: IngestionSourceUpdate
+    SourceRunRequest:
+      type: object
+      properties:
+        runLabel:
+          description: Names the run. The same label resumes an unfinished one; a new label re-scans from the
+            beginning (P9). Defaults to a timestamp.
+          type: string
+          minLength: 1
+          maxLength: 128
+        limit:
+          description: How many candidates to take in one poll.
+          type: integer
+          minimum: 1
+          maximum: 500
+      additionalProperties: false
+      title: SourceRunRequest
+    JobState:
+      type: string
+      enum:
+        - queued
+        - running
+        - succeeded
+        - failed
+        - cancelled
+        - waiting_review
+        - dead
+      description: '`waiting_review` is not a failure: IK6 says a job in that state has produced
+        review-queue entries and will not proceed until they are resolved.'
+    JobRetryRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+          maxLength: 1024
+      additionalProperties: false
+      title: JobRetryRequest
+    JobCancelRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+          maxLength: 1024
+      additionalProperties: false
+      title: JobCancelRequest
+    ReviewStatus:
+      type: string
+      enum:
+        - open
+        - accepted
+        - rejected
+        - deferred
+        - superseded
+    ReviewSubjectType:
+      type: string
+      enum:
+        - document
+        - item
+        - attachment
+        - creator
+        - shadow_work
+        - merge_candidate
+        - ingest_batch
+        - check_result
+        - enrichment
+        - job
+    ReviewBulkAcceptRequest:
+      type: object
+      properties:
+        ids:
+          minItems: 1
+          maxItems: 500
+          type: array
+          items:
+            $ref: '#/components/schemas/Id'
+        note:
+          type: string
+          maxLength: 4096
+      required:
+        - ids
+      additionalProperties: false
+      title: ReviewBulkAcceptRequest
+    ReviewAcceptRequest:
+      type: object
+      properties:
+        note:
+          description: Recorded as `resolution_note` and in the audit log.
+          type: string
+          maxLength: 4096
+        edits:
+          $ref: '#/components/schemas/ReviewEdits'
+      additionalProperties: false
+      title: ReviewAcceptRequest
+    ReviewEdits:
+      type: object
+      properties:
+        itemType:
+          type: string
+          minLength: 1
+          maxLength: 64
+          pattern: ^[a-z][a-z0-9_]*$
+        fields:
+          description: 'Dotted, facet-qualified paths: `bibliographic.title`, `office.correspondent`. Null
+            removes.'
+          type: object
+          propertyNames:
+            type: string
+            maxLength: 128
+          additionalProperties:
+            anyOf:
+              - type: string
+                maxLength: 8192
+              - type: number
+              - type: boolean
+              - type: 'null'
+        tags:
+          maxItems: 200
+          type: array
+          items:
+            type: string
+            maxLength: 255
+        collectionIds:
+          maxItems: 200
+          type: array
+          items:
+            $ref: '#/components/schemas/Id'
+        customFields:
+          type: object
+          propertyNames:
+            type: string
+            maxLength: 128
+          additionalProperties:
+            anyOf:
+              - type: string
+                maxLength: 8192
+              - type: number
+              - type: boolean
+              - type: 'null'
+        notes:
+          maxItems: 20
+          type: array
+          items:
+            type: string
+            maxLength: 100000
+      additionalProperties: false
+      title: ReviewEdits
+    ReviewRejectRequest:
+      type: object
+      properties:
+        note:
+          type: string
+          maxLength: 4096
+      additionalProperties: false
+      title: ReviewRejectRequest
+    IngestUpload:
+      type: object
+      properties:
+        file:
+          type: string
+          format: binary
+          description: The file. Required.
+        sourceKind:
+          type: string
+        sourceId:
+          type: string
+        title:
+          type: string
+        sender:
+          type: string
+        subject:
+          type: string
+        runLabel:
           type: string
       required:
-        - sessionID
-      additionalProperties: {}
+        - file
+      title: IngestUpload
+    RuleCreate:
+      allOf:
+        - oneOf:
+            - type: object
+              properties:
+                kind:
+                  type: string
+                  const: ingestion
+                when:
+                  $ref: '#/components/schemas/__schema0'
+                then:
+                  minItems: 1
+                  maxItems: 64
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/IngestionAction'
+              required:
+                - kind
+                - when
+                - then
+              additionalProperties: false
+            - type: object
+              properties:
+                kind:
+                  type: string
+                  const: dedup
+                when:
+                  $ref: '#/components/schemas/__schema1'
+                then:
+                  minItems: 1
+                  maxItems: 64
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/DedupAction'
+              required:
+                - kind
+                - when
+                - then
+              additionalProperties: false
+          type: object
+        - type: object
+          properties:
+            ruleId:
+              $ref: '#/components/schemas/RuleId'
+            description:
+              type: string
+              maxLength: 1024
+            enabled:
+              type: boolean
+            priority:
+              type: integer
+              minimum: -1000000
+              maximum: 1000000
+          required:
+            - ruleId
+      title: RuleCreate
+    IngestionCondition:
+      anyOf:
+        - oneOf:
+            - type: object
+              properties:
+                type:
+                  type: string
+                  const: source
+                match:
+                  $ref: '#/components/schemas/Matcher'
+              required:
+                - type
+                - match
+              additionalProperties: false
+              description: 'The ingestion source kind: upload, folder, webdav, imap, scanner, …'
+            - type: object
+              properties:
+                type:
+                  type: string
+                  const: sender
+                match:
+                  $ref: '#/components/schemas/Matcher'
+              required:
+                - type
+                - match
+              additionalProperties: false
+              description: The mail sender, or the scanner or share identity that supplied the file.
+            - type: object
+              properties:
+                type:
+                  type: string
+                  const: recipient
+                match:
+                  $ref: '#/components/schemas/Matcher'
+              required:
+                - type
+                - match
+              additionalProperties: false
+              description: Any one of the recipients. Matches when at least one does.
+            - type: object
+              properties:
+                type:
+                  type: string
+                  const: subject
+                match:
+                  $ref: '#/components/schemas/Matcher'
+              required:
+                - type
+                - match
+              additionalProperties: false
+              description: The mail subject line.
+            - type: object
+              properties:
+                type:
+                  type: string
+                  const: path
+                match:
+                  $ref: '#/components/schemas/Matcher'
+              required:
+                - type
+                - match
+              additionalProperties: false
+              description: The source path, lexically normalised before matching.
+            - type: object
+              properties:
+                type:
+                  type: string
+                  const: filename
+                match:
+                  $ref: '#/components/schemas/Matcher'
+              required:
+                - type
+                - match
+              additionalProperties: false
+              description: The last segment of the source path.
+            - type: object
+              properties:
+                type:
+                  type: string
+                  const: mime
+                match:
+                  $ref: '#/components/schemas/Matcher'
+              required:
+                - type
+                - match
+              additionalProperties: false
+              description: The sniffed MIME type, for instance application/pdf.
+            - type: object
+              properties:
+                type:
+                  type: string
+                  const: text
+                match:
+                  $ref: '#/components/schemas/Matcher'
+              required:
+                - type
+                - match
+              additionalProperties: false
+              description: The extracted text, from the text layer or from OCR.
+            - type: object
+              properties:
+                type:
+                  type: string
+                  const: item-type
+                match:
+                  $ref: '#/components/schemas/Matcher'
+              required:
+                - type
+                - match
+              additionalProperties: false
+              description: The item type as it stands when the rule engine runs.
+            - type: object
+              properties:
+                type:
+                  type: string
+                  const: tag
+                match:
+                  $ref: '#/components/schemas/Matcher'
+              required:
+                - type
+                - match
+              additionalProperties: false
+              description: Any tag already on the subject. Matches when at least one does.
+            - type: object
+              properties:
+                type:
+                  type: string
+                  const: resolver
+                resolver:
+                  description: Restrict to one resolver, e.g. crossref. Omitted, any resolver satisfies the condition.
+                  type: string
+                  minLength: 1
+                  maxLength: 64
+                outcome:
+                  anyOf:
+                    - $ref: '#/components/schemas/ResolverOutcomeKind'
+                    - minItems: 1
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/ResolverOutcomeKind'
+                minConfidence:
+                  description: Also require the resolution to carry at least this much confidence.
+                  $ref: '#/components/schemas/Confidence'
+              required:
+                - type
+                - outcome
+              additionalProperties: false
+              description: The result of identifier resolution (CONCEPT.md §5.3 stage 7).
+            - type: object
+              properties:
+                type:
+                  type: string
+                  const: always
+              required:
+                - type
+              additionalProperties: false
+              description: Matches everything. The honest way to write a catch-all or a default.
+          type: object
+        - type: object
+          properties:
+            all:
+              minItems: 1
+              maxItems: 64
+              type: array
+              items:
+                $ref: '#/components/schemas/__schema0'
+          required:
+            - all
+          additionalProperties: false
+          description: Every member must match.
+        - type: object
+          properties:
+            any:
+              minItems: 1
+              maxItems: 64
+              type: array
+              items:
+                $ref: '#/components/schemas/__schema0'
+          required:
+            - any
+          additionalProperties: false
+          description: At least one member must match.
+        - type: object
+          properties:
+            not:
+              $ref: '#/components/schemas/__schema0'
+          required:
+            - not
+          additionalProperties: false
+          description: The member must not match.
+      description: A condition tree. `all`, `any` and `not` compose the leaves; the leaves read the subject.
+    Matcher:
+      anyOf:
+        - $ref: '#/components/schemas/EqualsMatcher'
+        - $ref: '#/components/schemas/EqualsAnyMatcher'
+        - $ref: '#/components/schemas/ContainsMatcher'
+        - $ref: '#/components/schemas/StartsWithMatcher'
+        - $ref: '#/components/schemas/EndsWithMatcher'
+        - $ref: '#/components/schemas/RegexMatcher'
+        - $ref: '#/components/schemas/GlobMatcher'
+      description: One test against one string. Exactly one operator per matcher.
+    EqualsMatcher:
+      type: object
+      properties:
+        equals:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        caseSensitive:
+          description: 'Default false: matching ignores case unless a rule asks for it.'
+          type: boolean
+      required:
+        - equals
+      additionalProperties: false
+      description: The whole value, exactly.
+    EqualsAnyMatcher:
+      type: object
+      properties:
+        equalsAny:
+          minItems: 1
+          maxItems: 1000
+          type: array
+          items:
+            type: string
+            minLength: 1
+            maxLength: 4096
+        caseSensitive:
+          description: 'Default false: matching ignores case unless a rule asks for it.'
+          type: boolean
+      required:
+        - equalsAny
+      additionalProperties: false
+      description: The whole value, exactly, against any member of the list.
+    ContainsMatcher:
+      type: object
+      properties:
+        contains:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        caseSensitive:
+          description: 'Default false: matching ignores case unless a rule asks for it.'
+          type: boolean
+      required:
+        - contains
+      additionalProperties: false
+    StartsWithMatcher:
+      type: object
+      properties:
+        startsWith:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        caseSensitive:
+          description: 'Default false: matching ignores case unless a rule asks for it.'
+          type: boolean
+      required:
+        - startsWith
+      additionalProperties: false
+    EndsWithMatcher:
+      type: object
+      properties:
+        endsWith:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        caseSensitive:
+          description: 'Default false: matching ignores case unless a rule asks for it.'
+          type: boolean
+      required:
+        - endsWith
+      additionalProperties: false
+    RegexMatcher:
+      type: object
+      properties:
+        matches:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        caseSensitive:
+          description: 'Default false: matching ignores case unless a rule asks for it.'
+          type: boolean
+        multiline:
+          description: Make `^` and `$` match at every line break. Useful against extracted text.
+          type: boolean
+        dotAll:
+          description: Make `.` match a line break as well.
+          type: boolean
+      required:
+        - matches
+      additionalProperties: false
+      description: 'A regular expression, anywhere in the value. Runs on a linear-time engine:
+        backreferences, lookahead and lookbehind are not available, and no pattern can backtrack.'
+    GlobMatcher:
+      type: object
+      properties:
+        glob:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        caseSensitive:
+          description: 'Default false: matching ignores case unless a rule asks for it.'
+          type: boolean
+      required:
+        - glob
+      additionalProperties: false
+      description: A path glob, anchored to the whole value. `*` stays within a segment, `**` crosses them.
+    ResolverOutcomeKind:
+      type: string
+      enum:
+        - hit
+        - miss
+        - ambiguous
+        - error
+        - skipped
+      description: 'What identifier resolution (CONCEPT.md §5.4) came back with for one source.
+        `ambiguous` is the case P3 cares about: several candidates, none decisive.'
+    IngestionAction:
+      oneOf:
+        - type: object
+          properties:
+            type:
+              type: string
+              const: set-item-type
+            itemType:
+              $ref: '#/components/schemas/ItemType'
+          required:
+            - type
+            - itemType
+          additionalProperties: false
+          description: Set the item type. Open vocabulary; a plugin may have registered the value.
+        - type: object
+          properties:
+            type:
+              type: string
+              const: add-to-collection
+            collection:
+              type: string
+              minLength: 1
+              maxLength: 1024
+              description: A collection path with `/` between levels, for instance Office/Invoices/2026.
+            create:
+              description: 'Default true: create the collection, and its parents, when it does not exist.'
+              type: boolean
+          required:
+            - type
+            - collection
+          additionalProperties: false
+          description: Add the item to a collection.
+        - type: object
+          properties:
+            type:
+              type: string
+              const: add-tags
+            tags:
+              minItems: 1
+              maxItems: 64
+              type: array
+              items:
+                type: string
+                minLength: 1
+                maxLength: 1024
+          required:
+            - type
+            - tags
+          additionalProperties: false
+          description: Add tags. They are recorded with scheme `automatic` and this rule as `rule_ref`.
+        - type: object
+          properties:
+            type:
+              type: string
+              const: set-custom-field
+            field:
+              type: string
+              minLength: 1
+              maxLength: 64
+              pattern: ^[a-z][a-z0-9_]*$
+            value:
+              $ref: '#/components/schemas/RuleFieldValue'
+          required:
+            - type
+            - field
+            - value
+          additionalProperties: false
+          description: Set one custom field (CONCEPT.md §5.2, CustomField / FieldValue).
+        - type: object
+          properties:
+            type:
+              type: string
+              const: set-correspondent
+            correspondent:
+              type: string
+              minLength: 1
+              maxLength: 1024
+          required:
+            - type
+            - correspondent
+          additionalProperties: false
+          description: Set the office facet correspondent (spec/data-model.md §3.7).
+        - type: object
+          properties:
+            type:
+              type: string
+              const: set-confidence
+            confidence:
+              $ref: '#/components/schemas/Confidence'
+          required:
+            - type
+            - confidence
+          additionalProperties: false
+          description: Set the confidence the gate at stage 9 will read.
+        - type: object
+          properties:
+            type:
+              type: string
+              const: route-to-review
+            reasonCode:
+              type: string
+              minLength: 1
+              maxLength: 64
+              pattern: ^[a-z][a-z0-9_]*$
+              description: Open vocabulary; `rule_conflict` and friends come from spec/data-model.md §6.1.
+            explanation:
+              type: string
+              minLength: 1
+              maxLength: 1024
+              description: The stored sentence a human will read. Name the evidence.
+            severity:
+              $ref: '#/components/schemas/RuleReviewSeverity'
+            proposedAction:
+              $ref: '#/components/schemas/RuleReviewProposedAction'
+          required:
+            - type
+            - reasonCode
+            - explanation
+          additionalProperties: false
+          description: Queue the subject for a human decision (P3, "flag, never guess").
+        - type: object
+          properties:
+            type:
+              type: string
+              const: stop
+          required:
+            - type
+          additionalProperties: false
+          description: Apply nothing further. Rules after this one are traced as not reached.
+      type: object
+    RuleFieldValue:
+      anyOf:
+        - type: string
+          maxLength: 4096
+        - type: number
+        - type: boolean
+        - type: 'null'
+      description: What a rule may write into a custom field. Interpolation applies to the string form.
+    RuleReviewSeverity:
+      type: string
+      enum:
+        - info
+        - warning
+        - blocker
+    RuleReviewProposedAction:
+      type: string
+      enum:
+        - merge
+        - link
+        - create_item
+        - set_fields
+        - discard
+        - retry
+        - none
+      description: The `proposed_action` vocabulary of `review_queue` (spec/data-model.md §6.1).
+    DedupCondition:
+      anyOf:
+        - oneOf:
+            - type: object
+              properties:
+                type:
+                  type: string
+                  const: identifier-match
+                identifier:
+                  description: doi, pmid, pmcid, arxiv, isbn, … Omitted, any shared identifier satisfies the
+                    condition.
+                  type: string
+                  minLength: 1
+                  maxLength: 32
+              required:
+                - type
+              additionalProperties: false
+              description: Both sides carry the same value for an identifier. Compared with `=`, because invariant
+                B1 (spec/data-model.md §3.5) stores identifiers normalised; this rule engine does
+                not re-normalise and would be wrong to, since it cannot see whether the caller
+                honoured B1.
+            - type: object
+              properties:
+                type:
+                  type: string
+                  const: identifier-conflict
+                identifier:
+                  type: string
+                  minLength: 1
+                  maxLength: 32
+              required:
+                - type
+              additionalProperties: false
+              description: Both sides carry the same identifier key with different values — strong evidence
+                against a merge.
+            - type: object
+              properties:
+                type:
+                  type: string
+                  const: file-hash-match
+              required:
+                - type
+              additionalProperties: false
+              description: 'The two sides share a document hash: the file layer of §5.6, byte-identical.'
+            - type: object
+              properties:
+                type:
+                  type: string
+                  const: title-similarity
+                atLeast:
+                  type: number
+                  minimum: 0
+                  maximum: 1
+              required:
+                - type
+                - atLeast
+              additionalProperties: false
+              description: Trigram Jaccard similarity of the normalised titles is at least this.
+            - type: object
+              properties:
+                type:
+                  type: string
+                  const: venue-similarity
+                atLeast:
+                  type: number
+                  minimum: 0
+                  maximum: 1
+              required:
+                - type
+                - atLeast
+              additionalProperties: false
+              description: Trigram Jaccard similarity of the normalised venues is at least this.
+            - type: object
+              properties:
+                type:
+                  type: string
+                  const: creator-similarity
+                atLeast:
+                  type: number
+                  minimum: 0
+                  maximum: 1
+                firstOnly:
+                  description: Compare only the first creator, which is the §5.6 fuzzy rule.
+                  type: boolean
+              required:
+                - type
+                - atLeast
+              additionalProperties: false
+              description: Overlap of the normalised creator names.
+            - type: object
+              properties:
+                type:
+                  type: string
+                  const: year-within
+                years:
+                  type: integer
+                  minimum: 0
+                  maximum: 50
+              required:
+                - type
+                - years
+              additionalProperties: false
+              description: The two years differ by at most this. §5.6 uses ± 1.
+            - type: object
+              properties:
+                type:
+                  type: string
+                  const: field
+                field:
+                  $ref: '#/components/schemas/DedupField'
+                side:
+                  $ref: '#/components/schemas/DedupSide'
+                match:
+                  $ref: '#/components/schemas/Matcher'
+              required:
+                - type
+                - field
+                - match
+              additionalProperties: false
+              description: Match one field on one or both sides. `side` defaults to `either`.
+            - type: object
+              properties:
+                type:
+                  type: string
+                  const: same-field
+                field:
+                  $ref: '#/components/schemas/DedupField'
+              required:
+                - type
+                - field
+              additionalProperties: false
+              description: The two sides agree on a field, compared after case and whitespace normalisation.
+            - type: object
+              properties:
+                type:
+                  type: string
+                  const: always
+              required:
+                - type
+              additionalProperties: false
+              description: Matches every pair.
+          type: object
+        - type: object
+          properties:
+            all:
+              minItems: 1
+              maxItems: 64
+              type: array
+              items:
+                $ref: '#/components/schemas/__schema1'
+          required:
+            - all
+          additionalProperties: false
+        - type: object
+          properties:
+            any:
+              minItems: 1
+              maxItems: 64
+              type: array
+              items:
+                $ref: '#/components/schemas/__schema1'
+          required:
+            - any
+          additionalProperties: false
+        - type: object
+          properties:
+            not:
+              $ref: '#/components/schemas/__schema1'
+          required:
+            - not
+          additionalProperties: false
+      description: A condition tree. `all`, `any` and `not` compose the leaves; the leaves read the pair.
+    DedupField:
+      type: string
+      enum:
+        - source
+        - item-type
+        - title
+        - venue
+        - correspondent
+        - container
+    DedupSide:
+      type: string
+      enum:
+        - left
+        - right
+        - either
+        - both
+      description: '`left` is the candidate, `right` is the record already in the library.'
+    DedupAction:
+      oneOf:
+        - type: object
+          properties:
+            type:
+              type: string
+              const: merge
+            winner:
+              $ref: '#/components/schemas/MergeWinner'
+          required:
+            - type
+            - winner
+          additionalProperties: false
+          description: Propose a merge. The loser goes to trash with a reversible merge record; this rule set
+            does not do that.
+        - type: object
+          properties:
+            type:
+              type: string
+              const: link
+          required:
+            - type
+          additionalProperties: false
+          description: Propose attaching the candidate document to the existing item rather than creating a
+            second one.
+        - type: object
+          properties:
+            type:
+              type: string
+              const: flag
+            reasonCode:
+              type: string
+              minLength: 1
+              maxLength: 64
+              pattern: ^[a-z][a-z0-9_]*$
+            explanation:
+              type: string
+              minLength: 1
+              maxLength: 1024
+            severity:
+              $ref: '#/components/schemas/RuleReviewSeverity'
+          required:
+            - type
+            - explanation
+          additionalProperties: false
+          description: Route the pair to the review queue with a stored explanation, deciding nothing.
+        - type: object
+          properties:
+            type:
+              type: string
+              const: ignore
+          required:
+            - type
+          additionalProperties: false
+          description: Declare the pair not a duplicate, so a later pass does not raise it again.
+        - type: object
+          properties:
+            type:
+              type: string
+              const: set-confidence
+            confidence:
+              $ref: '#/components/schemas/Confidence'
+          required:
+            - type
+            - confidence
+          additionalProperties: false
+          description: Attach a confidence to the decision.
+        - type: object
+          properties:
+            type:
+              type: string
+              const: stop
+          required:
+            - type
+          additionalProperties: false
+          description: Apply nothing further.
+      type: object
+    MergeWinner:
+      type: string
+      enum:
+        - newest
+        - oldest
+        - most-complete
+        - left
+        - right
+      description: 'The winner rule of CONCEPT.md §5.6: newest dateAdded, oldest, most complete, or a
+        named side.'
+    RuleId:
+      type: string
+      minLength: 1
+      maxLength: 64
+      pattern: ^[a-z0-9][a-z0-9_-]*$
+      examples:
+        - acme-invoices
+        - scanner-inbox
+    RuleDryRunRequest:
+      type: object
+      properties:
+        kind:
+          description: Default `ingestion`. Ignored when `rules` is given.
+          $ref: '#/components/schemas/RuleKind'
+        mode:
+          $ref: '#/components/schemas/RuleMode'
+        limits:
+          $ref: '#/components/schemas/RuleLimits'
+        rules:
+          maxItems: 200
+          type: array
+          items:
+            $ref: '#/components/schemas/RuleCreate'
+        includeDisabled:
+          type: boolean
+        subjects:
+          minItems: 1
+          maxItems: 500
+          type: array
+          items:
+            $ref: '#/components/schemas/IngestionRuleSubject'
+        maxTraces:
+          type: integer
+          minimum: 0
+          maximum: 500
+      required:
+        - subjects
+      additionalProperties: false
+      title: RuleDryRunRequest
+      description: Evaluates rules over subjects and writes nothing. The evaluator is a pure function of
+        the rule set and the subject, so there is no apply path this endpoint has to remember to
+        switch off (CONCEPT.md §5.6).
+    RuleKind:
+      type: string
+      enum:
+        - ingestion
+        - dedup
+      description: 'Which pipeline the set belongs to: `ingestion` is CONCEPT.md §5.3 stage 8, `dedup` is
+        §5.6. The envelope, the precedence, the trace and the dry run are shared; the conditions and
+        the actions are not, because they see different subjects.'
+    RuleMode:
+      type: string
+      enum:
+        - first-match
+        - all-match
+      description: '`all-match`: every rule whose condition holds contributes, in precedence order, and a
+        later rule overwrites a scalar an earlier one set (the overwrite is recorded as a conflict).
+        `first-match`: evaluation stops at the first rule whose condition holds.'
+    RuleLimits:
+      type: object
+      properties:
+        maxSteps:
+          description: Simulation steps allowed for one pattern against one value.
+          type: integer
+          minimum: 1000
+          maximum: 200000000
+        timeoutMs:
+          description: Wall-clock milliseconds allowed for one pattern against one value.
+          type: integer
+          minimum: 1
+          maximum: 60000
+        maxTextLength:
+          description: Longest extracted text a `text` condition will read. Beyond it the text is truncated
+            and the trace says so, because a silent truncation is a wrong answer.
+          type: integer
+          minimum: 1
+          maximum: 100000000
+      additionalProperties: false
+    IngestionRuleSubject:
+      type: object
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 256
+        source:
+          type: string
+          maxLength: 64
+        sender:
+          type: string
+          maxLength: 512
+        recipients:
+          maxItems: 64
+          type: array
+          items:
+            type: string
+            maxLength: 512
+        subject:
+          type: string
+          maxLength: 2048
+        path:
+          type: string
+          maxLength: 4096
+        filename:
+          type: string
+          maxLength: 1024
+        mime:
+          type: string
+          maxLength: 255
+        text:
+          type: string
+          maxLength: 1000000
+        itemType:
+          type: string
+          maxLength: 64
+        tags:
+          maxItems: 200
+          type: array
+          items:
+            type: string
+            maxLength: 255
+        resolvers:
+          maxItems: 32
+          type: array
+          items:
+            type: object
+            properties:
+              resolver:
+                type: string
+                maxLength: 64
+              outcome:
+                type: string
+                enum:
+                  - hit
+                  - miss
+                  - ambiguous
+                  - error
+                  - skipped
+              identifier:
+                type: string
+                maxLength: 512
+              confidence:
+                $ref: '#/components/schemas/Confidence'
+            required:
+              - resolver
+              - outcome
+            additionalProperties: false
+      required:
+        - id
+      additionalProperties: false
+      title: IngestionRuleSubject
+    RuleUpdate:
+      type: object
+      properties:
+        description:
+          anyOf:
+            - type: string
+              maxLength: 1024
+            - type: 'null'
+        enabled:
+          type: boolean
+        priority:
+          type: integer
+          minimum: -1000000
+          maximum: 1000000
+        when: {}
+        then:
+          minItems: 1
+          maxItems: 64
+          type: array
+          items: {}
+      additionalProperties: false
+      title: RuleUpdate
+    ConfiguredStorageBackendCreate:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        config:
+          $ref: '#/components/schemas/StorageBackendConfig'
+        enabled:
+          type: boolean
+        secret:
+          type: object
+          properties:
+            password:
+              type: string
+              minLength: 1
+              maxLength: 4096
+            token:
+              type: string
+              minLength: 1
+              maxLength: 8192
+            secretAccessKey:
+              type: string
+              minLength: 1
+              maxLength: 4096
+            sessionToken:
+              type: string
+              minLength: 1
+              maxLength: 8192
+          additionalProperties: false
+      required:
+        - name
+        - config
+      additionalProperties: false
+      title: ConfiguredStorageBackendCreate
+    StorageBackendConfig:
+      oneOf:
+        - $ref: '#/components/schemas/WebDavBackendConfig'
+        - $ref: '#/components/schemas/S3BackendConfig'
+      title: StorageBackendConfig
+      type: object
+      discriminator:
+        propertyName: kind
+        mapping:
+          webdav: '#/components/schemas/WebDavBackendConfig'
+          s3: '#/components/schemas/S3BackendConfig'
+    WebDavBackendConfig:
+      type: object
+      properties:
+        kind:
+          type: string
+          const: webdav
+        url:
+          type: string
+          maxLength: 2048
+          format: uri
+        username:
+          type: string
+          maxLength: 255
+        authKind:
+          type: string
+          enum:
+            - basic
+            - bearer
+            - none
+        writeStrategy:
+          type: string
+          enum:
+            - temp-move
+            - direct-put
+        verifyOnWrite:
+          type: string
+          enum:
+            - none
+            - size
+            - digest
+        sendContentMd5:
+          type: boolean
+        sendOcChecksum:
+          type: boolean
+      required:
+        - kind
+        - url
+      additionalProperties: false
+      title: WebDavBackendConfig
+    S3BackendConfig:
+      type: object
+      properties:
+        kind:
+          type: string
+          const: s3
+        bucket:
+          type: string
+          minLength: 1
+          maxLength: 255
+        region:
+          type: string
+          maxLength: 64
+        endpoint:
+          type: string
+          maxLength: 2048
+          format: uri
+        forcePathStyle:
+          type: boolean
+        prefix:
+          type: string
+          maxLength: 255
+        accessKeyId:
+          type: string
+          maxLength: 255
+        verifyOnWrite:
+          type: string
+          enum:
+            - none
+            - size
+            - digest
+        multipartThreshold:
+          type: integer
+          minimum: 5242880
+          maximum: 5368709120
+        serverSideChecksums:
+          type: boolean
+      required:
+        - kind
+        - bucket
+      additionalProperties: false
+      title: S3BackendConfig
+    ConfiguredStorageBackendUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        config:
+          $ref: '#/components/schemas/StorageBackendConfig'
+        enabled:
+          type: boolean
+        secret:
+          type: object
+          properties:
+            password:
+              type: string
+              minLength: 1
+              maxLength: 4096
+            token:
+              type: string
+              minLength: 1
+              maxLength: 8192
+            secretAccessKey:
+              type: string
+              minLength: 1
+              maxLength: 4096
+            sessionToken:
+              type: string
+              minLength: 1
+              maxLength: 8192
+          additionalProperties: false
+      additionalProperties: false
+      title: ConfiguredStorageBackendUpdate
+    StorageHealthRequest:
+      type: object
+      properties:
+        mode:
+          description: Default `read`. `roundtrip` writes a probe blob and deletes it again.
+          type: string
+          enum:
+            - read
+            - roundtrip
+      additionalProperties: false
+      title: StorageHealthRequest
+    __schema0:
+      $ref: '#/components/schemas/IngestionCondition'
+    __schema1:
+      $ref: '#/components/schemas/DedupCondition'
     Id:
       type: string
       pattern: ^[0-9A-HJKMNP-TV-Z]{26}$
@@ -9403,6 +13321,13 @@ components:
           type: integer
           minimum: 0
           maximum: 9007199254740991
+        textFilterTruncated:
+          description: 'True when a text filter matched more records than the server would materialise, so
+            this page is drawn from the best-ranked candidates rather than from every match. Absent
+            means no text filter was applied, or every match was considered — `hasMore: false` alone
+            cannot tell exhaustion from truncation. Use the search endpoint and its cursor for the
+            long tail of a broad query.'
+          type: boolean
       required:
         - nextCursor
         - hasMore
@@ -9702,6 +13627,19 @@ components:
             - local
             - webdav
             - s3
+        strayTempFiles:
+          description: "Partial writes left in the store's `.tmp` directory by an interrupted upload. They are
+            not blobs and are never restored or backed up, so nothing else would ever mention them —
+            and a store quietly accumulating half-written scans until the disk fills is a fault
+            nobody can diagnose. A non-zero count is not itself unhealthy: a `.part` file a few
+            seconds old belongs to an upload still in flight. Local backend only."
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        strayTempBytes:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
         detail:
           type: string
           maxLength: 1024
@@ -10443,10 +14381,21 @@ components:
         targets:
           type: array
           items:
-            type: object
-            propertyNames:
-              type: string
-            additionalProperties: {}
+            $ref: '#/components/schemas/ConnectorSaveTarget'
+        tags:
+          type: object
+          propertyNames:
+            type: string
+          additionalProperties:
+            type: array
+            items:
+              type: object
+              properties:
+                tag:
+                  type: string
+              required:
+                - tag
+              additionalProperties: {}
       required:
         - libraryID
         - libraryName
@@ -10454,9 +14403,35 @@ components:
         - editable
         - id
         - name
+        - targets
+        - tags
       additionalProperties: false
       title: ConnectorCollectionResponse
       description: Where a save from the browser will land (ADR-0006).
+    ConnectorSaveTarget:
+      type: object
+      properties:
+        id:
+          type: string
+          maxLength: 64
+        name:
+          type: string
+          maxLength: 255
+        filesEditable:
+          type: boolean
+        level:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        recent:
+          type: boolean
+      required:
+        - id
+        - name
+        - filesEditable
+        - level
+      additionalProperties: {}
+      title: ConnectorSaveTarget
     ConnectorSaveItemsResponse:
       type: object
       properties:
@@ -10471,23 +14446,902 @@ components:
         - items
       additionalProperties: false
       title: ConnectorSaveItemsResponse
-    ConnectorSessionProgressResponse:
+    IngestionSourcePage:
       type: object
       properties:
-        items:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/IngestionSource'
+        page:
+          $ref: '#/components/schemas/PageInfo'
+      required:
+        - data
+        - page
+      additionalProperties: false
+      title: IngestionSourcePage
+    IngestionSource:
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        kind:
+          $ref: '#/components/schemas/IngestionSourceKind'
+        enabled:
+          type: boolean
+        sourceKind:
+          description: The `documents.source_kind` recorded for everything this source produces.
+          $ref: '#/components/schemas/DocumentSourceKind'
+        config:
+          $ref: '#/components/schemas/IngestionSourceConfig'
+        consume:
+          $ref: '#/components/schemas/ConsumePolicy'
+        secretNames:
+          type: array
+          items:
+            type: string
+            maxLength: 64
+          description: Which credentials are held, by name. The values are never returned.
+        lastRunJobId:
+          anyOf:
+            - $ref: '#/components/schemas/Id'
+            - type: 'null'
+        lastRunAt:
+          anyOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+        lastError:
+          anyOf:
+            - type: string
+              maxLength: 4096
+            - type: 'null'
+        version:
+          type: integer
+          minimum: 1
+          maximum: 9007199254740991
+        createdAt:
+          $ref: '#/components/schemas/Timestamp'
+        updatedAt:
+          $ref: '#/components/schemas/Timestamp'
+      required:
+        - id
+        - name
+        - kind
+        - enabled
+        - sourceKind
+        - config
+        - consume
+        - secretNames
+        - lastRunJobId
+        - lastRunAt
+        - lastError
+        - version
+        - createdAt
+        - updatedAt
+      additionalProperties: false
+      title: IngestionSource
+    IngestionSourceKind:
+      type: string
+      enum:
+        - folder
+        - webdav
+        - imap
+      description: 'The three places CONCEPT.md §5.3 names that are places rather than protocols. The
+        scanner path is not a fourth: a Brother ADS-4700W is a folder or a mailbox depending on
+        which of its destinations it is pointed at.'
+    TestConnectionResult:
+      type: object
+      properties:
+        sourceId:
+          $ref: '#/components/schemas/Id'
+        kind:
+          $ref: '#/components/schemas/IngestionSourceKind'
+        ok:
+          type: boolean
+        checkedAt:
+          $ref: '#/components/schemas/Timestamp'
+        durationMs:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        checks:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConnectionCheck'
+        detail:
+          type: string
+          maxLength: 4096
+      required:
+        - sourceId
+        - kind
+        - ok
+        - checkedAt
+        - durationMs
+        - checks
+        - detail
+      additionalProperties: false
+      title: TestConnectionResult
+      description: What was actually tried, one row per check. `ok` is the conjunction of the rows rather
+        than a separate opinion, so a green result names the evidence behind it.
+    ConnectionCheck:
+      type: object
+      properties:
+        check:
+          type: string
+          maxLength: 64
+          description: 'What was tried: `resolve`, `directory`, `options`, `list`, `login`, `select`.'
+        ok:
+          type: boolean
+        detail:
+          type: string
+          maxLength: 2048
+      required:
+        - check
+        - ok
+        - detail
+      additionalProperties: false
+      title: ConnectionCheck
+    SourceRunAccepted:
+      type: object
+      properties:
+        sourceId:
+          $ref: '#/components/schemas/Id'
+        jobId:
+          description: The `jobs` row this run writes to. Poll it at `/api/v1/ingestion/queue/{id}`.
+          $ref: '#/components/schemas/Id'
+        runLabel:
+          type: string
+          maxLength: 128
+        startedAt:
+          $ref: '#/components/schemas/Timestamp'
+      required:
+        - sourceId
+        - jobId
+        - runLabel
+        - startedAt
+      additionalProperties: false
+      title: SourceRunAccepted
+    IngestionJobPage:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/IngestionJob'
+        page:
+          $ref: '#/components/schemas/PageInfo'
+      required:
+        - data
+        - page
+      additionalProperties: false
+      title: IngestionJobPage
+    IngestionJob:
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        jobType:
+          type: string
+          maxLength: 64
+        state:
+          $ref: '#/components/schemas/JobState'
+        idempotencyKey:
+          anyOf:
+            - type: string
+              maxLength: 512
+            - type: 'null'
+        params:
+          type: object
+          propertyNames:
+            type: string
+          additionalProperties: {}
+        priority:
+          type: integer
+          minimum: -9007199254740991
+          maximum: 9007199254740991
+        attempts:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        maxAttempts:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        progress:
+          type: object
+          properties:
+            done:
+              type: integer
+              minimum: 0
+              maximum: 9007199254740991
+            total:
+              anyOf:
+                - type: integer
+                  minimum: 0
+                  maximum: 9007199254740991
+                - type: 'null'
+          required:
+            - done
+            - total
+          additionalProperties: false
+        runAfter:
+          $ref: '#/components/schemas/Timestamp'
+        startedAt:
+          anyOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+        finishedAt:
+          anyOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+        heartbeatAt:
+          anyOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+        result:
+          anyOf:
+            - type: object
+              propertyNames:
+                type: string
+              additionalProperties: {}
+            - type: 'null'
+        error:
+          anyOf:
+            - type: object
+              properties:
+                code:
+                  type: string
+                  maxLength: 128
+                message:
+                  type: string
+                  maxLength: 4096
+              required:
+                - code
+                - message
+              additionalProperties: false
+            - type: 'null'
+        createdAt:
+          $ref: '#/components/schemas/Timestamp'
+        updatedAt:
+          $ref: '#/components/schemas/Timestamp'
+      required:
+        - id
+        - jobType
+        - state
+        - idempotencyKey
+        - params
+        - priority
+        - attempts
+        - maxAttempts
+        - progress
+        - runAfter
+        - startedAt
+        - finishedAt
+        - heartbeatAt
+        - result
+        - error
+        - createdAt
+        - updatedAt
+      additionalProperties: false
+      title: IngestionJob
+    IngestionJobDetail:
+      type: object
+      properties:
+        job:
+          $ref: '#/components/schemas/IngestionJob'
+        stages:
+          type: array
+          items:
+            $ref: '#/components/schemas/StageTraceEntry'
+        log:
+          type: array
+          items:
+            $ref: '#/components/schemas/JobLogEntry'
+        reviewEntryIds:
+          type: array
+          items:
+            $ref: '#/components/schemas/Id'
+      required:
+        - job
+        - stages
+        - log
+        - reviewEntryIds
+      additionalProperties: false
+      title: IngestionJobDetail
+      description: The job row with its stage trace. `stages` comes from `ingest_checkpoints`, which is
+        what a resumed run reads, so the trace and the resume point cannot disagree.
+    StageTraceEntry:
+      type: object
+      properties:
+        candidateKey:
+          type: string
+          maxLength: 64
+        stage:
+          type: string
+          maxLength: 32
+          description: One of the ten anchors of CONCEPT.md §5.3, or `commit` for the terminal row.
+        sha256:
+          anyOf:
+            - type: string
+              maxLength: 64
+            - type: 'null'
+        payload:
+          description: What the stage produced, read back verbatim when the run resumes.
+        createdAt:
+          $ref: '#/components/schemas/Timestamp'
+      required:
+        - candidateKey
+        - stage
+        - sha256
+        - payload
+        - createdAt
+      additionalProperties: false
+      title: StageTraceEntry
+    JobLogEntry:
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        loggedAt:
+          $ref: '#/components/schemas/Timestamp'
+        level:
+          type: string
+          enum:
+            - debug
+            - info
+            - warn
+            - error
+        message:
+          type: string
+          maxLength: 8192
+        data:
+          anyOf:
+            - type: object
+              propertyNames:
+                type: string
+              additionalProperties: {}
+            - type: 'null'
+        subjectType:
+          anyOf:
+            - type: string
+              maxLength: 64
+            - type: 'null'
+        subjectId:
+          anyOf:
+            - type: string
+              maxLength: 64
+            - type: 'null'
+      required:
+        - id
+        - loggedAt
+        - level
+        - message
+        - data
+        - subjectType
+        - subjectId
+      additionalProperties: false
+      title: JobLogEntry
+    ReviewEntryPage:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReviewEntry'
+        page:
+          $ref: '#/components/schemas/PageInfo'
+      required:
+        - data
+        - page
+      additionalProperties: false
+      title: ReviewEntryPage
+    ReviewEntry:
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        subjectType:
+          $ref: '#/components/schemas/ReviewSubjectType'
+        subjectId:
+          type: string
+          maxLength: 64
+        secondarySubjectType:
+          anyOf:
+            - type: string
+              maxLength: 64
+            - type: 'null'
+        secondarySubjectId:
+          anyOf:
+            - type: string
+              maxLength: 64
+            - type: 'null'
+        reasonCode:
+          type: string
+          maxLength: 64
+        explanation:
+          type: string
+          maxLength: 8192
+          description: Stored when the entry was raised, not generated at render time (§6.1).
+        proposedAction:
+          anyOf:
+            - $ref: '#/components/schemas/ReviewProposedAction'
+            - type: 'null'
+        proposedPayload:
+          description: Exactly what accepting will execute (RQ1). Null when there is nothing to propose.
+        confidence:
+          anyOf:
+            - $ref: '#/components/schemas/Confidence'
+            - type: 'null'
+        severity:
+          type: string
+          enum:
+            - info
+            - warning
+            - blocker
+        status:
+          $ref: '#/components/schemas/ReviewStatus'
+        sourceStage:
+          anyOf:
+            - type: string
+              maxLength: 64
+            - type: 'null'
+        jobId:
+          anyOf:
+            - $ref: '#/components/schemas/Id'
+            - type: 'null'
+        createdAt:
+          $ref: '#/components/schemas/Timestamp'
+        updatedAt:
+          $ref: '#/components/schemas/Timestamp'
+        resolvedAt:
+          anyOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+        resolutionNote:
+          anyOf:
+            - type: string
+              maxLength: 4096
+            - type: 'null'
+        resolutionPayload: {}
+      required:
+        - id
+        - subjectType
+        - subjectId
+        - secondarySubjectType
+        - secondarySubjectId
+        - reasonCode
+        - explanation
+        - proposedAction
+        - proposedPayload
+        - confidence
+        - severity
+        - status
+        - sourceStage
+        - jobId
+        - createdAt
+        - updatedAt
+        - resolvedAt
+        - resolutionNote
+        - resolutionPayload
+      additionalProperties: false
+      title: ReviewEntry
+    ReviewProposedAction:
+      type: string
+      enum:
+        - merge
+        - link
+        - create_item
+        - set_fields
+        - discard
+        - retry
+        - none
+    ReviewBulkAcceptResult:
+      type: object
+      properties:
+        accepted:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReviewAcceptResult'
+        refused:
           type: array
           items:
             type: object
-            propertyNames:
-              type: string
-            additionalProperties: {}
-        done:
-          type: boolean
+            properties:
+              id:
+                $ref: '#/components/schemas/Id'
+              code:
+                type: string
+                maxLength: 64
+              detail:
+                type: string
+                maxLength: 2048
+            required:
+              - id
+              - code
+              - detail
+            additionalProperties: false
       required:
-        - items
-        - done
+        - accepted
+        - refused
       additionalProperties: false
-      title: ConnectorSessionProgressResponse
+      title: ReviewBulkAcceptResult
+      description: Each entry is accepted in its own transaction, so one refusal does not roll back the
+        rest and the response says exactly which ones landed.
+    ReviewAcceptResult:
+      type: object
+      properties:
+        entry:
+          $ref: '#/components/schemas/ReviewEntry'
+        itemId:
+          anyOf:
+            - $ref: '#/components/schemas/Id'
+            - type: 'null'
+          description: Set when accepting created an item.
+        attachmentId:
+          anyOf:
+            - $ref: '#/components/schemas/Id'
+            - type: 'null'
+        warnings:
+          type: array
+          items:
+            type: string
+            maxLength: 2048
+      required:
+        - entry
+        - itemId
+        - attachmentId
+        - warnings
+      additionalProperties: false
+      title: ReviewAcceptResult
+    IngestUploadResult:
+      type: object
+      properties:
+        outcome:
+          type: string
+          enum:
+            - ingested
+            - duplicate
+            - review
+            - container
+            - stopped
+            - failed
+          description: The pipeline outcome, verbatim — the caller is told which of the six happened.
+        jobId:
+          $ref: '#/components/schemas/Id'
+        document:
+          anyOf:
+            - $ref: '#/components/schemas/Document'
+            - type: 'null'
+        item:
+          anyOf:
+            - $ref: '#/components/schemas/Item'
+            - type: 'null'
+          description: Set when the confidence gate auto-accepted (CONCEPT.md §5.3 stage 9).
+        reviewEntry:
+          anyOf:
+            - $ref: '#/components/schemas/ReviewEntry'
+            - type: 'null'
+          description: Set when the gate routed it for a human decision (P3).
+        reasonCode:
+          anyOf:
+            - type: string
+              maxLength: 64
+            - type: 'null'
+        detail:
+          type: string
+          maxLength: 4096
+      required:
+        - outcome
+        - jobId
+        - document
+        - item
+        - reviewEntry
+        - reasonCode
+        - detail
+      additionalProperties: false
+      title: IngestUploadResult
+      description: 'One upload, one answer: the created item, or the review entry that says why there is
+        not one. A share-target client renders one or the other and never has to poll to find out
+        which.'
+    RulePage:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Rule'
+        page:
+          $ref: '#/components/schemas/PageInfo'
+      required:
+        - data
+        - page
+      additionalProperties: false
+      title: RulePage
+    Rule:
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        ruleId:
+          $ref: '#/components/schemas/RuleId'
+        kind:
+          $ref: '#/components/schemas/RuleKind'
+        description:
+          anyOf:
+            - type: string
+              maxLength: 1024
+            - type: 'null'
+        enabled:
+          type: boolean
+        priority:
+          type: integer
+          minimum: -9007199254740991
+          maximum: 9007199254740991
+        when:
+          description: The condition, in the rule format of `@recueil/rules`.
+        then:
+          type: array
+          items: {}
+          description: The actions, in the rule format of `@recueil/rules`.
+        version:
+          type: integer
+          minimum: 1
+          maximum: 9007199254740991
+        createdAt:
+          $ref: '#/components/schemas/Timestamp'
+        updatedAt:
+          $ref: '#/components/schemas/Timestamp'
+      required:
+        - id
+        - ruleId
+        - kind
+        - description
+        - enabled
+        - priority
+        - when
+        - then
+        - version
+        - createdAt
+        - updatedAt
+      additionalProperties: false
+      title: Rule
+    RuleDryRunResponse:
+      type: object
+      properties:
+        ruleSet:
+          type: string
+          maxLength: 255
+        kind:
+          type: string
+          maxLength: 32
+        mode:
+          type: string
+          maxLength: 32
+        subjectCount:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        entries:
+          type: array
+          items:
+            type: object
+            properties:
+              subjectId:
+                type: string
+                maxLength: 256
+              outcome: {}
+              trace: {}
+            required:
+              - subjectId
+              - outcome
+            additionalProperties: false
+        rules:
+          type: array
+          items:
+            type: object
+            properties:
+              ruleId:
+                type: string
+                maxLength: 64
+              order:
+                type: integer
+                minimum: 0
+                maximum: 9007199254740991
+              priority:
+                type: integer
+                minimum: -9007199254740991
+                maximum: 9007199254740991
+              matched:
+                type: integer
+                minimum: 0
+                maximum: 9007199254740991
+              notMatched:
+                type: integer
+                minimum: 0
+                maximum: 9007199254740991
+              notReached:
+                type: integer
+                minimum: 0
+                maximum: 9007199254740991
+              disabled:
+                type: integer
+                minimum: 0
+                maximum: 9007199254740991
+              errors:
+                type: integer
+                minimum: 0
+                maximum: 9007199254740991
+            required:
+              - ruleId
+              - order
+              - priority
+              - matched
+              - notMatched
+              - notReached
+              - disabled
+              - errors
+            additionalProperties: false
+        unmatchedSubjectIds:
+          type: array
+          items:
+            type: string
+            maxLength: 256
+        erroredSubjectIds:
+          type: array
+          items:
+            type: string
+            maxLength: 256
+        warnings:
+          type: array
+          items:
+            type: string
+            maxLength: 2048
+      required:
+        - ruleSet
+        - kind
+        - mode
+        - subjectCount
+        - entries
+        - rules
+        - unmatchedSubjectIds
+        - erroredSubjectIds
+        - warnings
+      additionalProperties: false
+      title: RuleDryRunResponse
+      description: "The engine's own report: one entry per subject with its trace, and one row per rule
+        whatever its outcome — a rule that never fires is news."
+    ConfiguredStorageBackendPage:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConfiguredStorageBackend'
+        page:
+          $ref: '#/components/schemas/PageInfo'
+      required:
+        - data
+        - page
+      additionalProperties: false
+      title: ConfiguredStorageBackendPage
+    ConfiguredStorageBackend:
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        kind:
+          type: string
+          enum:
+            - webdav
+            - s3
+        enabled:
+          type: boolean
+        config:
+          $ref: '#/components/schemas/StorageBackendConfig'
+        secretNames:
+          type: array
+          items:
+            type: string
+            maxLength: 64
+        active:
+          type: boolean
+        lastCheckedAt:
+          anyOf:
+            - $ref: '#/components/schemas/Timestamp'
+            - type: 'null'
+        lastStatus:
+          anyOf:
+            - type: string
+              enum:
+                - ok
+                - degraded
+                - failed
+            - type: 'null'
+        lastDetail:
+          anyOf:
+            - type: string
+              maxLength: 4096
+            - type: 'null'
+        version:
+          type: integer
+          minimum: 1
+          maximum: 9007199254740991
+        createdAt:
+          $ref: '#/components/schemas/Timestamp'
+        updatedAt:
+          $ref: '#/components/schemas/Timestamp'
+      required:
+        - id
+        - name
+        - kind
+        - enabled
+        - config
+        - secretNames
+        - active
+        - lastCheckedAt
+        - lastStatus
+        - lastDetail
+        - version
+        - createdAt
+        - updatedAt
+      additionalProperties: false
+      title: ConfiguredStorageBackend
+      description: 'A configured remote store. Configuring one does not rebind the running library: the
+        store a process writes through is chosen at boot, because swapping it mid-request would
+        strand every blob written before the swap.'
+    StorageHealthResult:
+      type: object
+      properties:
+        backendId:
+          $ref: '#/components/schemas/Id'
+        kind:
+          type: string
+          enum:
+            - webdav
+            - s3
+        status:
+          type: string
+          enum:
+            - ok
+            - degraded
+            - failed
+        checkedAt:
+          $ref: '#/components/schemas/Timestamp'
+        durationMs:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        mode:
+          type: string
+          enum:
+            - read
+            - roundtrip
+        checks:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConnectionCheck'
+        detail:
+          type: string
+          maxLength: 4096
+      required:
+        - backendId
+        - kind
+        - status
+        - checkedAt
+        - durationMs
+        - mode
+        - checks
+        - detail
+      additionalProperties: false
+      title: StorageHealthResult
     Item:
       type: object
       properties:

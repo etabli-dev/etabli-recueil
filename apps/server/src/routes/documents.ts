@@ -484,8 +484,12 @@ export const documentPaths: ZodOpenApiPathsObject = {
         }),
       },
       responses: {
-        '200': { description: 'The whole document.', content: { 'application/octet-stream': { schema: z.string().meta({ format: 'binary' }) } } },
-        '206': { description: 'The requested byte range.', content: { 'application/octet-stream': { schema: z.string().meta({ format: 'binary' }) } } },
+        // `*/*` and not `application/octet-stream`: the response carries the document's own MIME
+        // type — `application/pdf`, `image/jpeg`, whatever was sniffed at ingest (§3.3) — and
+        // declaring one concrete type would tell a generated client to expect a media type this
+        // endpoint almost never sends. The schema is still the bytes.
+        '200': { description: 'The whole document, in its own MIME type.', content: { '*/*': { schema: z.string().meta({ format: 'binary' }) } } },
+        '206': { description: 'The requested byte range, in the document\'s own MIME type.', content: { '*/*': { schema: z.string().meta({ format: 'binary' }) } } },
         ...problems('304', '401', '403', '404', '416', '422'),
       },
     }),

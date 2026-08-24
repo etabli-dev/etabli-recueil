@@ -1,0 +1,31 @@
+{
+  "pngx_version": "2.14.7",
+  "server_os": "Linux-6.8.0-generic-x86_64-with-glibc2.36",
+  "install_type": "docker",
+  "storage": {
+    "total": 511123124224,
+    "available": 402118459392
+  },
+  "database": {
+    "type": "postgresql",
+    "url": "paperless",
+    "status": "OK",
+    "error": null,
+    "migration_status": {
+      "latest_migration": "1061_alter_document_options",
+      "unapplied_migrations": []
+    }
+  },
+  "tasks": {
+    "redis_url": "redis://broker:6379",
+    "redis_status": "OK",
+    "redis_error": null,
+    "celery_status": "OK",
+    "index_status": "OK",
+    "index_last_modified": "2024-01-19T23:58:20.000000+01:00",
+    "index_error": null,
+    "classifier_status": "OK",
+    "classifier_error": null,
+    "classifier_last_trained": "2024-01-19T04:00:00.000000+01:00"
+  }
+}

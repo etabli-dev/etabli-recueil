@@ -10,7 +10,11 @@
  *
  * The second rule is that a restore never writes over anything by accident. The target must be
  * absent or empty; `force` is the operator saying, in as many words, that the contents of that
- * directory are expendable.
+ * directory are expendable. That promise is only worth something if every path the restore touches
+ * is *inside* the target, so every manifest path is checked syntactically when the manifest is
+ * parsed and resolved against its root again at the I/O (`resolveWithin`). A manifest is data off
+ * removable media: an entry saying `../../.ssh/authorized_keys` would otherwise read outside the
+ * snapshot, write outside the target, and be deleted by the rollback when the restore failed.
  *
  * What lands in the target is an ordinary Recueil deployment, not a special "restored" shape:
  *
@@ -32,7 +36,7 @@ import {
   RESTORED_DATABASE_FILE,
   RESTORED_STORAGE_DIRECTORY,
 } from './format.js';
-import { copyFileHashing, hashFile, isEmptyDirectory } from './files.js';
+import { copyFileHashing, hashFile, isEmptyDirectory, resolveWithin } from './files.js';
 import { inspectDatabaseFile } from './inspect.js';
 import type { BackupFileEntry, BackupManifest } from './manifest.js';
 import { manifestFiles, parseManifest } from './manifest.js';
@@ -94,7 +98,7 @@ export const verifyBackup = async (
     index += 1;
     progress({ phase: 'verify', done: index, total: files.length, label: entry.path });
 
-    const path = join(root, entry.path);
+    const path = resolveWithin(root, entry.path);
     if (!existsSync(path)) {
       failures.push({
         path: entry.path,
@@ -233,7 +237,10 @@ export const restoreBackup = async (options: RestoreBackupOptions): Promise<Rest
           : 'storage';
     progress({ phase, done: index, total: files.length, label: entry.path });
 
-    const source = join(root, entry.path);
+    // Resolved and bounded on the read side as well as the write side. `parseManifest` already
+    // refused anything that escapes, so reaching a throw here means the filesystem did something
+    // the syntax could not express.
+    const source = resolveWithin(root, entry.path);
     if (!existsSync(source)) {
       failures.push({
         path: entry.path,
@@ -246,7 +253,7 @@ export const restoreBackup = async (options: RestoreBackupOptions): Promise<Rest
       continue;
     }
 
-    const destination = join(into, targetFor(manifest, entry));
+    const destination = resolveWithin(into, targetFor(manifest, entry));
     const copied = await copyFileHashing(source, destination);
     written.push(destination);
 

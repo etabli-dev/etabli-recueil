@@ -1,0 +1,71 @@
+# Recueil ingestion rules — negation.
+#
+# "none" is a list of conditions, none of which may hold. Two of these five rules are the cases a
+# negation implementation gets wrong.
+
+version: 1
+name: negation
+
+rules:
+  # Ordinary correspondence: from a person, not from a list. A message with a List-Id header is a
+  # newsletter and is not correspondence, however much the rest of it looks like one.
+  - id: correspondence-not-list
+    priority: 80
+    match:
+      all:
+        - source: mail
+      none:
+        - header: { name: List-Id, present: true }
+        - header: { name: Precedence, equals: bulk }
+    actions:
+      - set_item_type: letter
+      - add_tag: Korrespondenz
+
+  # A double negative. "none of [ none of [ tag Storno ] ]" is "the document IS tagged Storno".
+  # An implementation that flattens nested negations into one gets the exact opposite answer, and
+  # gets it silently.
+  - id: double-negative-storno
+    priority: 70
+    match:
+      none:
+        - none:
+            - tag: Storno
+    actions:
+      - add_tag: Geprüft
+      - set_custom_field: { key: geprueft, value: true }
+
+  # An EMPTY none. There is nothing to exclude, so the condition holds. A fold with the wrong
+  # identity — Array.prototype.some() over an empty list is false, and "not false" is true, but
+  # every() is true and "not true" is false — turns this rule off for every document in the library.
+  - id: vacuous-none-scanner
+    priority: 60
+    match:
+      all:
+        - source: scanner
+      none: []
+    actions:
+      - add_tag: Gescannt
+
+  # Missing, not empty. A correspondent that was never extracted is not a correspondent whose name
+  # is the empty string, and only one of the two belongs in the review queue.
+  - id: no-correspondent-to-review
+    priority: 40
+    match:
+      all:
+        - correspondent: { missing: true }
+      none:
+        - source: import
+    actions:
+      - route_to_review: low_confidence_metadata
+
+  # any + none together: one of the two tags, and not the third.
+  - id: steuer-nicht-storniert
+    priority: 30
+    match:
+      any:
+        - tag: Steuer
+        - tag: Behörde
+      none:
+        - tag: Storno
+    actions:
+      - add_to_collection: Steuer

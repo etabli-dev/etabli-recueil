@@ -40,16 +40,41 @@ export class RequestValidationError extends Error {
 export const dottedPath = (path: readonly PropertyKey[]): string =>
   path.map((segment) => String(segment)).join('.');
 
-const problemErrors = (issues: readonly z.core.$ZodIssue[]): ProblemError[] =>
-  issues.map((issue) => {
-    // An unrecognised key is reported by Zod against the *containing* object, which leaves the
-    // client's pointer aimed at the wrong thing. The offending key is in `issue.keys`, so the
-    // pointer is extended to name it: `body.titel` rather than `body`.
+/**
+ * Flatten Zod's issue tree into the `errors` member.
+ *
+ * Two transformations, both because the raw tree points a client at the wrong thing.
+ *
+ * **An unrecognised key** is reported against the *containing* object, so the pointer is extended
+ * with the offending key: `body.titel` rather than `body`.
+ *
+ * **A union failure** is reported as every branch's complaint at once, and the *summary* is the
+ * useless string "Invalid input". A rule condition is a twelve-way union of strict objects and an
+ * ingestion source config is a three-way one, so without this a mistyped rule comes back as
+ * `body.when Invalid input` and the author has nothing to act on. The branch with the fewest issues
+ * is near enough always the one they meant, so that branch is reported and the rest are dropped —
+ * the same choice `@recueil/rules` makes for its own parser, for the same reason.
+ */
+const problemErrors = (
+  issues: readonly z.core.$ZodIssue[],
+  prefix: readonly PropertyKey[] = [],
+): ProblemError[] =>
+  issues.flatMap((issue) => {
+    const here = [...prefix, ...issue.path];
+
+    if (issue.code === 'invalid_union' && issue.errors.length > 0) {
+      const closest = issue.errors.reduce(
+        (best, branch) => (branch.length < best.length ? branch : best),
+        issue.errors[0] as readonly z.core.$ZodIssue[],
+      );
+      return problemErrors(closest, here);
+    }
+
     const path =
       issue.code === 'unrecognized_keys' && issue.keys.length > 0
-        ? dottedPath([...issue.path, issue.keys[0] as string])
-        : dottedPath(issue.path);
-    return { path, message: issue.message, code: issue.code };
+        ? dottedPath([...here, issue.keys[0] as string])
+        : dottedPath(here);
+    return [{ path, message: issue.message, code: issue.code }];
   });
 
 /**

@@ -82,6 +82,21 @@ systematic-review, job and audit entities are specified in `spec/data-model.md` 
 phases that serve them; `src/openapi/paths.ts` carries the marked extension point where their
 routes will be registered.
 
+### Known defect: schemas with no operation behind them
+
+**32 of the 196 published schemas are unreachable from any operation in the generated document**,
+including the whole Annotation API — `AnnotationSchema`, `AnnotationCreateSchema`, the selector
+family, `WebAnnotationSchema`. ADR-0009 specifies them and Phase 2 serves them; today a generated
+client gets types for endpoints that answer 404.
+
+That is a defect, not a design decision: a contract that describes routes which are not there is
+worse than one that describes fewer. It is recorded here rather than fixed because the fix is a
+choice — prune to the reachable set and re-add each schema with the phase that implements it, or
+mark the unreachable ones in the document so a generator can exclude them — and either is a change
+to the published contract that wants deciding rather than doing in a remediation pass. Whichever is
+chosen, the check that keeps it true is a test walking `components.schemas` against the `$ref`s
+reachable from `paths`, failing on anything orphaned.
+
 ## Provenance of the design
 
 - `CONCEPT.md` §5.2 (entities), §5.12 (API surface), §5.15 (`/health`)

@@ -14,7 +14,9 @@
  * subscriber that reads `stagesRun: ['hash', 'dedup', 'commit']` learns something correct; one that
  * reads a fabricated ten-stage list learns something false.
  */
+import { schema as coreSchema } from '@recueil/core';
 import type { Actor, IngestResult, ItemRecord, Recueil, schema } from '@recueil/core';
+import { and, eq, isNull } from 'drizzle-orm';
 
 import type { EventBus, EventEnvelope } from './events.js';
 import { collectionIdsFor, itemTagsFor } from './queries.js';
@@ -184,5 +186,195 @@ export const publishAttachmentAdded = (
       ...(attachment.title === null ? {} : { filename: attachment.title }),
       position: attachment.position,
       addedVia,
+    },
+  });
+
+/* -------------------------------------------------------------------------------------------- */
+/* Phase 2: the ingestion pipeline and the job queue                                               */
+/* -------------------------------------------------------------------------------------------- */
+
+/**
+ * `document.ingested` for a document the pipeline handled.
+ *
+ * §7.3 says the event "fires once per Document that reaches commit at pipeline stage 10, including
+ * when the pipeline stopped at stage 2 because the hash already existed — with
+ * `duplicateOfDocumentId` set and no new bytes stored". Both cases go through here.
+ *
+ * Every field is read back out of the library rather than taken from the pipeline's own event:
+ * `storageBackend`, `storageKey` and `hasTextLayer` are columns, `itemIds` is a query over live
+ * attachments, and `reviewQueueEntryId` is a query over open review rows for this document. A
+ * payload assembled from the emitter's in-memory notion of what it had just done would agree with
+ * itself whatever went wrong at the commit.
+ */
+export const publishDocumentIngestedFromPipeline = (
+  bus: EventBus,
+  recueil: Recueil,
+  input: {
+    actor: Actor;
+    documentId: string;
+    duplicate: boolean;
+    pipelineRunId: string;
+    ref?: { sourceId: string; externalId: string; revision?: string };
+  },
+): EventEnvelope | null => {
+  const document = recueil.db
+    .select()
+    .from(coreSchema.documents)
+    .where(eq(coreSchema.documents.id, input.documentId))
+    .get();
+  // A document the pipeline named and the library does not hold is a bug worth being loud about,
+  // and emitting a half-filled event would hide it. No event, and the caller's log line stands.
+  if (document === undefined) return null;
+
+  const itemIds = recueil.db
+    .select({ itemId: coreSchema.attachments.itemId })
+    .from(coreSchema.attachments)
+    .where(
+      and(
+        eq(coreSchema.attachments.documentId, input.documentId),
+        isNull(coreSchema.attachments.trashedAt),
+      ),
+    )
+    .all()
+    .map((row) => row.itemId);
+
+  const openReview = recueil.connection
+    .prepare(
+      `select id from review_queue
+       where subject_type = 'document' and subject_id = ? and status = 'open'
+       order by created_at limit 1`,
+    )
+    .get(input.documentId) as { id: string } | undefined;
+
+  return bus.publish({
+    type: 'document.ingested',
+    actor: input.actor,
+    payload: {
+      documentId: document.id,
+      sha256: document.sha256,
+      mediaType: document.mimeType,
+      byteSize: document.byteSize,
+      storageBackend: document.storageBackend,
+      storageKey: document.storageKey,
+      hasTextLayer: document.hasTextLayer ?? false,
+      // Stage 5 is off in this process: there is no OCR worker to reach (no container runtime), so
+      // this is false because nothing ran, not because nothing was needed.
+      ocrApplied: false,
+      source: {
+        kind: document.sourceKind,
+        ...(input.ref === undefined ? {} : { ref: input.ref }),
+        ...(document.sourceRef === null ? {} : { path: document.sourceRef }),
+      },
+      ...(input.duplicate ? { duplicateOfDocumentId: document.id } : {}),
+      itemIds,
+      pipelineRunId: input.pipelineRunId,
+      stagesRun: PIPELINE_STAGES_RUN,
+      confidence: 1,
+      ...(openReview === undefined ? {} : { reviewQueueEntryId: openReview.id }),
+    },
+  });
+};
+
+/**
+ * The stages this build's pipeline really runs.
+ *
+ * Not the ten of CONCEPT §5.3: OCR is off because there is no worker to reach, and resolution has
+ * no resolvers until Phase 3. A subscriber that reads this list learns something correct; one that
+ * read a fabricated ten-stage list would learn something false (the same reasoning as the Phase 1
+ * `stagesRun: ['hash','dedup','commit']`).
+ */
+const PIPELINE_STAGES_RUN = [
+  'hash',
+  'duplicate_check',
+  'archive_extraction',
+  'type_detection',
+  'metadata_extraction',
+  'resolution',
+  'rules',
+  'confidence_gate',
+  'commit',
+];
+
+export interface JobStartedInput {
+  jobId: string;
+  jobType: string;
+  idempotencyKey?: string;
+  params: Record<string, unknown>;
+  attempt: number;
+  priority: number;
+  parentJobId?: string;
+  startedAt: string;
+}
+
+/** `job.started` (§7.3). `params` carries no credential: the job rows this server writes hold none. */
+export const publishJobStarted = (bus: EventBus, actor: Actor, input: JobStartedInput): EventEnvelope =>
+  bus.publish({
+    type: 'job.started',
+    actor,
+    payload: {
+      jobId: input.jobId,
+      jobType: input.jobType,
+      ...(input.idempotencyKey === undefined ? {} : { idempotencyKey: input.idempotencyKey }),
+      params: input.params,
+      attempt: input.attempt,
+      priority: input.priority,
+      ...(input.parentJobId === undefined ? {} : { parentJobId: input.parentJobId }),
+      startedAt: input.startedAt,
+    },
+  });
+
+export interface JobFinishedInput {
+  jobId: string;
+  jobType: string;
+  state: 'succeeded' | 'cancelled';
+  attempt: number;
+  durationMs: number;
+  result: Record<string, unknown>;
+  parentJobId?: string;
+  finishedAt: string;
+}
+
+export const publishJobFinished = (bus: EventBus, actor: Actor, input: JobFinishedInput): EventEnvelope =>
+  bus.publish({
+    type: 'job.finished',
+    actor,
+    payload: {
+      jobId: input.jobId,
+      jobType: input.jobType,
+      state: input.state,
+      attempt: input.attempt,
+      durationMs: input.durationMs,
+      result: input.result,
+      ...(input.parentJobId === undefined ? {} : { parentJobId: input.parentJobId }),
+      finishedAt: input.finishedAt,
+    },
+  });
+
+export interface JobFailedInput {
+  jobId: string;
+  jobType: string;
+  state: 'failed' | 'dead';
+  attempt: number;
+  willRetry: boolean;
+  nextRunAfter?: string;
+  error: { code: string; message: string; retryable: boolean; userMessage?: string };
+  parentJobId?: string;
+  failedAt: string;
+}
+
+export const publishJobFailed = (bus: EventBus, actor: Actor, input: JobFailedInput): EventEnvelope =>
+  bus.publish({
+    type: 'job.failed',
+    actor,
+    payload: {
+      jobId: input.jobId,
+      jobType: input.jobType,
+      state: input.state,
+      attempt: input.attempt,
+      willRetry: input.willRetry,
+      ...(input.nextRunAfter === undefined ? {} : { nextRunAfter: input.nextRunAfter }),
+      error: input.error,
+      ...(input.parentJobId === undefined ? {} : { parentJobId: input.parentJobId }),
+      failedAt: input.failedAt,
     },
   });

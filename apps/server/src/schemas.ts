@@ -570,6 +570,23 @@ export const ConnectorPingResponseSchema = z
     description: "The handshake the Zotero Connector expects from a client on port 23119 (ADR-0006).",
   });
 
+/**
+ * One row of the connector's save-target picker.
+ *
+ * `id` is Zotero's `treeViewID`: `L<libraryID>` for a library, `C<collectionID>` for a collection.
+ * `level` is the indent depth, 0 for a library. Shape taken from the client's own response builder,
+ * captured verbatim in `fixtures/zotero-connector/server_connector.GetSelectedCollection.js`.
+ */
+const ConnectorSaveTargetSchema = z
+  .looseObject({
+    id: z.string().max(64),
+    name: z.string().max(255),
+    filesEditable: z.boolean(),
+    level: z.number().int().min(0),
+    recent: z.boolean().optional(),
+  })
+  .meta({ id: 'ConnectorSaveTarget', title: 'ConnectorSaveTarget' });
+
 export const ConnectorCollectionResponseSchema = z
   .strictObject({
     libraryID: z.union([z.number(), z.string()]),
@@ -579,7 +596,14 @@ export const ConnectorCollectionResponseSchema = z
     id: z.string().max(64).nullable(),
     name: z.string().max(255),
     filesEditable: z.boolean().optional(),
-    targets: z.array(z.record(z.string(), z.unknown())).optional(),
+    /**
+     * Required, not optional. The extension does `response.targets.filter(…)` with no guard —
+     * `progressWindow_inject.js` line 153 at `c279ccc` — so omitting it throws a `TypeError` in the
+     * progress window on every capture.
+     */
+    targets: z.array(ConnectorSaveTargetSchema),
+    /** Tag autocomplete, keyed by `treeViewID`. Sent because `ping` advertises the capability. */
+    tags: z.record(z.string(), z.array(z.looseObject({ tag: z.string() }))),
   })
   .meta({
     id: 'ConnectorCollectionResponse',
@@ -590,13 +614,6 @@ export const ConnectorCollectionResponseSchema = z
 export const ConnectorSaveItemsResponseSchema = z
   .strictObject({ items: z.array(z.record(z.string(), z.unknown())) })
   .meta({ id: 'ConnectorSaveItemsResponse', title: 'ConnectorSaveItemsResponse' });
-
-export const ConnectorSessionProgressResponseSchema = z
-  .strictObject({
-    items: z.array(z.record(z.string(), z.unknown())),
-    done: z.boolean(),
-  })
-  .meta({ id: 'ConnectorSessionProgressResponse', title: 'ConnectorSessionProgressResponse' });
 
 /* -------------------------------------------------------------------------------------------- */
 /* Miscellaneous                                                                                   */

@@ -14,13 +14,26 @@ export type BibliographicFieldPath = keyof BibliographicFacetUpdate;
 
 export type FieldKind = 'text' | 'longText' | 'number';
 
-export interface BibliographicFieldDescriptor {
-  path: BibliographicFieldPath;
+/**
+ * One editable field, whichever facet it belongs to.
+ *
+ * `FieldRow` renders this rather than the bibliographic descriptor, because the office facet
+ * (§5.2, `spec/data-model.md` §3.7) needs exactly the same row — a labelled input, its provenance
+ * and its lock — and a second copy of that component would be a second place for the lock wording
+ * to drift.
+ */
+export interface FieldDescriptor {
+  /** A key of the facet's `Update` type. Also the `data-field` attribute and the lock's path. */
+  path: string;
   label: string;
   group: string;
   kind: FieldKind;
   /** Shown under the input when the field's format is not obvious. */
   hint?: string;
+}
+
+export interface BibliographicFieldDescriptor extends FieldDescriptor {
+  path: BibliographicFieldPath;
 }
 
 export const BIBLIOGRAPHIC_FIELDS: readonly BibliographicFieldDescriptor[] = [

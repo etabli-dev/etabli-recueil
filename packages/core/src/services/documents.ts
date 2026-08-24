@@ -81,6 +81,15 @@ export interface IngestResult {
   attachmentId: string | null;
   /** True when the blob was written to the store, false when it was already there. */
   blobWritten: boolean;
+  /**
+   * True when the store held an object at this digest whose bytes were wrong, and this ingest
+   * replaced it.
+   *
+   * It means the store had rotted and these bytes arriving again is what repaired it. The audit row
+   * says so, and `documents.storage_verified_at` is moved forward, because the blob has just been
+   * proven correct by construction.
+   */
+  blobRepaired: boolean;
 }
 
 export class DocumentService {
@@ -150,6 +159,15 @@ export class DocumentService {
         tx.insert(documents).values(document).run();
       } else {
         document = existing;
+        if (stored.repaired) {
+          // The bytes on disk were wrong until a moment ago and are right now, so the row's
+          // verification stamp is a fact again rather than a memory of one.
+          tx.update(documents)
+            .set({ storageVerifiedAt: now, storageOk: true, updatedAt: now })
+            .where(eq(documents.id, existing.id))
+            .run();
+          document = { ...existing, storageVerifiedAt: now, storageOk: true, updatedAt: now };
+        }
       }
 
       const provenanceRow: DocumentProvenanceRow = {
@@ -195,10 +213,14 @@ export class DocumentService {
             sourceRef: provenance.sourceRef ?? null,
             provenanceId: provenanceRow.id,
             ...(attachmentId === null ? {} : { attachmentId }),
+            ...(stored.repaired ? { blobRepaired: true } : {}),
           },
-          reason: created
-            ? null
-            : 'these bytes were already in the library; linked the existing document (D1, CONCEPT §5.3 stage 2)',
+          reason: stored.repaired
+            ? 'the blob at this digest did not hold these bytes; the store had rotted and these ' +
+              'bytes repaired it (ADR-0004, invariant D2)'
+            : created
+              ? null
+              : 'these bytes were already in the library; linked the existing document (D1, CONCEPT §5.3 stage 2)',
         },
         tx,
       );
@@ -209,6 +231,7 @@ export class DocumentService {
         created,
         attachmentId,
         blobWritten: stored.created,
+        blobRepaired: stored.repaired,
       };
     });
   }
@@ -243,7 +266,8 @@ export class DocumentService {
    * Attach a known document to an item (§3.8).
    *
    * Attaching an already-known file creates an `attachments` row and no `documents` row (AT1): two
-   * items citing the same supplementary dataset share one blob.
+   * items citing the same supplementary dataset share one blob. A trashed document is refused
+   * (D4); see `attachInTransaction`.
    */
   attachDocument(
     input: { itemId: string; documentId: string; role?: AttachmentRole; title?: string | null },
@@ -334,7 +358,8 @@ export class DocumentService {
    *
    * Refused for an attachment that went into the bin as part of trashing its item (I4): that one
    * comes back with the item, and putting it back on its own would leave a live attachment hanging
-   * off a trashed record.
+   * off a trashed record. Refused as well when the item or the document behind it is in the trash
+   * (D4) — either would put the attachment back into a state no other path is allowed to create.
    */
   restoreAttachment(attachmentId: string, actor: Actor): void {
     this.db.transaction((tx) => {
@@ -365,6 +390,27 @@ export class DocumentService {
           `Item '${current.itemId}' is in the trash; restore it before re-attaching files to it.`,
           { itemId: current.itemId },
         );
+      }
+
+      // D4 again, from the other direction: the document may have been trashed while this
+      // attachment sat in the bin — `trashDocument` allows exactly that, because at the time no
+      // live attachment pointed at it. Restoring the attachment now would create the forbidden
+      // state without any path having done anything wrong.
+      if (current.documentId !== null) {
+        const document = tx
+          .select({ trashedAt: documents.trashedAt })
+          .from(documents)
+          .where(eq(documents.id, current.documentId))
+          .get();
+        if (document === undefined) throw new NotFoundError('document', current.documentId);
+        if (document.trashedAt !== null) {
+          throw new InvariantError(
+            'D4',
+            `Document '${current.documentId}' went into the trash while this attachment was in ` +
+              'it. Restore the document first; a live attachment may not point at a trashed one.',
+            { attachmentId, documentId: current.documentId },
+          );
+        }
       }
 
       const now = nowTimestamp();
@@ -497,6 +543,35 @@ export class DocumentService {
   ): string {
     const item = tx.select({ id: items.id }).from(items).where(eq(items.id, input.itemId)).get();
     if (item === undefined) throw new NotFoundError('item', input.itemId);
+
+    /*
+     * D4, enforced on the way *in* as well as on the way out.
+     *
+     * `trashDocument` refuses while a live attachment points at the document. That is one half of
+     * the invariant and, on its own, it is not the invariant: a live attachment over a trashed
+     * document is the forbidden state whichever end arrives second. Every path that can create one
+     * comes through here — `attachDocument` with a trashed document id, and a re-ingest of bytes
+     * whose document was trashed, which finds the existing row and attaches to it — so the check
+     * belongs here rather than in each caller.
+     *
+     * Refused rather than restored: bringing a document back out of the trash is a decision with a
+     * trash record and an audit row behind it, and an attach is not the place to make it silently.
+     */
+    const document = tx
+      .select({ id: documents.id, trashedAt: documents.trashedAt })
+      .from(documents)
+      .where(eq(documents.id, input.documentId))
+      .get();
+    if (document === undefined) throw new NotFoundError('document', input.documentId);
+    if (document.trashedAt !== null) {
+      throw new InvariantError(
+        'D4',
+        `Document '${input.documentId}' is in the trash, so nothing may be attached to it: an ` +
+          'attachment that resolves to bytes the library says are gone is a row every reader ' +
+          'would need a special case for. Restore the document first.',
+        { documentId: input.documentId, itemId: input.itemId },
+      );
+    }
 
     const alreadyThere = tx
       .select({ id: attachments.id })

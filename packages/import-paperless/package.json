@@ -1,0 +1,47 @@
+{
+  "name": "@recueil/import-paperless",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The Paperless-ngx migrator: reads documents, tags, correspondents, document types, custom fields, notes and originals from the Paperless-ngx REST API, maps them onto the Recueil Office facet, hashes every original, and produces the verification report the M2 exit criterion names.",
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "import": "./dist/testing/index.js",
+      "default": "./dist/testing/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc --build tsconfig.build.json",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --build tsconfig.build.json && tsc --noEmit -p tsconfig.json",
+    "test": "tsc --build tsconfig.build.json && vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@recueil/core": "workspace:*",
+    "@recueil/schemas": "workspace:*",
+    "drizzle-orm": "^0.44.6"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.11"
+  }
+}

@@ -180,3 +180,82 @@ export const multipart = (
     headers: { 'content-type': `multipart/form-data; boundary=${boundary}` },
   };
 };
+
+/* -------------------------------------------------------------------------------------------- */
+/* Phase 2 fixtures                                                                                */
+/* -------------------------------------------------------------------------------------------- */
+
+/**
+ * A 32-byte credential-encryption key, as base64.
+ *
+ * Fixed rather than random, because a test that fails should fail the same way twice. It is a test
+ * key and nothing is encrypted with it that outlives the temporary directory.
+ */
+export const TEST_SECRET_KEY = Buffer.alloc(32, 7).toString('base64');
+
+/** A temporary directory, removed by the returned function. For watched-folder fixtures. */
+export const temporaryDirectory = (prefix = 'recueil-consume-'): { path: string; remove: () => void } => {
+  const path = mkdtempSync(join(tmpdir(), prefix));
+  return { path, remove: () => rmSync(path, { recursive: true, force: true }) };
+};
+
+/** Start the harness on a loopback port and return its origin. For the streaming endpoints. */
+export const listen = async (h: Harness): Promise<string> => {
+  await h.app.listen({ port: 0, host: '127.0.0.1' });
+  const address = h.app.server.address();
+  return typeof address === 'object' && address !== null ? `http://127.0.0.1:${address.port}` : '';
+};
+
+/**
+ * Read frames off an SSE response until `count` have arrived or the deadline passes.
+ *
+ * The framing is the contract — `id:`, `event:`, `data:`, blank line — so a test that inspected the
+ * bus directly would prove nothing about what a browser receives.
+ */
+export const readSseFrames = async (
+  response: Response,
+  count: number,
+  timeoutMs = 8000,
+): Promise<{ event: string; data: Record<string, unknown>; id: string }[]> => {
+  const reader = (response.body as ReadableStream<Uint8Array>).getReader();
+  const decoder = new TextDecoder();
+  const frames: { event: string; data: Record<string, unknown>; id: string }[] = [];
+  let buffer = '';
+  const deadline = Date.now() + timeoutMs;
+
+  while (frames.length < count && Date.now() < deadline) {
+    const chunk = await Promise.race([
+      reader.read(),
+      new Promise<{ done: true; value: undefined }>((resolve) =>
+        setTimeout(() => resolve({ done: true, value: undefined }), Math.max(1, deadline - Date.now())),
+      ),
+    ]);
+    if (chunk.done) break;
+    buffer += decoder.decode(chunk.value, { stream: true });
+
+    let separator = buffer.indexOf('\n\n');
+    while (separator !== -1) {
+      const raw = buffer.slice(0, separator);
+      buffer = buffer.slice(separator + 2);
+      separator = buffer.indexOf('\n\n');
+      if (raw.startsWith(':')) continue;
+
+      const fields = new Map<string, string>();
+      for (const line of raw.split('\n')) {
+        const colon = line.indexOf(':');
+        if (colon === -1) continue;
+        fields.set(line.slice(0, colon), line.slice(colon + 1).trim());
+      }
+      const data = fields.get('data');
+      if (data === undefined) continue;
+      frames.push({
+        event: fields.get('event') ?? '',
+        id: fields.get('id') ?? '',
+        data: JSON.parse(data) as Record<string, unknown>,
+      });
+    }
+  }
+
+  await reader.cancel().catch(() => undefined);
+  return frames;
+};

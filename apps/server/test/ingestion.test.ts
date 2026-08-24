@@ -1,0 +1,969 @@
+/**
+ * `/api/v1/ingestion` — sources, the share-target upload, the work queue and the review queue.
+ *
+ * Every test here drives the real thing: a real SQLite library in a temporary directory, the real
+ * `@recueil/ingest` pipeline, a real watched folder on the filesystem and — for the WebDAV source —
+ * the in-process fake server from `@recueil/storage-backends/testing`, listening on loopback. There
+ * is no container anywhere and no mock of the pipeline: a test that stubbed the pipeline would
+ * prove that the route calls a stub.
+ */
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+import { startFakeWebDavServer } from '@recueil/storage-backends/testing';
+import type { FakeWebDavServer } from '@recueil/storage-backends/testing';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+import {
+  TEST_SECRET_KEY,
+  body,
+  harness,
+  listen,
+  multipart,
+  readSseFrames,
+  temporaryDirectory,
+} from './helpers.js';
+import type { Harness } from './helpers.js';
+
+/** A plausible office document as bytes: an invoice, in plain text. */
+const INVOICE = [
+  'Stadtwerke Ulm',
+  'Rechnung Nr. 2026-0042',
+  'Rechnungsdatum: 12.03.2026',
+  '',
+  'Betrag: 84,20 EUR',
+].join('\n');
+
+interface UploadResult {
+  outcome: string;
+  jobId: string;
+  document: { id: string; sha256: string } | null;
+  item: { id: string } | null;
+  reviewEntry: { id: string; status: string; proposedAction: string | null } | null;
+  reasonCode: string | null;
+  detail: string;
+}
+
+const upload = async (
+  h: Harness,
+  content: string,
+  filename = 'invoice.txt',
+  fields: Record<string, string> = {},
+): Promise<{ status: number; result: UploadResult }> => {
+  const part = multipart(
+    { name: 'file', filename, contentType: 'text/plain', bytes: content },
+    fields,
+  );
+  const response = await h.app.inject({
+    method: 'POST',
+    url: '/api/v1/ingestion/upload',
+    payload: part.payload,
+    headers: part.headers,
+  });
+  return { status: response.statusCode, result: body<UploadResult>(response) };
+};
+
+/* ============================================================================================== */
+/* Sources                                                                                          */
+/* ============================================================================================== */
+
+describe('/api/v1/ingestion/sources', () => {
+  let h: Harness;
+  let watched: { path: string; remove: () => void };
+
+  beforeEach(async () => {
+    watched = temporaryDirectory();
+    h = await harness({ env: { RECUEIL_SECRET_KEY: TEST_SECRET_KEY } });
+  });
+
+  afterEach(async () => {
+    await h.close();
+    watched.remove();
+  });
+
+  const createFolderSource = async (overrides: Record<string, unknown> = {}) =>
+    h.app.inject({
+      method: 'POST',
+      url: '/api/v1/ingestion/sources',
+      payload: {
+        name: 'Scanner drop',
+        sourceKind: 'scanner',
+        config: { kind: 'folder', root: watched.path },
+        ...overrides,
+      },
+    });
+
+  it('configures a watched folder and resolves its root', async () => {
+    const response = await createFolderSource();
+    expect(response.statusCode).toBe(201);
+
+    const source = body<{ id: string; kind: string; config: { root: string }; secretNames: string[] }>(
+      response,
+    );
+    expect(source.kind).toBe('folder');
+    expect(source.secretNames).toEqual([]);
+    // The stored root is the resolved, symlink-followed one, not the string that was sent: on
+    // macOS `/var/folders/...` is a link to `/private/var/folders/...` and the two must not both
+    // be configurable as separate sources.
+    expect(source.config.root.endsWith(watched.path.split('/').pop() as string)).toBe(true);
+    expect(response.headers['location']).toBe(`/api/v1/ingestion/sources/${source.id}`);
+  });
+
+  it('refuses a relative root, and a root that is not there', async () => {
+    const relative = await createFolderSource({ config: { kind: 'folder', root: './consume' } });
+    expect(relative.statusCode).toBe(422);
+    expect(body<{ detail: string }>(relative).detail).toMatch(/absolute/iu);
+
+    const missing = await createFolderSource({
+      config: { kind: 'folder', root: join(watched.path, 'not-here') },
+    });
+    expect(missing.statusCode).toBe(422);
+  });
+
+  it('refuses a consume destination that escapes the root', async () => {
+    const response = await createFolderSource({
+      consume: { mode: 'move', to: '../../elsewhere' },
+    });
+    expect(response.statusCode).toBe(422);
+    expect(body<{ detail: string }>(response).detail).toMatch(/outside the source root/iu);
+  });
+
+  it('honours RECUEIL_INGEST_ALLOWED_ROOTS', async () => {
+    const other = temporaryDirectory('recueil-allowed-');
+    const guarded = await harness({
+      env: { RECUEIL_SECRET_KEY: TEST_SECRET_KEY, RECUEIL_INGEST_ALLOWED_ROOTS: other.path },
+    });
+    try {
+      const outside = await guarded.app.inject({
+        method: 'POST',
+        url: '/api/v1/ingestion/sources',
+        payload: { name: 'Outside', config: { kind: 'folder', root: watched.path } },
+      });
+      expect(outside.statusCode).toBe(422);
+      expect(body<{ detail: string }>(outside).detail).toContain('RECUEIL_INGEST_ALLOWED_ROOTS');
+
+      const inside = join(other.path, 'inbox');
+      mkdirSync(inside);
+      const allowed = await guarded.app.inject({
+        method: 'POST',
+        url: '/api/v1/ingestion/sources',
+        payload: { name: 'Inside', config: { kind: 'folder', root: inside } },
+      });
+      expect(allowed.statusCode).toBe(201);
+    } finally {
+      await guarded.close();
+      other.remove();
+    }
+  });
+
+  it('refuses two sources with the same name', async () => {
+    expect((await createFolderSource()).statusCode).toBe(201);
+    const clash = await createFolderSource();
+    expect(clash.statusCode).toBe(409);
+  });
+
+  it('never returns a credential, and says which ones it holds', async () => {
+    const created = await h.app.inject({
+      method: 'POST',
+      url: '/api/v1/ingestion/sources',
+      payload: {
+        name: 'Mailbox',
+        config: { kind: 'imap', host: '127.0.0.1', username: 'rh', port: 1143, secure: false },
+        secret: { password: 'hunter2' },
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    expect(body<{ secretNames: string[] }>(created).secretNames).toEqual(['password']);
+    // The whole response body, not just the fields the schema names: a strict schema would reject
+    // an extra key, but this is the assertion that matters and it is worth making directly.
+    expect(created.payload).not.toContain('hunter2');
+
+    const id = body<{ id: string }>(created).id;
+    const fetched = await h.app.inject({ method: 'GET', url: `/api/v1/ingestion/sources/${id}` });
+    expect(fetched.payload).not.toContain('hunter2');
+
+    const listed = await h.app.inject({ method: 'GET', url: '/api/v1/ingestion/sources' });
+    expect(listed.payload).not.toContain('hunter2');
+
+    // And it really is encrypted at rest, not merely omitted from the response.
+    const stored = h.recueil.connection
+      .prepare('select secret_ciphertext from ingestion_sources where id = ?')
+      .get(id) as { secret_ciphertext: string };
+    expect(stored.secret_ciphertext).not.toContain('hunter2');
+    expect(stored.secret_ciphertext.startsWith('v1.')).toBe(true);
+  });
+
+  it('refuses to store a credential when no key is configured', async () => {
+    const keyless = await harness();
+    try {
+      const response = await keyless.app.inject({
+        method: 'POST',
+        url: '/api/v1/ingestion/sources',
+        payload: {
+          name: 'Mailbox',
+          config: { kind: 'imap', host: '127.0.0.1', username: 'rh' },
+          secret: { password: 'hunter2' },
+        },
+      });
+      expect(response.statusCode).toBe(409);
+      expect(body<{ detail: string }>(response).detail).toContain('RECUEIL_SECRET_KEY');
+
+      // A source that needs no credential is still configurable on such a server.
+      const plain = await keyless.app.inject({
+        method: 'POST',
+        url: '/api/v1/ingestion/sources',
+        payload: { name: 'Drop', config: { kind: 'folder', root: watched.path } },
+      });
+      expect(plain.statusCode).toBe(201);
+    } finally {
+      await keyless.close();
+    }
+  });
+
+  it('enables and disables', async () => {
+    const id = body<{ id: string }>(await createFolderSource()).id;
+
+    const disabled = await h.app.inject({
+      method: 'POST',
+      url: `/api/v1/ingestion/sources/${id}/disable`,
+    });
+    expect(body<{ enabled: boolean; version: number }>(disabled).enabled).toBe(false);
+
+    const enabled = await h.app.inject({
+      method: 'POST',
+      url: `/api/v1/ingestion/sources/${id}/enable`,
+    });
+    expect(body<{ enabled: boolean }>(enabled).enabled).toBe(true);
+
+    const filtered = await h.app.inject({ method: 'GET', url: '/api/v1/ingestion/sources?enabled=false' });
+    expect(body<{ data: unknown[] }>(filtered).data).toHaveLength(0);
+  });
+
+  it('refuses to run a disabled source', async () => {
+    const id = body<{ id: string }>(await createFolderSource()).id;
+    await h.app.inject({ method: 'POST', url: `/api/v1/ingestion/sources/${id}/disable` });
+
+    const run = await h.app.inject({ method: 'POST', url: `/api/v1/ingestion/sources/${id}/run` });
+    expect(run.statusCode).toBe(409);
+  });
+
+  it('tests a folder connection against the filesystem', async () => {
+    const id = body<{ id: string }>(await createFolderSource()).id;
+    writeFileSync(join(watched.path, 'a.txt'), 'hello');
+
+    const response = await h.app.inject({
+      method: 'POST',
+      url: `/api/v1/ingestion/sources/${id}/test-connection`,
+    });
+    expect(response.statusCode).toBe(200);
+
+    const result = body<{ ok: boolean; checks: { check: string; ok: boolean; detail: string }[] }>(
+      response,
+    );
+    expect(result.ok).toBe(true);
+    expect(result.checks.map((check) => check.check)).toEqual(['resolve', 'directory', 'read']);
+    // The read check counted what is really there, so it is evidence and not a constant.
+    expect(result.checks[2]?.detail).toContain('1 entr');
+  });
+
+  it('reports a folder that has gone away rather than claiming success', async () => {
+    const id = body<{ id: string }>(await createFolderSource()).id;
+    watched.remove();
+
+    const result = body<{ ok: boolean; checks: { check: string; ok: boolean }[] }>(
+      await h.app.inject({
+        method: 'POST',
+        url: `/api/v1/ingestion/sources/${id}/test-connection`,
+      }),
+    );
+    expect(result.ok).toBe(false);
+    expect(result.checks[0]).toMatchObject({ check: 'resolve', ok: false });
+
+    // Put it back so `afterEach` has something to remove.
+    mkdirSync(watched.path, { recursive: true });
+  });
+
+  it('removes a source without touching what it produced', async () => {
+    const id = body<{ id: string }>(await createFolderSource()).id;
+    const removed = await h.app.inject({ method: 'DELETE', url: `/api/v1/ingestion/sources/${id}` });
+    expect(removed.statusCode).toBe(204);
+    expect((await h.app.inject({ method: 'GET', url: `/api/v1/ingestion/sources/${id}` })).statusCode).toBe(
+      404,
+    );
+
+    const audit = h.recueil.connection
+      .prepare(`select action, before from audit_log where entity_type = 'ingestion_source' order by id`)
+      .all() as { action: string; before: string | null }[];
+    expect(audit.map((row) => row.action)).toContain('ingestion_source.removed');
+    // The configuration is recoverable from the log, which is what makes the delete acceptable.
+    const removal = audit.find((row) => row.action === 'ingestion_source.removed');
+    expect(JSON.parse(removal?.before ?? '{}')).toMatchObject({ kind: 'folder' });
+  });
+});
+
+/* ============================================================================================== */
+/* WebDAV, against an in-process server                                                             */
+/* ============================================================================================== */
+
+describe('a WebDAV source', () => {
+  let h: Harness;
+  let server: FakeWebDavServer;
+
+  beforeEach(async () => {
+    server = await startFakeWebDavServer({ auth: { kind: 'basic', username: 'rh', password: 's3cret' } });
+    h = await harness({ env: { RECUEIL_SECRET_KEY: TEST_SECRET_KEY } });
+  });
+
+  afterEach(async () => {
+    await h.close();
+    await server.close();
+  });
+
+  const create = async (secret: Record<string, string>) =>
+    h.app.inject({
+      method: 'POST',
+      url: '/api/v1/ingestion/sources',
+      payload: {
+        name: 'Nextcloud inbox',
+        config: { kind: 'webdav', url: server.url, username: 'rh', authKind: 'basic' },
+        secret,
+      },
+    });
+
+  it('passes the connection test with the right password', async () => {
+    const id = body<{ id: string }>(await create({ password: 's3cret' })).id;
+
+    const result = body<{ ok: boolean; checks: { check: string; ok: boolean }[] }>(
+      await h.app.inject({
+        method: 'POST',
+        url: `/api/v1/ingestion/sources/${id}/test-connection`,
+      }),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.checks.map((check) => check.check)).toEqual(['options', 'list']);
+    // The server really was spoken to, twice.
+    expect(server.requests.map((request) => request.method)).toEqual(['OPTIONS', 'PROPFIND']);
+  });
+
+  it('fails the connection test with the wrong password', async () => {
+    const id = body<{ id: string }>(await create({ password: 'wrong' })).id;
+
+    const result = body<{ ok: boolean; detail: string }>(
+      await h.app.inject({
+        method: 'POST',
+        url: `/api/v1/ingestion/sources/${id}/test-connection`,
+      }),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.detail).toMatch(/401|unauthor/iu);
+  });
+});
+
+/* ============================================================================================== */
+/* The share-target upload, the queue and the review queue                                          */
+/* ============================================================================================== */
+
+describe('POST /api/v1/ingestion/upload', () => {
+  let h: Harness;
+
+  beforeEach(async () => {
+    h = await harness();
+  });
+
+  afterEach(async () => {
+    await h.close();
+  });
+
+  it('runs the pipeline and reports what the gate decided', async () => {
+    const { status, result } = await upload(h, INVOICE);
+
+    expect(status).toBe(200);
+    // No OCR and no resolvers in this build, so a plain text invoice does not clear the default
+    // 0.75 gate: it is stored and queued, which is P3 working rather than a failure.
+    expect(result.outcome).toBe('review');
+    expect(result.document).not.toBeNull();
+    expect(result.reviewEntry).not.toBeNull();
+    expect(result.reviewEntry?.status).toBe('open');
+    expect(result.reviewEntry?.proposedAction).toBe('create_item');
+    expect(result.item).toBeNull();
+    expect(result.jobId).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/u);
+
+    // The document really is in the library, addressed by its digest.
+    const stored = await h.app.inject({
+      method: 'GET',
+      url: `/api/v1/documents/by-sha256/${result.document?.sha256 ?? ''}`,
+    });
+    expect(stored.statusCode).toBe(200);
+  });
+
+  it('creates the item outright when the gate is open', async () => {
+    const permissive = await harness({ env: { RECUEIL_INGEST_CONFIDENCE_THRESHOLD: '0' } });
+    try {
+      const { status, result } = await upload(permissive, INVOICE);
+      expect(status).toBe(201);
+      expect(result.outcome).toBe('ingested');
+      expect(result.item).not.toBeNull();
+      expect(result.reviewEntry).toBeNull();
+
+      const item = await permissive.app.inject({
+        method: 'GET',
+        url: `/api/v1/items/${result.item?.id ?? ''}`,
+      });
+      expect(item.statusCode).toBe(200);
+    } finally {
+      await permissive.close();
+    }
+  });
+
+  it('re-enters bytes that were stored but never filed, rather than calling them a duplicate', async () => {
+    const first = await upload(h, INVOICE);
+    const second = await upload(h, INVOICE, 'a-different-name.txt');
+
+    // CONCEPT §5.3 stage 2 is "link to the existing document, log, stop" — but only once the
+    // document is *filed*. These bytes are in the store and in nobody's library record, so the
+    // second arrival goes through the gate again and refreshes the open entry rather than being
+    // dismissed as already handled. The entry is the same one, keyed by its dedupe key (P9).
+    expect(second.result.outcome).toBe('review');
+    expect(second.result.reviewEntry?.id).toBe(first.result.reviewEntry?.id);
+
+    // One document either way: the name is not the identity (P2).
+    const documents = h.recueil.connection
+      .prepare('select count(*) as n from documents')
+      .get() as { n: number };
+    expect(documents.n).toBe(1);
+  });
+
+  it('reports the second arrival of filed bytes as a duplicate', async () => {
+    const first = await upload(h, INVOICE);
+    const accepted = await h.app.inject({
+      method: 'POST',
+      url: `/api/v1/ingestion/review/${first.result.reviewEntry?.id ?? ''}/accept`,
+    });
+    expect(accepted.statusCode).toBe(200);
+
+    const second = await upload(h, INVOICE, 'a-different-name.txt');
+    expect(second.status).toBe(200);
+    expect(second.result.outcome).toBe('duplicate');
+    expect(second.result.document?.sha256).toBe(first.result.document?.sha256);
+    expect(second.result.item).toBeNull();
+
+    // Still one document and one item: the arrival was recorded and nothing was created twice.
+    const counts = h.recueil.connection
+      .prepare('select (select count(*) from documents) as documents, (select count(*) from items) as items')
+      .get() as { documents: number; items: number };
+    expect(counts).toEqual({ documents: 1, items: 1 });
+  });
+
+  it('never lets a filename become a path', async () => {
+    const { result } = await upload(h, 'traversal attempt', '../../etc/passwd');
+    expect(result.outcome).toBe('review');
+
+    const document = h.recueil.connection
+      .prepare('select original_filename, source_ref from documents where id = ?')
+      .get(result.document?.id) as { original_filename: string | null; source_ref: string | null };
+    expect(document.original_filename).toBe('passwd');
+    expect(document.source_ref ?? '').not.toContain('..');
+  });
+
+  it('refuses a request that is not multipart', async () => {
+    const response = await h.app.inject({
+      method: 'POST',
+      url: '/api/v1/ingestion/upload',
+      payload: { file: 'nope' },
+    });
+    expect(response.statusCode).toBe(415);
+  });
+});
+
+describe('/api/v1/ingestion/queue', () => {
+  let h: Harness;
+
+  beforeEach(async () => {
+    h = await harness();
+  });
+
+  afterEach(async () => {
+    await h.close();
+  });
+
+  it('lists the run an upload created and shows its stage trace', async () => {
+    const { result } = await upload(h, INVOICE);
+
+    const listed = body<{ data: { id: string; jobType: string; state: string }[] }>(
+      await h.app.inject({ method: 'GET', url: '/api/v1/ingestion/queue' }),
+    );
+    expect(listed.data.some((job) => job.id === result.jobId)).toBe(true);
+
+    const detail = body<{
+      job: { id: string; state: string; result: Record<string, unknown> | null };
+      stages: { candidateKey: string; stage: string }[];
+      log: { message: string }[];
+      reviewEntryIds: string[];
+    }>(await h.app.inject({ method: 'GET', url: `/api/v1/ingestion/queue/${result.jobId}` }));
+
+    expect(detail.job.id).toBe(result.jobId);
+    // A run that queued something is `waiting_review`, not `failed` and not `succeeded` (IK6).
+    expect(detail.job.state).toBe('waiting_review');
+    // The trace comes from `ingest_checkpoints`, which is what a resumed run reads.
+    expect(detail.stages.length).toBeGreaterThan(0);
+    expect(detail.stages.map((stage) => stage.stage)).toContain('commit');
+    // And the review ids are queried from the queue rather than counted from the run's own tally.
+    expect(detail.reviewEntryIds).toEqual([result.reviewEntry?.id]);
+  });
+
+  it('refuses to cancel a run that has already finished', async () => {
+    const { result } = await upload(h, INVOICE);
+    const response = await h.app.inject({
+      method: 'POST',
+      url: `/api/v1/ingestion/queue/${result.jobId}/cancel`,
+    });
+    expect(response.statusCode).toBe(409);
+  });
+
+  it('404s on a job that is not there', async () => {
+    const response = await h.app.inject({
+      method: 'GET',
+      url: '/api/v1/ingestion/queue/01JXXXXXXXXXXXXXXXXXXXXXXX',
+    });
+    expect(response.statusCode).toBe(404);
+  });
+});
+
+describe('running a configured source', () => {
+  let h: Harness;
+  let watched: { path: string; remove: () => void };
+  let sourceId: string;
+
+  beforeEach(async () => {
+    watched = temporaryDirectory();
+    writeFileSync(join(watched.path, 'scan-001.txt'), INVOICE);
+    writeFileSync(join(watched.path, 'scan-002.txt'), `${INVOICE}\nZweite Rechnung`);
+
+    h = await harness();
+    sourceId = body<{ id: string }>(
+      await h.app.inject({
+        method: 'POST',
+        url: '/api/v1/ingestion/sources',
+        payload: {
+          name: 'Scanner drop',
+          sourceKind: 'scanner',
+          // No stability delay: the fixture files are already written and this is a test, not a
+          // scanner still spooling a page.
+          config: { kind: 'folder', root: watched.path, minimumAgeMillis: 0 },
+        },
+      }),
+    ).id;
+  });
+
+  afterEach(async () => {
+    await h.close();
+    watched.remove();
+  });
+
+  /** Poll the queue until the job leaves `queued`/`running`, or the deadline passes. */
+  const settle = async (jobId: string, timeoutMs = 15_000): Promise<Record<string, unknown>> => {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const job = body<{ job: Record<string, unknown> }>(
+        await h.app.inject({ method: 'GET', url: `/api/v1/ingestion/queue/${jobId}` }),
+      ).job;
+      if (job.state !== 'queued' && job.state !== 'running') return job;
+      if (Date.now() > deadline) throw new Error(`job ${jobId} is still ${String(job.state)}`);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  };
+
+  it('polls the folder, runs the pipeline and records both jobs', async () => {
+    const accepted = await h.app.inject({
+      method: 'POST',
+      url: `/api/v1/ingestion/sources/${sourceId}/run`,
+      payload: { runLabel: 'first-pass' },
+    });
+    expect(accepted.statusCode).toBe(202);
+
+    const started = body<{ jobId: string; runLabel: string }>(accepted);
+    expect(started.runLabel).toBe('first-pass');
+    expect(accepted.headers['location']).toBe(`/api/v1/ingestion/queue/${started.jobId}`);
+
+    const job = await settle(started.jobId);
+    // Two text files, no OCR and no resolvers: both reach the gate and both are queued (P3).
+    expect(job.state).toBe('waiting_review');
+
+    const result = job.result as { offered: number; pipelineJobId: string; counts: { review: number } };
+    expect(result.offered).toBe(2);
+    expect(result.counts.review).toBe(2);
+
+    // The pipeline's own run is this job's child (§6.3), and the trace is read through the parent.
+    const detail = body<{
+      stages: { candidateKey: string; stage: string }[];
+      log: { message: string }[];
+      reviewEntryIds: string[];
+    }>(await h.app.inject({ method: 'GET', url: `/api/v1/ingestion/queue/${started.jobId}` }));
+
+    expect(new Set(detail.stages.map((stage) => stage.candidateKey)).size).toBe(2);
+    expect(detail.log.length).toBeGreaterThan(0);
+    expect(detail.reviewEntryIds).toHaveLength(2);
+
+    const child = h.recueil.connection
+      .prepare(`select id, job_type from jobs where parent_job_id = ?`)
+      .all(started.jobId) as { id: string; job_type: string }[];
+    expect(child).toHaveLength(1);
+    expect(child[0]?.job_type).toBe('ingest.run');
+
+    // The queue lists both, and the source records what it last did.
+    const listed = body<{ data: { id: string }[] }>(
+      await h.app.inject({ method: 'GET', url: '/api/v1/ingestion/queue' }),
+    );
+    expect(listed.data.map((entry) => entry.id)).toEqual(
+      expect.arrayContaining([started.jobId, child[0]?.id ?? '']),
+    );
+
+    const source = body<{ lastRunJobId: string; lastError: string | null }>(
+      await h.app.inject({ method: 'GET', url: `/api/v1/ingestion/sources/${sourceId}` }),
+    );
+    expect(source.lastRunJobId).toBe(started.jobId);
+    expect(source.lastError).toBeNull();
+
+    // Nothing was consumed: the default policy leaves the originals where they are.
+    const stillThere = body<{ ok: boolean; checks: { detail: string }[] }>(
+      await h.app.inject({
+        method: 'POST',
+        url: `/api/v1/ingestion/sources/${sourceId}/test-connection`,
+      }),
+    );
+    expect(stillThere.checks[2]?.detail).toContain('2 entr');
+  }, 30_000);
+
+  it('resumes under the same label when the run is retried', async () => {
+    const first = body<{ jobId: string }>(
+      await h.app.inject({
+        method: 'POST',
+        url: `/api/v1/ingestion/sources/${sourceId}/run`,
+        payload: { runLabel: 'nightly' },
+      }),
+    );
+    await settle(first.jobId);
+
+    const retried = await h.app.inject({
+      method: 'POST',
+      url: `/api/v1/ingestion/queue/${first.jobId}/retry`,
+      payload: { reason: 'the operator wanted another pass' },
+    });
+    expect(retried.statusCode).toBe(202);
+
+    // The same row, not a second one: the key is built from the source and the label (IK1), which
+    // is what makes a retry a resume rather than a duplicate scan.
+    const again = body<{ id: string; attempts: number }>(retried);
+    expect(again.id).toBe(first.jobId);
+    expect(again.attempts).toBe(2);
+
+    await settle(first.jobId);
+
+    // Still one document per file: re-running found the bytes at stage 2.
+    const documents = h.recueil.connection
+      .prepare('select count(*) as n from documents')
+      .get() as { n: number };
+    expect(documents.n).toBe(2);
+
+    const audit = h.recueil.connection
+      .prepare(`select count(*) as n from audit_log where action = 'job.retry_requested'`)
+      .get() as { n: number };
+    expect(audit.n).toBe(1);
+  }, 45_000);
+
+  it('refuses a second run of the same source under the same label while one is in flight', async () => {
+    const first = await h.app.inject({
+      method: 'POST',
+      url: `/api/v1/ingestion/sources/${sourceId}/run`,
+      payload: { runLabel: 'clash' },
+    });
+    expect(first.statusCode).toBe(202);
+
+    const second = await h.app.inject({
+      method: 'POST',
+      url: `/api/v1/ingestion/sources/${sourceId}/run`,
+      payload: { runLabel: 'clash' },
+    });
+    expect(second.statusCode).toBe(409);
+
+    await settle(body<{ jobId: string }>(first).jobId);
+  }, 30_000);
+});
+
+describe('/api/v1/ingestion/review', () => {
+  let h: Harness;
+  let entryId: string;
+  let documentId: string;
+
+  beforeEach(async () => {
+    h = await harness();
+    const { result } = await upload(h, INVOICE);
+    entryId = result.reviewEntry?.id ?? '';
+    documentId = result.document?.id ?? '';
+  });
+
+  afterEach(async () => {
+    await h.close();
+  });
+
+  it('lists open entries with their reason and their proposal', async () => {
+    const listed = body<{
+      data: {
+        id: string;
+        reasonCode: string;
+        explanation: string;
+        proposedAction: string;
+        proposedPayload: { itemType: string };
+        confidence: number | null;
+      }[];
+    }>(await h.app.inject({ method: 'GET', url: '/api/v1/ingestion/review' }));
+
+    expect(listed.data).toHaveLength(1);
+    expect(listed.data[0]?.id).toBe(entryId);
+    expect(listed.data[0]?.reasonCode).toBe('low_confidence_metadata');
+    expect(listed.data[0]?.explanation.length).toBeGreaterThan(10);
+    expect(listed.data[0]?.proposedAction).toBe('create_item');
+    expect(listed.data[0]?.proposedPayload.itemType).toBeTypeOf('string');
+    expect(listed.data[0]?.confidence).toBeLessThan(0.75);
+  });
+
+  it('accepts an entry, creating the item and resolving it in one transaction', async () => {
+    const before = h.recueil.connection.prepare('select count(*) as n from items').get() as { n: number };
+
+    const response = await h.app.inject({
+      method: 'POST',
+      url: `/api/v1/ingestion/review/${entryId}/accept`,
+      payload: { note: 'checked against the paper' },
+    });
+    expect(response.statusCode).toBe(200);
+
+    const result = body<{
+      entry: { status: string; resolutionNote: string; resolutionPayload: { action: string } };
+      itemId: string;
+      attachmentId: string;
+    }>(response);
+
+    expect(result.entry.status).toBe('accepted');
+    expect(result.entry.resolutionNote).toBe('checked against the paper');
+    expect(result.entry.resolutionPayload.action).toBe('create_item');
+    expect(result.itemId).toBeTypeOf('string');
+
+    const after = h.recueil.connection.prepare('select count(*) as n from items').get() as { n: number };
+    expect(after.n).toBe(before.n + 1);
+
+    // The item really holds the document, which is the point of accepting.
+    const attachments = body<{ data: { documentId: string }[] }>(
+      await h.app.inject({ method: 'GET', url: `/api/v1/items/${result.itemId}/attachments` }),
+    );
+    expect(attachments.data.map((attachment) => attachment.documentId)).toContain(documentId);
+
+    // And it is audited like any other write (RQ1).
+    const audit = h.recueil.connection
+      .prepare(`select count(*) as n from audit_log where action = 'review_queue.accepted'`)
+      .get() as { n: number };
+    expect(audit.n).toBe(1);
+  });
+
+  it('applies edits and records what was actually executed', async () => {
+    const response = await h.app.inject({
+      method: 'POST',
+      url: `/api/v1/ingestion/review/${entryId}/accept`,
+      payload: {
+        note: 'the extractor got the correspondent wrong',
+        edits: {
+          itemType: 'invoice',
+          fields: { 'office.correspondent': 'Stadtwerke Ulm', 'office.referenceNumber': '2026-0042' },
+          tags: ['utilities'],
+        },
+      },
+    });
+    expect(response.statusCode).toBe(200);
+
+    const result = body<{
+      itemId: string;
+      entry: { resolutionPayload: { itemType: string; fields: Record<string, unknown> } };
+    }>(response);
+
+    const item = body<{ itemType: string; office: { correspondent: string; referenceNumber: string } }>(
+      await h.app.inject({ method: 'GET', url: `/api/v1/items/${result.itemId}` }),
+    );
+    expect(item.itemType).toBe('invoice');
+    expect(item.office.correspondent).toBe('Stadtwerke Ulm');
+    expect(item.office.referenceNumber).toBe('2026-0042');
+
+    // `resolution_payload` is what ran, which is not what was proposed — that difference is the
+    // most interesting thing in the queue (§6.1).
+    expect(result.entry.resolutionPayload.itemType).toBe('invoice');
+    expect(result.entry.resolutionPayload.fields['office.correspondent']).toBe('Stadtwerke Ulm');
+  });
+
+  it('leaves the entry open and creates nothing when the commit is refused', async () => {
+    // Another live item already holds ASN 4711.
+    const holder = await h.app.inject({
+      method: 'POST',
+      url: '/api/v1/items',
+      payload: {
+        itemType: 'invoice',
+        title: 'The invoice that is already filed as 4711',
+        office: { correspondent: 'Somebody Else', asn: 4711 },
+      },
+    });
+    expect(holder.statusCode).toBe(201);
+
+    const before = h.recueil.connection.prepare('select count(*) as n from items').get() as { n: number };
+
+    const refused = await h.app.inject({
+      method: 'POST',
+      url: `/api/v1/ingestion/review/${entryId}/accept`,
+      payload: { edits: { fields: { 'office.correspondent': 'Stadtwerke Ulm', 'office.asn': 4711 } } },
+    });
+    expect(refused.statusCode).toBe(409);
+
+    // Nothing was created, and the entry is still waiting for a person. This is the transaction
+    // doing its job: the alternative is a library holding an item whose entry says nobody looked.
+    const after = h.recueil.connection.prepare('select count(*) as n from items').get() as { n: number };
+    expect(after.n).toBe(before.n);
+
+    const entry = body<{ status: string; resolvedAt: string | null }>(
+      await h.app.inject({ method: 'GET', url: `/api/v1/ingestion/review/${entryId}` }),
+    );
+    expect(entry.status).toBe('open');
+    expect(entry.resolvedAt).toBeNull();
+
+    const audit = h.recueil.connection
+      .prepare(`select count(*) as n from audit_log where action = 'review_queue.accepted'`)
+      .get() as { n: number };
+    expect(audit.n).toBe(0);
+  });
+
+  it('refuses to accept the same entry twice', async () => {
+    expect(
+      (
+        await h.app.inject({
+          method: 'POST',
+          url: `/api/v1/ingestion/review/${entryId}/accept`,
+        })
+      ).statusCode,
+    ).toBe(200);
+
+    const again = await h.app.inject({
+      method: 'POST',
+      url: `/api/v1/ingestion/review/${entryId}/accept`,
+    });
+    expect(again.statusCode).toBe(409);
+    expect(body<{ detail: string }>(again).detail).toMatch(/already accepted/iu);
+  });
+
+  it('rejects an entry without creating anything', async () => {
+    const before = h.recueil.connection.prepare('select count(*) as n from items').get() as { n: number };
+
+    const response = await h.app.inject({
+      method: 'POST',
+      url: `/api/v1/ingestion/review/${entryId}/reject`,
+      payload: { note: 'a duplicate of the paper already filed' },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(body<{ status: string; resolutionNote: string }>(response)).toMatchObject({
+      status: 'rejected',
+      resolutionNote: 'a duplicate of the paper already filed',
+    });
+
+    const after = h.recueil.connection.prepare('select count(*) as n from items').get() as { n: number };
+    expect(after.n).toBe(before.n);
+
+    // The document stays: it was ingested before the gate ran, and P5 does not delete.
+    expect(
+      (await h.app.inject({ method: 'GET', url: `/api/v1/documents/${documentId}` })).statusCode,
+    ).toBe(200);
+  });
+
+  it('accepts in bulk and names every refusal', async () => {
+    const second = await upload(h, `${INVOICE}\nZweite Seite`);
+    const secondId = second.result.reviewEntry?.id ?? '';
+    expect(secondId).not.toBe('');
+
+    // One id that is not an entry at all, so the refusal path is exercised alongside the happy one.
+    const response = await h.app.inject({
+      method: 'POST',
+      url: '/api/v1/ingestion/review/accept',
+      payload: { ids: [entryId, secondId, '01JZZZZZZZZZZZZZZZZZZZZZZZ'], note: 'batch review' },
+    });
+    expect(response.statusCode).toBe(200);
+
+    const result = body<{
+      accepted: { entry: { id: string }; itemId: string }[];
+      refused: { id: string; code: string; detail: string }[];
+    }>(response);
+
+    expect(result.accepted.map((entry) => entry.entry.id).sort()).toEqual([entryId, secondId].sort());
+    expect(result.accepted.every((entry) => typeof entry.itemId === 'string')).toBe(true);
+    expect(result.refused).toHaveLength(1);
+    expect(result.refused[0]?.code).toBe('not_found');
+
+    // Both really landed: one refusal did not roll the others back.
+    const open = body<{ data: unknown[] }>(
+      await h.app.inject({ method: 'GET', url: '/api/v1/ingestion/review?status=open' }),
+    );
+    expect(open.data).toHaveLength(0);
+  });
+});
+
+/* ============================================================================================== */
+/* The ingestion lifecycle on the event stream                                                      */
+/* ============================================================================================== */
+
+describe('the ingestion lifecycle events', () => {
+  let h: Harness;
+  let origin: string;
+
+  beforeEach(async () => {
+    h = await harness();
+    origin = await listen(h);
+  });
+
+  afterEach(async () => {
+    await h.close();
+  });
+
+  it('streams job.started, document.ingested and job.finished for an upload', async () => {
+    const controller = new AbortController();
+    const stream = await fetch(`${origin}/api/v1/events`, {
+      headers: { accept: 'text/event-stream' },
+      signal: controller.signal,
+    });
+    expect(stream.status).toBe(200);
+
+    const frames = readSseFrames(stream, 3);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const form = new FormData();
+    form.set('file', new Blob([INVOICE], { type: 'text/plain' }), 'invoice.txt');
+    const uploaded = await fetch(`${origin}/api/v1/ingestion/upload`, { method: 'POST', body: form });
+    expect(uploaded.status).toBe(200);
+    const result = (await uploaded.json()) as UploadResult;
+
+    const received = await frames;
+    controller.abort();
+
+    const types = received.map((frame) => frame.event);
+    expect(types).toContain('document.ingested');
+    expect(types).toContain('job.started');
+    expect(types).toContain('job.finished');
+
+    const ingested = received.find((frame) => frame.event === 'document.ingested');
+    const payload = ingested?.data.payload as Record<string, unknown>;
+    expect(payload.documentId).toBe(result.document?.id);
+    expect(payload.sha256).toBe(result.document?.sha256);
+    // §7.3: the entry the gate raised is named on the event, which is why the catalogue needs no
+    // `ingest.review_queued` of its own.
+    expect(payload.reviewQueueEntryId).toBe(result.reviewEntry?.id);
+    expect(payload.pipelineRunId).toBe(result.jobId);
+    // And the stage list is what really ran: no OCR worker exists in this process.
+    expect(payload.stagesRun as string[]).not.toContain('ocr');
+
+    const finished = received.find((frame) => frame.event === 'job.finished');
+    expect((finished?.data.payload as Record<string, unknown>).jobId).toBe(result.jobId);
+  });
+});

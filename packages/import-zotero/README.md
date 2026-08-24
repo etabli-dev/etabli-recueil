@@ -24,8 +24,8 @@ The user's `zotero.sqlite` is their only copy of a decade of work. "Read-only" h
 independent mechanisms, applied together because any one of them could be got wrong:
 
 1. the file — and its `-wal`/`-shm` companions, if a running Zotero left them — is **copied** into a
-   temporary directory, and the copy is what gets opened. The original is touched by exactly one
-   call, `fs.copyFile`, which opens it `O_RDONLY`;
+   temporary directory, and the copy is what gets opened. In this mode, which is the default, the
+   original is touched by exactly one call, `fs.copyFile`, which opens it `O_RDONLY`;
 2. SQLite opens it with `readonly: true`;
 3. `PRAGMA query_only = 1` is set and then **asserted**, not assumed;
 4. `ReadOnlyDatabase` exposes no method that can run anything but a `SELECT` or a read-only
@@ -38,6 +38,12 @@ Copying also removes the one real hazard of reading in place: a hot journal make
 recover on open, recovery is a write, and a read-only handle then either fails or — worse — an
 in-place one succeeds. `copySourceBeforeReading: false` opens the file directly, still read-only,
 for a caller who has already taken their own copy.
+
+**"Exactly one call" is a claim about the default and does not hold in that mode.** Opening a WAL
+database in place makes SQLite create or rewrite `zotero.sqlite-shm` in the Zotero data directory,
+read-only handle or not — so `copySourceBeforeReading: false` now **refuses** a database with a
+live `-wal` beside it rather than writing next to the user's library. On a cleanly closed database
+there is no log and nothing to rewrite.
 
 ## Layout
 

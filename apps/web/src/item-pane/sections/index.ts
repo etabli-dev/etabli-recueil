@@ -14,6 +14,7 @@ import { BibliographicSection } from './bibliographic.js';
 import { CollectionsSection } from './collections.js';
 import { CustomFieldsSection } from './custom-fields.js';
 import { NotesSection } from './notes.js';
+import { OfficeSection } from './office.js';
 import { TagsSection } from './tags.js';
 
 export { setAttachmentOpener } from './attachments.js';
@@ -33,6 +34,18 @@ export const registerCoreSections = (): void => {
     Component: BibliographicSection,
     // Absent on the invoices, letters and photographs that make up half a real library (I1).
     isVisible: (item) => item.bibliographic !== null && item.bibliographic !== undefined,
+  });
+
+  itemPaneSections.register({
+    id: 'core.office',
+    title: 'Office',
+    order: 15,
+    source: 'core',
+    Component: OfficeSection,
+    // The other half of I1: an invoice has this facet and no bibliographic one, and a journal
+    // article has neither an ASN nor a correspondent. Showing both to everything would put an
+    // "archive serial number" field on a preprint.
+    isVisible: (item) => item.office !== null && item.office !== undefined,
   });
 
   itemPaneSections.register({

@@ -313,6 +313,73 @@ describe('the document and the route table', () => {
   });
 });
 
+describe('the errors the shared body pipeline can produce', () => {
+  /**
+   * M7. The content-type check and the JSON parser sit in front of every handler, so 415 and 400
+   * are outcomes of *every* body-taking operation whether or not its author declared them. A
+   * generated client with no case for a status the server returns is a client that throws on it.
+   */
+  it('declares 400 and 415 on every operation that takes a body', async () => {
+    const h = await harness();
+    try {
+      const document = (await h.app.inject({ method: 'GET', url: '/openapi.json' })).json() as Record<
+        string,
+        any
+      >;
+
+      const bodyTaking: string[] = [];
+      const missing: string[] = [];
+      for (const [path, item] of Object.entries(document.paths as Record<string, any>)) {
+        for (const [method, declared] of Object.entries(item as Record<string, any>)) {
+          if (!HTTP_METHODS.includes(method)) continue;
+          if ((declared as Record<string, unknown>).requestBody === undefined) continue;
+          bodyTaking.push(`${method.toUpperCase()} ${path}`);
+          const responses = (declared as { responses: Record<string, unknown> }).responses;
+          for (const status of ['400', '415']) {
+            if (responses[status] === undefined) missing.push(`${method.toUpperCase()} ${path} → ${status}`);
+          }
+        }
+      }
+
+      // A guard against the check passing because nothing was found to check.
+      expect(bodyTaking.length).toBeGreaterThanOrEqual(30);
+      expect(missing).toEqual([]);
+    } finally {
+      await h.close();
+    }
+  });
+
+  it('really returns them, so the declaration is not a courtesy', async () => {
+    const h = await harness();
+    try {
+      // `application/xml` has no parser on this application, so Fastify refuses it before the
+      // handler. (`text/plain` does have one, and reaches the handler's Zod check as a 422.)
+      const wrongType = await h.app.inject({
+        method: 'POST',
+        url: '/api/v1/items',
+        headers: { 'content-type': 'application/xml' },
+        payload: '<item/>',
+      });
+      expect(wrongType.statusCode).toBe(415);
+      expect(wrongType.headers['content-type']).toMatch(/application\/problem\+json/u);
+
+      const noType = await h.app.inject({ method: 'POST', url: '/api/v1/items', payload: 'anything' });
+      expect(noType.statusCode).toBe(415);
+
+      const unparseable = await h.app.inject({
+        method: 'POST',
+        url: '/api/v1/items',
+        headers: { 'content-type': 'application/json' },
+        payload: '{"itemType": "article",',
+      });
+      expect(unparseable.statusCode).toBe(400);
+      expect(unparseable.headers['content-type']).toMatch(/application\/problem\+json/u);
+    } finally {
+      await h.close();
+    }
+  });
+});
+
 describe('spec/openapi.yaml', () => {
   it('is the document this server generates', async () => {
     const committed = readFileSync(

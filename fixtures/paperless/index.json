@@ -1,0 +1,218 @@
+{
+  "$schema": "https://recueil.invalid/fixtures/paperless-route-table",
+  "description": "A route table over the files in this directory, so that a test can stand up an in-process fake Paperless-ngx and drive the real importer through the real HTTP client. Modelled on the documented Paperless-ngx API; see fixtures/README.md for what that does and does not prove.",
+  "baseUrl": "http://paperless.invalid",
+  "paperlessVersion": "2.14.7",
+  "apiVersion": 6,
+  "pageSize": 8,
+  "defaultHeaders": {
+    "x-version": "2.14.7",
+    "x-api-version": "6"
+  },
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/api/status/",
+      "query": {},
+      "status": 200,
+      "contentType": "application/json",
+      "file": "api/status.json"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tags/",
+      "query": {
+        "page": "1",
+        "page_size": "100"
+      },
+      "status": 200,
+      "contentType": "application/json",
+      "file": "api/tags.json"
+    },
+    {
+      "method": "GET",
+      "path": "/api/correspondents/",
+      "query": {
+        "page": "1",
+        "page_size": "100"
+      },
+      "status": 200,
+      "contentType": "application/json",
+      "file": "api/correspondents.json"
+    },
+    {
+      "method": "GET",
+      "path": "/api/document_types/",
+      "query": {
+        "page": "1",
+        "page_size": "100"
+      },
+      "status": 200,
+      "contentType": "application/json",
+      "file": "api/document_types.json"
+    },
+    {
+      "method": "GET",
+      "path": "/api/storage_paths/",
+      "query": {
+        "page": "1",
+        "page_size": "100"
+      },
+      "status": 200,
+      "contentType": "application/json",
+      "file": "api/storage_paths.json"
+    },
+    {
+      "method": "GET",
+      "path": "/api/custom_fields/",
+      "query": {
+        "page": "1",
+        "page_size": "100"
+      },
+      "status": 200,
+      "contentType": "application/json",
+      "file": "api/custom_fields.json"
+    },
+    {
+      "method": "GET",
+      "path": "/api/trash/",
+      "query": {
+        "page": "1",
+        "page_size": "100"
+      },
+      "status": 200,
+      "contentType": "application/json",
+      "file": "api/trash.json"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/",
+      "query": {
+        "page": "1",
+        "page_size": "8"
+      },
+      "status": 200,
+      "contentType": "application/json",
+      "file": "api/documents-page-1.json"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/",
+      "query": {
+        "page": "2",
+        "page_size": "8"
+      },
+      "status": 200,
+      "contentType": "application/json",
+      "file": "api/documents-page-2.json"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/1001/download/",
+      "query": {},
+      "status": 200,
+      "contentType": "application/pdf",
+      "file": "originals/1001.pdf",
+      "contentDisposition": "attachment; filename=\"Rechnung_2023-004417.pdf\""
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/1002/download/",
+      "query": {},
+      "status": 200,
+      "contentType": "application/pdf",
+      "file": "originals/1002.pdf",
+      "contentDisposition": "attachment; filename=\"Mietvertrag-Lagerraum-14.pdf\""
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/1003/download/",
+      "query": {},
+      "status": 200,
+      "contentType": "image/png",
+      "file": "originals/1003.png",
+      "contentDisposition": "attachment; filename=\"Beleg-2023-0912.png\""
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/1004/download/",
+      "query": {},
+      "status": 200,
+      "contentType": "application/pdf",
+      "file": "originals/1004.pdf",
+      "contentDisposition": "attachment; filename=\"Protokoll 2023-03-13.pdf\""
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/1005/download/",
+      "query": {},
+      "status": 200,
+      "contentType": "application/pdf",
+      "file": "originals/1005.pdf",
+      "contentDisposition": "attachment; filename=\"ESt-Bescheid-2021.pdf\""
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/1006/download/",
+      "query": {},
+      "status": 200,
+      "contentType": "application/pdf",
+      "file": "originals/1006.pdf",
+      "contentDisposition": "attachment; filename=\"scan_0041.pdf\""
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/1007/download/",
+      "query": {},
+      "status": 500,
+      "contentType": "application/json",
+      "file": "api/documents-1007-download-error.json",
+      "note": "the deliberately unfetchable original"
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/1008/download/",
+      "query": {},
+      "status": 200,
+      "contentType": "application/pdf",
+      "file": "originals/1008.pdf",
+      "contentDisposition": "attachment; filename=\"Rechnung_2023-004417 (1).pdf\""
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/1009/download/",
+      "query": {},
+      "status": 200,
+      "contentType": "application/pdf",
+      "file": "originals/1009.pdf",
+      "contentDisposition": "attachment; filename=\"Rechnung_2023-004417_scan2.pdf\""
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/1010/download/",
+      "query": {},
+      "status": 200,
+      "contentType": "application/pdf",
+      "file": "originals/1010.pdf",
+      "contentDisposition": "attachment; filename=\"../../../../etc/paperless-pwn.pdf\""
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/1011/download/",
+      "query": {},
+      "status": 200,
+      "contentType": "application/pdf",
+      "file": "originals/1011.pdf",
+      "contentDisposition": "attachment; filename=\"μελέτη-υδρολογίας.pdf\""
+    },
+    {
+      "method": "GET",
+      "path": "/api/documents/1012/download/",
+      "query": {},
+      "status": 200,
+      "contentType": "application/pdf",
+      "file": "originals/1012.pdf",
+      "contentDisposition": "attachment; filename=\"Vereinbarung: Messstelle Sigmaringen *Entwurf?*.pdf.\""
+    }
+  ]
+}

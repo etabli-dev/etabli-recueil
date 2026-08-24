@@ -79,6 +79,8 @@ describe('the verdict', () => {
     expect(report.checks.map((check) => check.name)).toEqual([
       'item_count_parity',
       'item_count_parity_per_type',
+      'item_type_fidelity',
+      'source_libraries_covered',
       'trash_parity',
       'note_parity',
       'annotation_parity',

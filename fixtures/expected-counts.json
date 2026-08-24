@@ -406,5 +406,965 @@
         }
       }
     }
+  },
+  "ingest": {
+    "generatedBy": "fixtures/make-ingest.mjs",
+    "description": "Counts for the Phase 2 ingestion corpora, asserted by the generator against the numbers stated in fixtures/lib/ingest-fixtures.mjs and read back with independent parsers. Ingestion tests should assert against these.",
+    "oracles": {
+      "pdf": "pdf.js 6.2.108 (apps/web/node_modules/pdfjs-dist/legacy/build/pdf.mjs)",
+      "mail": "python3 3.14.4 — email",
+      "archives": "python3 3.14.4 — zipfile",
+      "yaml": "yaml (packages/rules/node_modules/yaml/dist/index.js)"
+    },
+    "files": 46,
+    "totalBytes": 194622,
+    "scans": {
+      "files": 6,
+      "byFile": {
+        "born-digital.pdf": {
+          "bytes": 2031,
+          "sha256": "5aabfe1ca220e3b582d72ff0b96eab37c3b2ec201ea158e90961fa7a17c50460",
+          "pages": 2,
+          "textLayerPages": 2,
+          "imagePages": 0,
+          "textCharacters": 421,
+          "rotations": [
+            0,
+            0
+          ],
+          "title": "Prüfbericht zu den Bohrkernproben BK-11"
+        },
+        "invoice-image-only.pdf": {
+          "bytes": 8172,
+          "sha256": "f9089390be0a39f00df1f879e3b244f0a0fb7e191c8d3e94020f07d579864aa6",
+          "pages": 1,
+          "textLayerPages": 0,
+          "imagePages": 1,
+          "textCharacters": 0,
+          "rotations": [
+            0
+          ],
+          "title": "Rechnung 2023-004417"
+        },
+        "mixed-text-and-scan.pdf": {
+          "bytes": 6996,
+          "sha256": "960a0a23f793b3513f2e870ca823c9f69e83ee65770a1559b465ddaa5dfa2705",
+          "pages": 2,
+          "textLayerPages": 1,
+          "imagePages": 1,
+          "textCharacters": 306,
+          "rotations": [
+            0,
+            0
+          ],
+          "title": "Anschreiben mit eingescanntem Anhang"
+        },
+        "report-multi-page.pdf": {
+          "bytes": 22585,
+          "sha256": "5af462d8b4b095d792ee11b1825153c943451cdf5fc10e3e8cc8c2ef185e0e97",
+          "pages": 3,
+          "textLayerPages": 0,
+          "imagePages": 3,
+          "textCharacters": 0,
+          "rotations": [
+            0,
+            0,
+            270
+          ],
+          "title": "Jahresbericht Gewässergüte 2022"
+        },
+        "skewed-page.pdf": {
+          "bytes": 7037,
+          "sha256": "cf0fb52a15b4534cf4781166d16a7531e3aff9ff630935ccf3038da60b2a30a8",
+          "pages": 1,
+          "textLayerPages": 0,
+          "imagePages": 1,
+          "textCharacters": 0,
+          "rotations": [
+            0
+          ],
+          "title": "Laborbefund L-2019-0884 (schief eingezogen)"
+        },
+        "sparse-text-layer.pdf": {
+          "bytes": 7396,
+          "sha256": "a3f6e9fb5f541e71388ff53919c644daf0160bf4ac1089e23d7fa166884adf51",
+          "pages": 1,
+          "textLayerPages": 1,
+          "imagePages": 1,
+          "textCharacters": 16,
+          "rotations": [
+            0
+          ],
+          "title": "Anschreiben mit Scannerstempel"
+        }
+      }
+    },
+    "mail": {
+      "files": 8,
+      "byFile": {
+        "attachment-name-traversal.eml": {
+          "bytes": 1547,
+          "sha256": "d00888c2c9e773fed03e68ebf7203c821d5024737609c74f1a06a265e3364171",
+          "contentType": "multipart/mixed",
+          "parts": 7,
+          "attachments": [
+            "../../../../etc/cron.d/recueil-pwn.pdf",
+            "C:\\Windows\\Temp\\recueil-pwn.pdf",
+            "../../escape.pdf",
+            ".bashrc",
+            "Invoice-88201934.pdf"
+          ],
+          "inlineWithContentId": 0,
+          "nestedMessages": 0,
+          "utf8Valid": true,
+          "defects": [],
+          "subject": "Invoice 88201934 attached",
+          "from": "invoices@billing-notice.example"
+        },
+        "forwarded-nested.eml": {
+          "bytes": 3483,
+          "sha256": "16b7e880a1adc8b2792e318b982f8281ba270d2137bd53b75671c1ccade183d5",
+          "contentType": "multipart/mixed",
+          "parts": 6,
+          "attachments": [
+            "Mietvertrag Lagerraum Nr. 14.eml",
+            "Mietvertrag-Lagerraum-14.pdf"
+          ],
+          "inlineWithContentId": 0,
+          "nestedMessages": 1,
+          "utf8Valid": true,
+          "defects": [],
+          "subject": "Fwd: Mietvertrag Lagerraum Nr. 14",
+          "from": "R. Heller <r.heller@example.org>"
+        },
+        "html-multipart.eml": {
+          "bytes": 1403,
+          "sha256": "f9634bd46680b3c678827f378128f26c0c7f5b1280ccc192542858506d03de6e",
+          "contentType": "multipart/alternative",
+          "parts": 3,
+          "attachments": [],
+          "inlineWithContentId": 0,
+          "nestedMessages": 0,
+          "utf8Valid": true,
+          "defects": [],
+          "subject": "Ausgabe 6/2023: Niedrigwasser und Grundwasserneubildung",
+          "from": "Newsletter Wasserwirtschaft <newsletter@example.net>"
+        },
+        "inline-image.eml": {
+          "bytes": 5813,
+          "sha256": "1c9ce81e26189f13ef58a09e38a46051976ca9fe1a0304f91211bb13aca72f2c",
+          "contentType": "multipart/related",
+          "parts": 4,
+          "attachments": [
+            "Beleg-2023-0912.png"
+          ],
+          "inlineWithContentId": 1,
+          "nestedMessages": 0,
+          "utf8Valid": true,
+          "defects": [],
+          "subject": "Ihre Bestellung 2023/0912",
+          "from": "Buchhandlung Jastram <bestellung@jastram.example>"
+        },
+        "malformed-boundary.eml": {
+          "bytes": 863,
+          "sha256": "45fdacbe33fa60f9a747742c05af047192025a988f728f7c75b93c6133670f7d",
+          "contentType": "multipart/mixed",
+          "parts": 2,
+          "attachments": [],
+          "inlineWithContentId": 0,
+          "nestedMessages": 0,
+          "utf8Valid": true,
+          "defects": [
+            "CloseBoundaryNotFoundDefect"
+          ],
+          "subject": "Befund vom 26.10.2023",
+          "from": "Praxis Dr. Lindqvist <praxis@lindqvist.example>"
+        },
+        "plain-text.eml": {
+          "bytes": 1045,
+          "sha256": "22856c77e12c0b5e2591e2183ca1f36f1ff75ee0e6462ea1e9016b1fbb9023ef",
+          "contentType": "text/plain",
+          "parts": 1,
+          "attachments": [],
+          "inlineWithContentId": 0,
+          "nestedMessages": 0,
+          "utf8Valid": true,
+          "defects": [],
+          "subject": "Kurze Rückmeldung zur Messreihe Sigmaringen",
+          "from": "Anna Weiß <anna.weiss@example.org>"
+        },
+        "subject-non-utf8.eml": {
+          "bytes": 713,
+          "sha256": "0ba648ba2a1d9146bd2881badbbbc7d9f7756b29bfd16d272ab7fc4da7871c72",
+          "contentType": "text/plain",
+          "parts": 1,
+          "attachments": [],
+          "inlineWithContentId": 0,
+          "nestedMessages": 0,
+          "utf8Valid": false,
+          "defects": [],
+          "subject": "Zahlungserinnerung: 471,50 € offen (Kundennr. 88-201934)",
+          "from": "Buchhaltung Stadtwerke Ulm � Mahnwesen <mahnung@stadtwerke-ulm.example>"
+        },
+        "two-attachments.eml": {
+          "bytes": 15460,
+          "sha256": "9c0630b579db5ea5958bcbfb2a0195cb228d07fa99850ff163c80a2973a43654",
+          "contentType": "multipart/mixed",
+          "parts": 4,
+          "attachments": [
+            "Rechnung_2023-004417.pdf",
+            "Protokoll Sitzung 13. März 2023.pdf"
+          ],
+          "inlineWithContentId": 0,
+          "nestedMessages": 0,
+          "utf8Valid": true,
+          "defects": [],
+          "subject": "Ihre Rechnung 2023-004417 und das Sitzungsprotokoll",
+          "from": "Buchhaltung Stadtwerke Ulm <rechnung@stadtwerke-ulm.example>"
+        }
+      }
+    },
+    "archives": {
+      "files": 3,
+      "byFile": {
+        "mixed.zip": {
+          "bytes": 17214,
+          "sha256": "6a7de8dafd7a1f5d4d97c80f75dda9214c88513b945a0184d6bfa8f45f3e434b",
+          "entries": 9,
+          "directories": 2,
+          "utf8FlagEntries": 1,
+          "nonAsciiNames": 2,
+          "emptyEntries": 1,
+          "symlinks": 0,
+          "hostileNames": 0,
+          "crcFailures": 0,
+          "hostileEntryNames": [],
+          "byEntry": [
+            {
+              "name": "Ordnerübersicht.txt",
+              "utf8Flag": true,
+              "directory": false,
+              "symlink": false,
+              "size": 112,
+              "crc": 2095265000,
+              "hostile": false
+            },
+            {
+              "name": "rechnungen/",
+              "utf8Flag": false,
+              "directory": true,
+              "symlink": false,
+              "size": 0,
+              "crc": 0,
+              "hostile": false
+            },
+            {
+              "name": "rechnungen/2023-03-14-stadtwerke.pdf",
+              "utf8Flag": false,
+              "directory": false,
+              "symlink": false,
+              "size": 8172,
+              "crc": 3661851763,
+              "hostile": false
+            },
+            {
+              "name": "rechnungen/2023-09-12-jastram.png",
+              "utf8Flag": false,
+              "directory": false,
+              "symlink": false,
+              "size": 3277,
+              "crc": 4003907249,
+              "hostile": false
+            },
+            {
+              "name": "protokolle/Protokoll 2023-03-13.pdf",
+              "utf8Flag": false,
+              "directory": false,
+              "symlink": false,
+              "size": 2249,
+              "crc": 1066108465,
+              "hostile": false
+            },
+            {
+              "name": "Grundri▀.png",
+              "utf8Flag": false,
+              "directory": false,
+              "symlink": false,
+              "size": 3277,
+              "crc": 4003907249,
+              "hostile": false
+            },
+            {
+              "name": "leere-datei.txt",
+              "utf8Flag": false,
+              "directory": false,
+              "symlink": false,
+              "size": 0,
+              "crc": 0,
+              "hostile": false
+            },
+            {
+              "name": "unterordner/",
+              "utf8Flag": false,
+              "directory": true,
+              "symlink": false,
+              "size": 0,
+              "crc": 0,
+              "hostile": false
+            },
+            {
+              "name": "unterordner/mietvertrag.pdf",
+              "utf8Flag": false,
+              "directory": false,
+              "symlink": false,
+              "size": 1506,
+              "crc": 1774573369,
+              "hostile": false
+            }
+          ]
+        },
+        "nested.zip": {
+          "bytes": 9663,
+          "sha256": "93659bdb43dd855c159eb804086460dc044919852423ff2a474f86a1fcfa3a71",
+          "entries": 4,
+          "directories": 1,
+          "utf8FlagEntries": 0,
+          "nonAsciiNames": 0,
+          "emptyEntries": 0,
+          "symlinks": 0,
+          "hostileNames": 0,
+          "crcFailures": 0,
+          "innerArchives": 2,
+          "maxArchiveDepth": 3,
+          "hostileEntryNames": [],
+          "byEntry": [
+            {
+              "name": "readme.txt",
+              "utf8Flag": false,
+              "directory": false,
+              "symlink": false,
+              "size": 146,
+              "crc": 1549730304,
+              "hostile": false
+            },
+            {
+              "name": "innen.zip",
+              "utf8Flag": false,
+              "directory": false,
+              "symlink": false,
+              "size": 8689,
+              "crc": 3423122887,
+              "hostile": false
+            },
+            {
+              "name": "tiefer/",
+              "utf8Flag": false,
+              "directory": true,
+              "symlink": false,
+              "size": 0,
+              "crc": 0,
+              "hostile": false
+            },
+            {
+              "name": "tiefer/noch-tiefer.zip",
+              "utf8Flag": false,
+              "directory": false,
+              "symlink": false,
+              "size": 447,
+              "crc": 4032210116,
+              "hostile": false
+            }
+          ]
+        },
+        "path-traversal.zip": {
+          "bytes": 1353,
+          "sha256": "b50cae633310c423f01667762f0a88641f8ad6b2e555b5429353e41f7905c5b8",
+          "entries": 7,
+          "directories": 0,
+          "utf8FlagEntries": 0,
+          "nonAsciiNames": 0,
+          "emptyEntries": 0,
+          "symlinks": 1,
+          "hostileNames": 5,
+          "crcFailures": 0,
+          "hostileEntryNames": [
+            "../../../../tmp/recueil-pwned.txt",
+            "/etc/recueil-pwned.txt",
+            "..\\..\\recueil-pwned-win.txt",
+            "unterordner/../../escape.txt",
+            ".././.././recueil-pwned-dots.txt"
+          ],
+          "byEntry": [
+            {
+              "name": "harmlos.txt",
+              "utf8Flag": false,
+              "directory": false,
+              "symlink": false,
+              "size": 118,
+              "crc": 2060264414,
+              "hostile": false
+            },
+            {
+              "name": "../../../../tmp/recueil-pwned.txt",
+              "utf8Flag": false,
+              "directory": false,
+              "symlink": false,
+              "size": 43,
+              "crc": 3528975327,
+              "hostile": true
+            },
+            {
+              "name": "/etc/recueil-pwned.txt",
+              "utf8Flag": false,
+              "directory": false,
+              "symlink": false,
+              "size": 67,
+              "crc": 2372874453,
+              "hostile": true
+            },
+            {
+              "name": "..\\..\\recueil-pwned-win.txt",
+              "utf8Flag": false,
+              "directory": false,
+              "symlink": false,
+              "size": 61,
+              "crc": 1744919115,
+              "hostile": true
+            },
+            {
+              "name": "unterordner/../../escape.txt",
+              "utf8Flag": false,
+              "directory": false,
+              "symlink": false,
+              "size": 76,
+              "crc": 2147192372,
+              "hostile": true
+            },
+            {
+              "name": ".././.././recueil-pwned-dots.txt",
+              "utf8Flag": false,
+              "directory": false,
+              "symlink": false,
+              "size": 49,
+              "crc": 2277682003,
+              "hostile": true
+            },
+            {
+              "name": "link-nach-etc-passwd",
+              "utf8Flag": false,
+              "directory": false,
+              "symlink": true,
+              "size": 11,
+              "crc": 689944842,
+              "hostile": false
+            }
+          ]
+        }
+      }
+    },
+    "paperless": {
+      "paperlessVersion": "2.14.7",
+      "apiVersion": 6,
+      "pageSize": 8,
+      "documents": {
+        "live": 11,
+        "trashed": 1,
+        "pages": 2,
+        "withAsn": 7,
+        "withoutCorrespondent": 1,
+        "withoutDocumentType": 2,
+        "withEmptyContent": 2,
+        "withNotes": 1,
+        "longestTitle": 303,
+        "unfetchable": [
+          {
+            "id": 1007,
+            "title": "Kontoauszug 04/2023",
+            "reason": "download returns HTTP 500; the file is missing from the media volume"
+          }
+        ],
+        "hostileFilenames": [
+          {
+            "id": 1010,
+            "originalFileName": "../../../../etc/paperless-pwn.pdf"
+          }
+        ]
+      },
+      "tags": {
+        "total": 9,
+        "inbox": 1
+      },
+      "correspondents": {
+        "total": 6
+      },
+      "documentTypes": {
+        "total": 5
+      },
+      "storagePaths": {
+        "total": 2
+      },
+      "customFields": {
+        "total": 6,
+        "byDataType": {
+          "monetary": 1,
+          "date": 1,
+          "string": 1,
+          "boolean": 1,
+          "select": 1,
+          "documentlink": 1
+        }
+      },
+      "originals": {
+        "files": 11,
+        "contents": [
+          {
+            "path": "paperless/originals/1001.pdf",
+            "bytes": 8172,
+            "sha256": "f9089390be0a39f00df1f879e3b244f0a0fb7e191c8d3e94020f07d579864aa6"
+          },
+          {
+            "path": "paperless/originals/1002.pdf",
+            "bytes": 1506,
+            "sha256": "307a8ea49968e6ecb2de2c32a0a17b372f7245ac8f422dc50da5c1c02ee4be7c"
+          },
+          {
+            "path": "paperless/originals/1003.png",
+            "bytes": 3277,
+            "sha256": "99617dd08a896d45f44bac1f77b183ecea4616d82ff854b80830f4bbe9a6f34f"
+          },
+          {
+            "path": "paperless/originals/1004.pdf",
+            "bytes": 2249,
+            "sha256": "e513597a4e9dc6e28828aa32f79af293d10aad610578196ae8118fb1e5534733"
+          },
+          {
+            "path": "paperless/originals/1005.pdf",
+            "bytes": 1831,
+            "sha256": "acf252b6402bb068af5705dfa0c12c0c14ec15b4b5ed4bf6e0032a24cc6dd166"
+          },
+          {
+            "path": "paperless/originals/1006.pdf",
+            "bytes": 836,
+            "sha256": "6f88c41704388b61af08f9c31ed1a6c4b3937b1e23180cbabc8a296d0b6e6046"
+          },
+          {
+            "path": "paperless/originals/1008.pdf",
+            "bytes": 1055,
+            "sha256": "b863c949096eafd72d9e89c7f9f4175dc4c6087a4d97a6f4ba2aa02ddc1ec745"
+          },
+          {
+            "path": "paperless/originals/1009.pdf",
+            "bytes": 8172,
+            "sha256": "f9089390be0a39f00df1f879e3b244f0a0fb7e191c8d3e94020f07d579864aa6"
+          },
+          {
+            "path": "paperless/originals/1010.pdf",
+            "bytes": 1081,
+            "sha256": "72bc925aba54e90de4df7736c2c5f54610f341ca9dcc4d29b9732f34b5aeb98b"
+          },
+          {
+            "path": "paperless/originals/1011.pdf",
+            "bytes": 1033,
+            "sha256": "ea2c81d3b3f93c439fb60f1ac2bde865d4063c93d9463fa4c7618ae0488e6086"
+          },
+          {
+            "path": "paperless/originals/1012.pdf",
+            "bytes": 975,
+            "sha256": "b0cf2d9f499e1785928bda565b3bf22710a3797dc96a6789c0d61b71ac356a61"
+          }
+        ],
+        "distinctHashes": 10
+      },
+      "routes": 21,
+      "apiFiles": 10
+    },
+    "rules": {
+      "files": 7,
+      "rulesByFile": {
+        "precedence.yaml": 6,
+        "precedence.json": 6,
+        "negation.yaml": 5,
+        "hostile-regex.yaml": 7,
+        "malformed.yaml": 6
+      },
+      "cases": 11,
+      "caseIds": [
+        "stadtwerke-invoice-stops-the-rest",
+        "stadtwerke-invoice-tagged-storno",
+        "equal-priority-conflict",
+        "nothing-matches-but-the-floor",
+        "json-twin-is-the-same-rule-set",
+        "newsletter-is-not-correspondence",
+        "double-negative-needs-the-tag",
+        "empty-none-is-vacuously-true",
+        "missing-correspondent-goes-to-review",
+        "hostile-regexes-must-not-hang",
+        "malformed-rule-set-names-every-fault"
+      ],
+      "yaml": {
+        "rules/precedence.yaml": {
+          "parses": true,
+          "topLevelKeys": [
+            "name",
+            "rules",
+            "version"
+          ],
+          "rules": 6,
+          "rulesWithoutId": 0
+        },
+        "rules/negation.yaml": {
+          "parses": true,
+          "topLevelKeys": [
+            "name",
+            "rules",
+            "version"
+          ],
+          "rules": 5,
+          "rulesWithoutId": 0
+        },
+        "rules/hostile-regex.yaml": {
+          "parses": true,
+          "topLevelKeys": [
+            "name",
+            "rules",
+            "version"
+          ],
+          "rules": 7,
+          "rulesWithoutId": 0
+        },
+        "rules/malformed.yaml": {
+          "parses": true,
+          "topLevelKeys": [
+            "name",
+            "rules",
+            "shared-defaults"
+          ],
+          "rules": 6,
+          "rulesWithoutId": 1
+        }
+      },
+      "contents": [
+        {
+          "path": "rules/precedence.yaml",
+          "bytes": 2551,
+          "sha256": "1bb4c629e84bf5d210f99e8c927085829879809a445a3eb3e48a04b1b90c8ed9",
+          "note": "six overlapping rules: a stop, a disabled rule at the top, an equal-priority conflict, a floor"
+        },
+        {
+          "path": "rules/precedence.json",
+          "bytes": 2900,
+          "sha256": "71124f2abc3d92bdfee1cd114d13eeeb43d712b7bbe2fef7a8a8ca71f3d3dc91",
+          "note": "the same rule set in JSON, written independently rather than serialised from the YAML"
+        },
+        {
+          "path": "rules/negation.yaml",
+          "bytes": 2208,
+          "sha256": "0f56cdfc47f4df573fd948bd1662e028ea8f4d64d0dbbfe915ba0fb8b0b8aef0",
+          "note": "five rules built on none, including an empty one and a nested one"
+        },
+        {
+          "path": "rules/hostile-regex.yaml",
+          "bytes": 2556,
+          "sha256": "50c3b2991ee4db4e721a1d9e761d0fd3dce9dda4ad2f1096d05235175cfcda2d",
+          "note": "seven patterns that must not be handed straight to a regex engine"
+        },
+        {
+          "path": "rules/hostile-regex.input.txt",
+          "bytes": 224,
+          "sha256": "9db1694994124562c25fe42d9a8f4a7ecb210f63997c0c217c6b1dab72626af3",
+          "note": "the input that detonates them"
+        },
+        {
+          "path": "rules/malformed.yaml",
+          "bytes": 1746,
+          "sha256": "a209e850d1bd1ccd38adc694b6f9e815561b5cd2823fc009849c864e0e45d30f",
+          "note": "valid YAML, invalid rule set, six faults listed at the top of the file"
+        },
+        {
+          "path": "rules/cases.json",
+          "bytes": 12133,
+          "sha256": "40eac159efa50eee6fc3d442249394bd45d680521efe7cf0960bbf1fb8c31186",
+          "note": "the assertion table: inputs, the rules that fire, and what comes out"
+        }
+      ]
+    },
+    "sharedDocuments": [
+      {
+        "sha256": "307a8ea49968e6ecb2de2c32a0a17b372f7245ac8f422dc50da5c1c02ee4be7c",
+        "bytes": 1506,
+        "arrivals": 3,
+        "appearsAs": [
+          "archives/mixed.zip!unterordner/mietvertrag.pdf",
+          "mail/forwarded-nested.eml!Mietvertrag-Lagerraum-14.pdf",
+          "paperless/originals/1002.pdf"
+        ]
+      },
+      {
+        "sha256": "99617dd08a896d45f44bac1f77b183ecea4616d82ff854b80830f4bbe9a6f34f",
+        "bytes": 3277,
+        "arrivals": 4,
+        "appearsAs": [
+          "archives/mixed.zip!Grundri▀.png",
+          "archives/mixed.zip!rechnungen/2023-09-12-jastram.png",
+          "mail/inline-image.eml!Beleg-2023-0912.png",
+          "paperless/originals/1003.png"
+        ]
+      },
+      {
+        "sha256": "e513597a4e9dc6e28828aa32f79af293d10aad610578196ae8118fb1e5534733",
+        "bytes": 2249,
+        "arrivals": 3,
+        "appearsAs": [
+          "archives/mixed.zip!protokolle/Protokoll 2023-03-13.pdf",
+          "mail/two-attachments.eml!Protokoll Sitzung 13. März 2023.pdf",
+          "paperless/originals/1004.pdf"
+        ]
+      },
+      {
+        "sha256": "f9089390be0a39f00df1f879e3b244f0a0fb7e191c8d3e94020f07d579864aa6",
+        "bytes": 8172,
+        "arrivals": 6,
+        "appearsAs": [
+          "archives/mixed.zip!rechnungen/2023-03-14-stadtwerke.pdf",
+          "archives/nested.zip!innen.zip!rechnungen/2023-03-14-stadtwerke.pdf",
+          "mail/two-attachments.eml!Rechnung_2023-004417.pdf",
+          "paperless/originals/1001.pdf",
+          "paperless/originals/1009.pdf",
+          "scans/invoice-image-only.pdf"
+        ]
+      }
+    ],
+    "contents": [
+      {
+        "path": "scans/invoice-image-only.pdf",
+        "bytes": 8172,
+        "sha256": "f9089390be0a39f00df1f879e3b244f0a0fb7e191c8d3e94020f07d579864aa6"
+      },
+      {
+        "path": "scans/report-multi-page.pdf",
+        "bytes": 22585,
+        "sha256": "5af462d8b4b095d792ee11b1825153c943451cdf5fc10e3e8cc8c2ef185e0e97"
+      },
+      {
+        "path": "scans/skewed-page.pdf",
+        "bytes": 7037,
+        "sha256": "cf0fb52a15b4534cf4781166d16a7531e3aff9ff630935ccf3038da60b2a30a8"
+      },
+      {
+        "path": "scans/born-digital.pdf",
+        "bytes": 2031,
+        "sha256": "5aabfe1ca220e3b582d72ff0b96eab37c3b2ec201ea158e90961fa7a17c50460"
+      },
+      {
+        "path": "scans/mixed-text-and-scan.pdf",
+        "bytes": 6996,
+        "sha256": "960a0a23f793b3513f2e870ca823c9f69e83ee65770a1559b465ddaa5dfa2705"
+      },
+      {
+        "path": "scans/sparse-text-layer.pdf",
+        "bytes": 7396,
+        "sha256": "a3f6e9fb5f541e71388ff53919c644daf0160bf4ac1089e23d7fa166884adf51"
+      },
+      {
+        "path": "mail/plain-text.eml",
+        "bytes": 1045,
+        "sha256": "22856c77e12c0b5e2591e2183ca1f36f1ff75ee0e6462ea1e9016b1fbb9023ef"
+      },
+      {
+        "path": "mail/html-multipart.eml",
+        "bytes": 1403,
+        "sha256": "f9634bd46680b3c678827f378128f26c0c7f5b1280ccc192542858506d03de6e"
+      },
+      {
+        "path": "mail/two-attachments.eml",
+        "bytes": 15460,
+        "sha256": "9c0630b579db5ea5958bcbfb2a0195cb228d07fa99850ff163c80a2973a43654"
+      },
+      {
+        "path": "mail/inline-image.eml",
+        "bytes": 5813,
+        "sha256": "1c9ce81e26189f13ef58a09e38a46051976ca9fe1a0304f91211bb13aca72f2c"
+      },
+      {
+        "path": "mail/forwarded-nested.eml",
+        "bytes": 3483,
+        "sha256": "16b7e880a1adc8b2792e318b982f8281ba270d2137bd53b75671c1ccade183d5"
+      },
+      {
+        "path": "mail/subject-non-utf8.eml",
+        "bytes": 713,
+        "sha256": "0ba648ba2a1d9146bd2881badbbbc7d9f7756b29bfd16d272ab7fc4da7871c72"
+      },
+      {
+        "path": "mail/malformed-boundary.eml",
+        "bytes": 863,
+        "sha256": "45fdacbe33fa60f9a747742c05af047192025a988f728f7c75b93c6133670f7d"
+      },
+      {
+        "path": "mail/attachment-name-traversal.eml",
+        "bytes": 1547,
+        "sha256": "d00888c2c9e773fed03e68ebf7203c821d5024737609c74f1a06a265e3364171"
+      },
+      {
+        "path": "archives/mixed.zip",
+        "bytes": 17214,
+        "sha256": "6a7de8dafd7a1f5d4d97c80f75dda9214c88513b945a0184d6bfa8f45f3e434b"
+      },
+      {
+        "path": "archives/nested.zip",
+        "bytes": 9663,
+        "sha256": "93659bdb43dd855c159eb804086460dc044919852423ff2a474f86a1fcfa3a71"
+      },
+      {
+        "path": "archives/path-traversal.zip",
+        "bytes": 1353,
+        "sha256": "b50cae633310c423f01667762f0a88641f8ad6b2e555b5429353e41f7905c5b8"
+      },
+      {
+        "path": "paperless/originals/1001.pdf",
+        "bytes": 8172,
+        "sha256": "f9089390be0a39f00df1f879e3b244f0a0fb7e191c8d3e94020f07d579864aa6"
+      },
+      {
+        "path": "paperless/originals/1002.pdf",
+        "bytes": 1506,
+        "sha256": "307a8ea49968e6ecb2de2c32a0a17b372f7245ac8f422dc50da5c1c02ee4be7c"
+      },
+      {
+        "path": "paperless/originals/1003.png",
+        "bytes": 3277,
+        "sha256": "99617dd08a896d45f44bac1f77b183ecea4616d82ff854b80830f4bbe9a6f34f"
+      },
+      {
+        "path": "paperless/originals/1004.pdf",
+        "bytes": 2249,
+        "sha256": "e513597a4e9dc6e28828aa32f79af293d10aad610578196ae8118fb1e5534733"
+      },
+      {
+        "path": "paperless/originals/1005.pdf",
+        "bytes": 1831,
+        "sha256": "acf252b6402bb068af5705dfa0c12c0c14ec15b4b5ed4bf6e0032a24cc6dd166"
+      },
+      {
+        "path": "paperless/originals/1006.pdf",
+        "bytes": 836,
+        "sha256": "6f88c41704388b61af08f9c31ed1a6c4b3937b1e23180cbabc8a296d0b6e6046"
+      },
+      {
+        "path": "paperless/originals/1008.pdf",
+        "bytes": 1055,
+        "sha256": "b863c949096eafd72d9e89c7f9f4175dc4c6087a4d97a6f4ba2aa02ddc1ec745"
+      },
+      {
+        "path": "paperless/originals/1009.pdf",
+        "bytes": 8172,
+        "sha256": "f9089390be0a39f00df1f879e3b244f0a0fb7e191c8d3e94020f07d579864aa6"
+      },
+      {
+        "path": "paperless/originals/1010.pdf",
+        "bytes": 1081,
+        "sha256": "72bc925aba54e90de4df7736c2c5f54610f341ca9dcc4d29b9732f34b5aeb98b"
+      },
+      {
+        "path": "paperless/originals/1011.pdf",
+        "bytes": 1033,
+        "sha256": "ea2c81d3b3f93c439fb60f1ac2bde865d4063c93d9463fa4c7618ae0488e6086"
+      },
+      {
+        "path": "paperless/originals/1012.pdf",
+        "bytes": 975,
+        "sha256": "b0cf2d9f499e1785928bda565b3bf22710a3797dc96a6789c0d61b71ac356a61"
+      },
+      {
+        "path": "paperless/api/status.json",
+        "bytes": 805,
+        "sha256": "9fc4e66d438ea130a99878fbb3bf3c559b345df876713b9e385e01ee4227d043"
+      },
+      {
+        "path": "paperless/api/tags.json",
+        "bytes": 3321,
+        "sha256": "1d29dd48fad6c6e4cf1bd4c095b06f710a82d583b123edce2424d190dda9c204"
+      },
+      {
+        "path": "paperless/api/correspondents.json",
+        "bytes": 2006,
+        "sha256": "ab415701bbe254df09bbc1eebd3ef27a4f42432bbdad07f16d7e14e1eb1e2312"
+      },
+      {
+        "path": "paperless/api/document_types.json",
+        "bytes": 1299,
+        "sha256": "b8441b8111f6fec61491aeb66694619805720a15aba5790bfa23171d1228b39a"
+      },
+      {
+        "path": "paperless/api/storage_paths.json",
+        "bytes": 712,
+        "sha256": "a9e7d73c2eea709a2e80a9f948064f0d61d7e785d9de760f2b655e71f198b3f5"
+      },
+      {
+        "path": "paperless/api/custom_fields.json",
+        "bytes": 1555,
+        "sha256": "36f56051a743c56a4e586f33c1260223d27586b839fbfc45216979d7756654a4"
+      },
+      {
+        "path": "paperless/api/documents-page-1.json",
+        "bytes": 8071,
+        "sha256": "e7faf38c61e583246da7fbf34a7ce9f1570d25004e5bff5828af39e0084e16ba"
+      },
+      {
+        "path": "paperless/api/documents-page-2.json",
+        "bytes": 3055,
+        "sha256": "6422623b0f685dc00a621baf1ed86b525ebaeab03fed5884e351efa8a9a90969"
+      },
+      {
+        "path": "paperless/api/trash.json",
+        "bytes": 321,
+        "sha256": "5706ea25785010c8fa9ae73d2446740aa30c96bdd20692b28375f58a744276f1"
+      },
+      {
+        "path": "paperless/api/documents-1007-download-error.json",
+        "bytes": 114,
+        "sha256": "81f13868dbf9533a1ab77b3c7132d3b2c28b4b629a34e434f1ab520b7c55574d"
+      },
+      {
+        "path": "paperless/index.json",
+        "bytes": 6084,
+        "sha256": "8ac4de840c65c1b7c340d7cb667d364460804823e9cbb289728bfd508cf7028d"
+      },
+      {
+        "path": "rules/precedence.yaml",
+        "bytes": 2551,
+        "sha256": "1bb4c629e84bf5d210f99e8c927085829879809a445a3eb3e48a04b1b90c8ed9"
+      },
+      {
+        "path": "rules/precedence.json",
+        "bytes": 2900,
+        "sha256": "71124f2abc3d92bdfee1cd114d13eeeb43d712b7bbe2fef7a8a8ca71f3d3dc91"
+      },
+      {
+        "path": "rules/negation.yaml",
+        "bytes": 2208,
+        "sha256": "0f56cdfc47f4df573fd948bd1662e028ea8f4d64d0dbbfe915ba0fb8b0b8aef0"
+      },
+      {
+        "path": "rules/hostile-regex.yaml",
+        "bytes": 2556,
+        "sha256": "50c3b2991ee4db4e721a1d9e761d0fd3dce9dda4ad2f1096d05235175cfcda2d"
+      },
+      {
+        "path": "rules/hostile-regex.input.txt",
+        "bytes": 224,
+        "sha256": "9db1694994124562c25fe42d9a8f4a7ecb210f63997c0c217c6b1dab72626af3"
+      },
+      {
+        "path": "rules/malformed.yaml",
+        "bytes": 1746,
+        "sha256": "a209e850d1bd1ccd38adc694b6f9e815561b5cd2823fc009849c864e0e45d30f"
+      },
+      {
+        "path": "rules/cases.json",
+        "bytes": 12133,
+        "sha256": "40eac159efa50eee6fc3d442249394bd45d680521efe7cf0960bbf1fb8c31186"
+      }
+    ]
   }
 }

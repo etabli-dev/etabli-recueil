@@ -108,8 +108,24 @@ export const operation = (input: {
   ...(input.security === undefined ? {} : { security: input.security }),
   ...(input.requestParams === undefined ? {} : { requestParams: input.requestParams }),
   ...(input.requestBody === undefined ? {} : { requestBody: input.requestBody }),
-  responses: input.responses,
+  responses:
+    input.requestBody === undefined
+      ? input.responses
+      : { ...bodyPipelineProblems(), ...input.responses },
 });
+
+/**
+ * The failures the shared body pipeline can produce before a handler is reached.
+ *
+ * Every operation that takes a body inherits them, whether or not its author thought about them:
+ * the content-type check and the parser sit in front of the handler, not inside it. Declaring them
+ * per operation, by hand, is how 37 of 38 body-taking operations came to omit 415 and 34 to omit
+ * 400 — a generated client with no case for either, for errors the server demonstrably returns.
+ *
+ * Spread *before* the operation's own responses, so an operation that wants different prose for one
+ * of these still wins.
+ */
+const bodyPipelineProblems = (): ZodOpenApiResponsesObject => problems('400', '415');
 
 /**
  * The query parameters every cursor-paged list accepts.

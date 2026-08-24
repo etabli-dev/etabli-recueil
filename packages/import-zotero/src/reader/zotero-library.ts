@@ -39,6 +39,7 @@ import type {
   ZoteroItemCreatorRow,
   ZoteroItemRow,
   ZoteroItemTagRow,
+  ZoteroLibraryItemCount,
   ZoteroLibraryRow,
   ZoteroNoteRow,
   ZoteroRelationRow,
@@ -139,6 +140,45 @@ export class ZoteroLibrary {
     return this.db.get<ZoteroLibraryRow>(
       'select libraryID, type, editable, filesEditable from libraries where libraryID = ?',
       [this.libraryId],
+    );
+  }
+
+  /** Every library in the file, not only the one being read. */
+  libraries(): ZoteroLibraryRow[] {
+    return this.memo('libraries', () =>
+      this.db.all<ZoteroLibraryRow>(
+        'select libraryID, type, editable, filesEditable from libraries order by libraryID',
+      ),
+    );
+  }
+
+  /**
+   * Items per library and per type, across the whole file.
+   *
+   * Every other reader on this class filters `libraryID = ?`, which is right — the importer reads
+   * one library — and which means a group library is invisible to all of them. A verification
+   * report built only out of those readers has a structurally impossible discrepancy: both sides of
+   * every count exclude the same rows. This query is deliberately unfiltered so that the report can
+   * name what it did not import.
+   */
+  itemCountsByLibrary(): ZoteroLibraryItemCount[] {
+    return this.memo('itemCountsByLibrary', () =>
+      this.db
+        .all<{ libraryID: number; libraryType: string | null; itemType: string; count: number }>(
+          `select i.libraryID as libraryID, l.type as libraryType, t.typeName as itemType,
+                  count(*) as count
+             from items i
+             join itemTypesCombined t on t.itemTypeID = i.itemTypeID
+             left join libraries l on l.libraryID = i.libraryID
+            group by i.libraryID, l.type, t.typeName
+            order by i.libraryID, t.typeName`,
+        )
+        .map((row) => ({
+          libraryID: Number(row.libraryID),
+          libraryType: row.libraryType === null ? null : String(row.libraryType),
+          itemType: String(row.itemType),
+          count: Number(row.count),
+        })),
     );
   }
 

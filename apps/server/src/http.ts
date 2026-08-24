@@ -60,13 +60,16 @@ export const resolvePageParams = (query: unknown): ResolvedPageParams => {
 
 /** The `page` block of a list response. `total` is omitted rather than guessed when unknown. */
 export const pageInfo = (
-  page: { nextCursor: string | null; hasMore: boolean; limit: number },
+  page: { nextCursor: string | null; hasMore: boolean; limit: number; textFilterTruncated?: boolean },
   total?: number,
 ): PageInfo => ({
   nextCursor: page.nextCursor,
   hasMore: page.hasMore,
   limit: page.limit,
   ...(total === undefined ? {} : { total }),
+  // Passed straight through: only the service knows whether its text filter hit its ceiling, and a
+  // client that is not told cannot distinguish "no more matches" from "no more than we looked at".
+  ...(page.textFilterTruncated === true ? { textFilterTruncated: true } : {}),
 });
 
 /**

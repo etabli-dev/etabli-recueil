@@ -14,6 +14,21 @@ import type { Readable } from 'node:stream';
 /** What a backend can be given. A stream, because a 400 MB scan should not be buffered. */
 export type BlobSource = Buffer | Uint8Array | Readable;
 
+/** How much of an object already in the store is checked before a `put` declares a hit. */
+export type PutVerification = 'size' | 'digest';
+
+/** Per-call options for `put`. */
+export interface PutOptions {
+  /**
+   * Override the backend's default verification for this call.
+   *
+   * `size` compares the length of the object already stored with the length of the bytes just
+   * hashed; `digest` re-reads it and compares the digest. `digest` is the honest answer and costs
+   * one extra read of a blob that is usually large, which is why it is not the default.
+   */
+  verify?: PutVerification;
+}
+
 /** The outcome of a `put`. */
 export interface PutResult {
   /** 64 lowercase hex characters — the identity of the bytes, and of the Document (ADR-0004). */
@@ -28,6 +43,14 @@ export interface PutResult {
    * blob" from "known blob" without a second round trip (CONCEPT §5.3 stage 2).
    */
   created: boolean;
+  /**
+   * True when an object was already at this digest, failed verification, and was replaced by the
+   * bytes of this `put`.
+   *
+   * A caller that sees this has learned that the store had rotted, and should say so: the blob is
+   * correct again only because these particular bytes happened to arrive a second time.
+   */
+  repaired: boolean;
 }
 
 export interface BlobStat {
@@ -43,11 +66,19 @@ export interface StorageBackend {
   /**
    * Store bytes and return their digest.
    *
-   * The digest is computed while streaming, never from a caller's claim, and a `put` of bytes
-   * already present must not rewrite the blob: it reports `created: false` and leaves the existing
-   * file untouched, because rewriting is the one way a content-addressed store can corrupt itself.
+   * The digest is computed while streaming, never from a caller's claim. A `put` of bytes already
+   * present does not rewrite the blob — it reports `created: false` and leaves the existing file
+   * untouched, because rewriting is one way a content-addressed store can corrupt itself.
+   *
+   * "Already present" is a fact that must be **verified, never inferred from the filename**. A file
+   * sitting at the digest path proves only that something was written there once; media rot, a
+   * truncated write on a full disk or a botched restore all leave a file whose name asserts a
+   * digest its bytes do not have. A backend therefore checks the stored object before declaring a
+   * hit, and when the check fails it writes the bytes it was just handed — which are known-good,
+   * having been hashed on the way in — rather than discarding them in favour of the corrupt copy.
+   * That case returns `repaired: true`.
    */
-  put(source: BlobSource): Promise<PutResult>;
+  put(source: BlobSource, options?: PutOptions): Promise<PutResult>;
 
   /** Open the bytes for reading. Throws if the digest is not in the store. */
   get(sha256: string): Promise<Readable>;

@@ -1,0 +1,71 @@
+# Recueil ingestion rules — deliberately not a valid rule set.
+#
+# This file is valid YAML and an invalid rule set. Six faults, in order of appearance:
+#
+#   1. no top-level "version"
+#   2. a rule with no "id"
+#   3. two rules sharing the id "duplicate"
+#   4. "priority" is a string, not an integer
+#   5. an action nobody defined ("send_email")
+#   6. a condition key nobody defined ("weather")
+#
+# and one thing that is not a fault but is worth being deliberate about: the YAML merge key on the
+# last rule. Some loaders honour "<<" and some do not, so whether "shared-defaults" reaches the rule
+# is a property of the loader, not of the file. Whichever a loader does, it must do it on purpose.
+#
+# As with bibtex/malformed.bib, the question is not whether this loads. It is whether the loader
+# names all six faults, or stops at the first.
+
+name: malformed
+
+shared-defaults: &shared-defaults
+  priority: 20
+  enabled: true
+
+rules:
+  - priority: 90
+    match:
+      all:
+        - source: mail
+    actions:
+      - add_tag: OhneKennung
+
+  - id: duplicate
+    priority: 80
+    match:
+      all:
+        - tag: Rechnung
+    actions:
+      - set_item_type: invoice
+
+  - id: duplicate
+    priority: 70
+    match:
+      all:
+        - tag: Vertrag
+    actions:
+      - set_item_type: contract
+
+  - id: priority-is-a-string
+    priority: hoch
+    match:
+      all:
+        - source: scanner
+    actions:
+      - add_tag: Gescannt
+
+  - id: unknown-action
+    priority: 60
+    match:
+      all:
+        - mime: { equals: application/pdf }
+    actions:
+      - send_email: archiv@recueil.invalid
+
+  - id: unknown-condition
+    <<: *shared-defaults
+    match:
+      all:
+        - weather: { equals: regnerisch }
+    actions:
+      - add_tag: Wetter

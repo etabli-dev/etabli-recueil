@@ -9,7 +9,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { and, count, eq, isNull } from 'drizzle-orm';
 
-import { NotFoundError, VersionConflictError, schema } from '../src/index.js';
+import { NotFoundError, TEXT_FILTER_CANDIDATES, VersionConflictError, schema } from '../src/index.js';
 import { makeLibrary } from './helpers.js';
 import type { TestLibrary } from './helpers.js';
 
@@ -422,5 +422,31 @@ describe('LibraryService — filtering (Phase 1)', () => {
     } finally {
       withoutIndex.dispose();
     }
+  });
+});
+
+/** m9: a caller could not tell "these are all the matches" from "these are the best 500". */
+describe('LibraryService — a truncated text filter says so', () => {
+  it('flags the page when the candidate ceiling was reached, and not when it was not', () => {
+    // One item is enough to prove the flag is absent; the ceiling needs more than 500 matches, so
+    // the truncating case is built from the constant rather than from a hard-coded 501.
+    for (let index = 0; index < TEXT_FILTER_CANDIDATES + 5; index += 1) {
+      library.library.createItem(
+        { itemType: 'article', bibliographic: { title: `Sepsis cohort ${index}` } },
+        library.actor,
+      );
+    }
+
+    const broad = library.library.listItems({ text: 'sepsis', limit: 10 });
+    expect(broad.data).toHaveLength(10);
+    expect(broad.page.textFilterTruncated).toBe(true);
+
+    // A query that matches a handful is not truncated, and neither is one with no text filter.
+    library.library.createItem(
+      { itemType: 'article', bibliographic: { title: 'Hyperlactataemia and outcome' } },
+      library.actor,
+    );
+    expect(library.library.listItems({ text: 'hyperlactataemia' }).page.textFilterTruncated).toBeUndefined();
+    expect(library.library.listItems({}).page.textFilterTruncated).toBeUndefined();
   });
 });

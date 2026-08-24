@@ -12,7 +12,7 @@
  * case-insensitively, so `?` is `?` rather than `Shift+/`.
  */
 
-export type ShortcutScope = 'global' | 'library' | 'reader';
+export type ShortcutScope = 'global' | 'library' | 'reader' | 'review';
 
 export interface Shortcut {
   /** Stable identifier. Handlers are registered against it, never against the chord. */
@@ -137,6 +137,70 @@ export const SHORTCUTS: readonly Shortcut[] = [
     // There is no companion "cycle the sort field": the list is ordered by (dateModified, id) and
     // `GET /api/v1/items` takes no sort field, so reversing is the whole of the ordering surface.
     description: 'Reverse the order: oldest first, or newest first',
+  },
+
+  /* The review queue ------------------------------------------------------------------------ */
+  /*
+   * M2 claims "zero manual filing for standard flows" with an auto-accept rate above 90%. The
+   * remaining ten per cent land here, and the queue is only bearable if a decision costs one
+   * keystroke. So the four decisions are single, unmodified letters on the home row's reach, and
+   * every one of them is undoable: `a` is only safe to press quickly if `u` is honest.
+   */
+  {
+    id: 'review-next',
+    keys: 'j',
+    scope: 'review',
+    group: 'Review queue',
+    description: 'Select the next entry',
+  },
+  {
+    id: 'review-previous',
+    keys: 'k',
+    scope: 'review',
+    group: 'Review queue',
+    description: 'Select the previous entry',
+  },
+  {
+    id: 'review-accept',
+    keys: 'a',
+    scope: 'review',
+    group: 'Review queue',
+    description: 'Accept the proposal as it stands and move to the next entry',
+  },
+  {
+    id: 'review-edit',
+    keys: 'e',
+    scope: 'review',
+    group: 'Review queue',
+    description: 'Edit the proposal before accepting it',
+  },
+  {
+    id: 'review-reject',
+    keys: 'x',
+    scope: 'review',
+    group: 'Review queue',
+    description: 'Reject the proposal and move to the next entry',
+  },
+  {
+    id: 'review-undo',
+    keys: 'u',
+    scope: 'review',
+    group: 'Review queue',
+    description: 'Undo the last decision: reopen the entry, and trash anything it created',
+  },
+  {
+    id: 'review-load-more',
+    keys: 'm',
+    scope: 'review',
+    group: 'Review queue',
+    description: 'Load the next page of entries',
+  },
+  {
+    id: 'review-open',
+    keys: 'Enter',
+    scope: 'review',
+    group: 'Review queue',
+    description: "Open the entry's document in the reader",
   },
 
   /* The reader ------------------------------------------------------------------------------ */

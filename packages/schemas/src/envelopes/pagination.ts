@@ -64,6 +64,17 @@ export const PageInfoSchema = z
           'Total matching records, when the endpoint can count them cheaply. Absent is not zero: ' +
           'an endpoint that cannot count without a table scan omits it rather than lying.',
       }),
+    textFilterTruncated: z
+      .boolean()
+      .optional()
+      .meta({
+        description:
+          'True when a text filter matched more records than the server would materialise, so ' +
+          'this page is drawn from the best-ranked candidates rather than from every match. ' +
+          'Absent means no text filter was applied, or every match was considered — `hasMore: ' +
+          'false` alone cannot tell exhaustion from truncation. Use the search endpoint and its ' +
+          'cursor for the long tail of a broad query.',
+      }),
   })
   .meta({ id: 'PageInfo', title: 'PageInfo' });
 

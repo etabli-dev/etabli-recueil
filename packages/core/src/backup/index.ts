@@ -29,6 +29,7 @@ export {
   RESTORED_DATABASE_FILE,
   RESTORED_STORAGE_DIRECTORY,
   STORAGE_DIRECTORY,
+  assertSnapshotRelativePath,
   blobPath,
 } from './format.js';
 
@@ -60,5 +61,5 @@ export type {
 export { inspectDatabaseFile, tableCounts } from './inspect.js';
 export type { DatabaseFacts } from './inspect.js';
 
-export { listStoredBlobs } from './files.js';
+export { listStoredBlobs, resolveWithin } from './files.js';
 export type { StoredBlob } from './files.js';

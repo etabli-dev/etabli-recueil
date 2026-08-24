@@ -6,7 +6,7 @@
  * count: they check that the handle refuses to write, that the refusal happens at more than one
  * layer, and that the file is byte-for-byte unchanged after a whole import has run over it.
  */
-import { copyFileSync, statSync } from 'node:fs';
+import { copyFileSync, existsSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -79,6 +79,56 @@ describe('ReadOnlyDatabase', () => {
       expect(statSync(copy).mtimeMs).toBe(before);
     } finally {
       temp.dispose();
+    }
+  });
+
+  /** m3. `copy: false` used to open a WAL database in place and rewrite its `-shm` beside it. */
+  it('refuses to read in place when the database has a live write-ahead log', () => {
+    const temp = makeTempDirectory();
+    try {
+      const copy = join(temp.path, 'zotero.sqlite');
+      copyFileSync(ZOTERO_FIXTURE.database, copy);
+      writeFileSync(`${copy}-wal`, Buffer.alloc(4096));
+
+      expect(() => new ReadOnlyDatabase(copy, { copy: false })).toThrow(/write-ahead log/u);
+      // Nothing was created beside the user's file on the way to the refusal.
+      expect(existsSync(`${copy}-shm`)).toBe(false);
+
+      // And copying — the default — is still allowed, log and all.
+      const db = new ReadOnlyDatabase(copy);
+      try {
+        expect(db.openedPath).not.toBe(copy);
+      } finally {
+        db.close();
+      }
+    } finally {
+      temp.dispose();
+    }
+  });
+
+  /** m2. `hasColumn` threw on every call: the pragma allow-list rejected a pragma with an argument. */
+  it('answers hasColumn instead of throwing at the statement guard', () => {
+    const db = new ReadOnlyDatabase(ZOTERO_FIXTURE.database);
+    try {
+      expect(db.hasColumn('items', 'libraryID')).toBe(true);
+      expect(db.hasColumn('items', 'noSuchColumn')).toBe(false);
+      expect(db.hasColumn('noSuchTable', 'anything')).toBe(false);
+      // A table name with a quote in it is escaped rather than interpolated.
+      expect(db.hasColumn('items" or 1=1 --', 'x')).toBe(false);
+      // Widening the pragma shape did not widen what may run: only the named introspection
+      // pragmas take an argument, and a pragma that *does* something is still refused.
+      for (const sql of [
+        'pragma journal_mode = delete',
+        'pragma optimize',
+        'pragma writable_schema(1)',
+        'pragma incremental_vacuum(10)',
+        'pragma wal_checkpoint(TRUNCATE)',
+        'pragma table_info("items"); delete from items',
+      ]) {
+        expect(() => db.all(sql), sql).toThrow(ReadOnlyViolationError);
+      }
+    } finally {
+      db.close();
     }
   });
 

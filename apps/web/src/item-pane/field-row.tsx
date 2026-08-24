@@ -17,10 +17,10 @@ import type { KeyboardEvent } from 'react';
 import type { FieldProvenanceEntry } from '@recueil/schemas';
 
 import { toInputValue, toPatchValue } from './fields.js';
-import type { BibliographicFieldDescriptor } from './fields.js';
+import type { FieldDescriptor } from './fields.js';
 
 export interface FieldRowProps {
-  descriptor: BibliographicFieldDescriptor;
+  descriptor: FieldDescriptor;
   value: unknown;
   provenance?: FieldProvenanceEntry;
   locked: boolean;

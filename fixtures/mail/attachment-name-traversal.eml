@@ -1,0 +1,46 @@
+Date: Sat, 18 Nov 2023 02:14:09 +0000
+From: invoices@billing-notice.example
+To: Archiv Recueil <archiv@recueil.invalid>
+Subject: Invoice 88201934 attached
+Message-ID: <b1llin9.20231118.021409@billing-notice.example>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="=_hostile_3f8c1b42"
+
+--=_hostile_3f8c1b42
+Content-Type: text/plain; charset=us-ascii
+Content-Transfer-Encoding: 7bit
+
+Please find the invoice attached.
+
+
+--=_hostile_3f8c1b42
+Content-Type: application/pdf
+Content-Disposition: attachment;
+ filename="../../../../etc/cron.d/recueil-pwn.pdf"
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjQKJSB0cmF2ZXJzYWwgYXR0ZW1wdCwgbm90IGEgcmVhbCBkb2N1bWVudAo=
+--=_hostile_3f8c1b42
+Content-Type: application/pdf; name="C:\Windows\Temp\recueil-pwn.pdf"
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjQKJSB3aW5kb3dzIHBhdGggYXR0ZW1wdAo=
+--=_hostile_3f8c1b42
+Content-Type: application/octet-stream
+Content-Disposition: attachment; filename*0*=utf-8''%2e%2e%2f;
+ filename*1*=%2e%2e%2f; filename*2*=escape.pdf
+Content-Transfer-Encoding: base64
+
+ZXNjYXBlIHZpYSBSRkMgMjIzMSBjb250aW51YXRpb25zCg==
+--=_hostile_3f8c1b42
+Content-Type: application/octet-stream; name=".bashrc"
+Content-Transfer-Encoding: base64
+
+IyBub3QgeW91ciBzaGVsbCBwcm9maWxlCg==
+--=_hostile_3f8c1b42
+Content-Type: application/pdf; name="Invoice-88201934.pdf"
+Content-Disposition: attachment; filename="Invoice-88201934.pdf"
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjQKJSB0aGUgb25lIGxlZ2l0aW1hdGUgYXR0YWNobWVudAo=
+--=_hostile_3f8c1b42--

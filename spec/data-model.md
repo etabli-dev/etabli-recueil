@@ -349,7 +349,11 @@ never define sameness (P2).
   without the application (P10).
 - D4. A document may have zero attachments (an ingested file not yet filed, sitting in the review
   queue) or many (the same PDF attached to several items). Trashing an item never trashes a
-  document; a document is trashable only when it has no live attachment.
+  document; a document is trashable only when it has no live attachment. The rule is symmetric and
+  has to be enforced from both ends: **no live attachment may reference a trashed document**, so
+  attaching one, re-ingesting bytes whose document is in the trash, and restoring an attachment
+  whose document was trashed while it sat in the bin are all refused. Enforcing only the trash
+  direction leaves three ordinary paths into the state the invariant forbids.
 - D5. Documents are unowned; see §1.4.
 
 ### 3.4 `items`

@@ -28,7 +28,14 @@ if (!('ResizeObserver' in globalThis)) {
     TestResizeObserver as unknown as typeof ResizeObserver;
 }
 
-if (typeof Element.prototype.scrollTo !== 'function') {
+/**
+ * Everything below needs a DOM, and one file in this suite deliberately runs without one: the
+ * service worker's, because a worker has Node's set of web globals rather than jsdom's
+ * (`test/service-worker.test.ts`). The guard is what lets one setup file serve both.
+ */
+const hasDom = typeof Element !== 'undefined' && typeof HTMLElement !== 'undefined';
+
+if (hasDom && typeof Element.prototype.scrollTo !== 'function') {
   Element.prototype.scrollTo = function scrollTo(): void {};
 }
 
@@ -45,16 +52,18 @@ const pixelsFrom = (value: string): number | null => {
   return match?.[1] === undefined ? null : Number(match[1]);
 };
 
-Object.defineProperty(HTMLElement.prototype, 'offsetWidth', {
-  configurable: true,
-  get(this: HTMLElement): number {
-    return pixelsFrom(this.style.width) ?? 720;
-  },
-});
+if (hasDom) {
+  Object.defineProperty(HTMLElement.prototype, 'offsetWidth', {
+    configurable: true,
+    get(this: HTMLElement): number {
+      return pixelsFrom(this.style.width) ?? 720;
+    },
+  });
 
-Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
-  configurable: true,
-  get(this: HTMLElement): number {
-    return pixelsFrom(this.style.height) ?? 640;
-  },
-});
+  Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
+    configurable: true,
+    get(this: HTMLElement): number {
+      return pixelsFrom(this.style.height) ?? 640;
+    },
+  });
+}

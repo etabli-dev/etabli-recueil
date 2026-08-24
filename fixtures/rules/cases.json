@@ -1,0 +1,423 @@
+{
+  "$schema": "https://recueil.invalid/fixtures/rule-cases",
+  "description": "Inputs, the rules that fire on them, and what comes out. Written in terms of rule ids so that it survives a change to the rule file syntax. See fixtures/README.md §6.",
+  "evaluationContract": [
+    "Rules are evaluated by priority descending, then by id ascending. Document order is not significant.",
+    "A rule with enabled: false is not evaluated at all, whatever its priority.",
+    "A rule whose match succeeds fires, and its actions are collected.",
+    "A fired rule with stop: true ends evaluation; lower-priority rules are not examined.",
+    "Two fired rules setting the same field to different values apply neither, and the document goes to the review queue with reason_code \"rule_conflict\"."
+  ],
+  "cases": [
+    {
+      "id": "stadtwerke-invoice-stops-the-rest",
+      "ruleFile": "precedence.yaml",
+      "why": "the specific rule stops evaluation, so the generic invoice rule and the catch-all are never reached",
+      "input": {
+        "source": "mail",
+        "sender": "rechnung@stadtwerke-ulm.example",
+        "subject": "Ihre Rechnung 2023-004417 und das Sitzungsprotokoll",
+        "mime": "application/pdf",
+        "path": null,
+        "tags": [],
+        "correspondent": null,
+        "headers": {},
+        "text": "Stadtwerke Ulm GmbH\nRechnungsnummer: 2023-004417\nGesamtbetrag 471,50 EUR"
+      },
+      "expect": {
+        "evaluated": [
+          "invoice-stadtwerke"
+        ],
+        "fired": [
+          "invoice-stadtwerke"
+        ],
+        "notEvaluated": [
+          "tie-vertrag-a",
+          "tie-vertrag-b",
+          "invoice-generic",
+          "catch-all-pdf"
+        ],
+        "skippedDisabled": [
+          "disabled-catch-all"
+        ],
+        "actions": [
+          {
+            "set_item_type": "invoice"
+          },
+          {
+            "add_tag": "Rechnung"
+          },
+          {
+            "set_office": {
+              "correspondent": "Stadtwerke Ulm",
+              "office_document_type": "invoice",
+              "reference_number": "2023-004417"
+            }
+          },
+          {
+            "add_to_collection": "Rechnungen/2023"
+          }
+        ],
+        "captures": {
+          "reference": "2023-004417"
+        },
+        "reviewReason": null
+      }
+    },
+    {
+      "id": "stadtwerke-invoice-tagged-storno",
+      "ruleFile": "precedence.yaml",
+      "why": "the same message with a Storno tag: the none clause blocks the specific rule, so the generic one and the catch-all both fire",
+      "input": {
+        "source": "mail",
+        "sender": "rechnung@stadtwerke-ulm.example",
+        "subject": "Storno zu Rechnung 2023-004417",
+        "mime": "application/pdf",
+        "path": null,
+        "tags": [
+          "Storno"
+        ],
+        "correspondent": null,
+        "headers": {},
+        "text": "Stadtwerke Ulm GmbH\nRechnungsnummer: 2023-004417\nStornorechnung"
+      },
+      "expect": {
+        "evaluated": [
+          "invoice-stadtwerke",
+          "tie-vertrag-a",
+          "tie-vertrag-b",
+          "invoice-generic",
+          "catch-all-pdf"
+        ],
+        "fired": [
+          "invoice-generic",
+          "catch-all-pdf"
+        ],
+        "notEvaluated": [],
+        "skippedDisabled": [
+          "disabled-catch-all"
+        ],
+        "actions": [
+          {
+            "set_item_type": "invoice"
+          },
+          {
+            "add_tag": "Rechnung"
+          },
+          {
+            "add_tag": "Posteingang"
+          }
+        ],
+        "captures": {},
+        "reviewReason": null
+      }
+    },
+    {
+      "id": "equal-priority-conflict",
+      "ruleFile": "precedence.yaml",
+      "why": "two rules at priority 60 set item_type to different values; neither value is applied",
+      "input": {
+        "source": "watched_folder",
+        "sender": null,
+        "subject": null,
+        "mime": "application/pdf",
+        "path": "/eingang/Mietvertrag-Lagerraum-14.pdf",
+        "tags": [],
+        "correspondent": "Hausverwaltung Kessler GmbH",
+        "headers": {},
+        "text": "Mietvertrag über einen Lagerraum\nLagerraum Nr. 14, Souterrain"
+      },
+      "expect": {
+        "evaluated": [
+          "invoice-stadtwerke",
+          "tie-vertrag-a",
+          "tie-vertrag-b",
+          "invoice-generic",
+          "catch-all-pdf"
+        ],
+        "fired": [
+          "tie-vertrag-a",
+          "tie-vertrag-b",
+          "catch-all-pdf"
+        ],
+        "notEvaluated": [],
+        "skippedDisabled": [
+          "disabled-catch-all"
+        ],
+        "actions": [
+          {
+            "add_tag": "Vertrag"
+          },
+          {
+            "add_tag": "Posteingang"
+          }
+        ],
+        "conflicts": [
+          {
+            "field": "item_type",
+            "rules": [
+              "tie-vertrag-a",
+              "tie-vertrag-b"
+            ],
+            "values": [
+              "contract",
+              "letter"
+            ]
+          }
+        ],
+        "captures": {},
+        "reviewReason": "rule_conflict"
+      }
+    },
+    {
+      "id": "nothing-matches-but-the-floor",
+      "ruleFile": "precedence.yaml",
+      "why": "a PDF that matches no content rule still reaches the catch-all, which is the only rule allowed to fire on everything",
+      "input": {
+        "source": "scanner",
+        "sender": null,
+        "subject": null,
+        "mime": "application/pdf",
+        "path": "/scans/scan_0041.pdf",
+        "tags": [],
+        "correspondent": null,
+        "headers": {},
+        "text": ""
+      },
+      "expect": {
+        "evaluated": [
+          "invoice-stadtwerke",
+          "tie-vertrag-a",
+          "tie-vertrag-b",
+          "invoice-generic",
+          "catch-all-pdf"
+        ],
+        "fired": [
+          "catch-all-pdf"
+        ],
+        "notEvaluated": [],
+        "skippedDisabled": [
+          "disabled-catch-all"
+        ],
+        "actions": [
+          {
+            "add_tag": "Posteingang"
+          }
+        ],
+        "captures": {},
+        "reviewReason": null
+      }
+    },
+    {
+      "id": "json-twin-is-the-same-rule-set",
+      "ruleFile": "precedence.json",
+      "why": "the JSON file must load to the same rule set as the YAML one and behave identically",
+      "sameAs": "stadtwerke-invoice-stops-the-rest",
+      "input": {
+        "source": "mail",
+        "sender": "rechnung@stadtwerke-ulm.example",
+        "subject": "Ihre Rechnung 2023-004417 und das Sitzungsprotokoll",
+        "mime": "application/pdf",
+        "path": null,
+        "tags": [],
+        "correspondent": null,
+        "headers": {},
+        "text": "Stadtwerke Ulm GmbH\nRechnungsnummer: 2023-004417\nGesamtbetrag 471,50 EUR"
+      },
+      "expect": {
+        "evaluated": [
+          "invoice-stadtwerke"
+        ],
+        "fired": [
+          "invoice-stadtwerke"
+        ],
+        "notEvaluated": [
+          "tie-vertrag-a",
+          "tie-vertrag-b",
+          "invoice-generic",
+          "catch-all-pdf"
+        ],
+        "skippedDisabled": [
+          "disabled-catch-all"
+        ],
+        "captures": {
+          "reference": "2023-004417"
+        },
+        "reviewReason": null
+      }
+    },
+    {
+      "id": "newsletter-is-not-correspondence",
+      "ruleFile": "negation.yaml",
+      "why": "the List-Id header blocks correspondence-not-list; the message is a newsletter",
+      "input": {
+        "source": "mail",
+        "sender": "newsletter@example.net",
+        "subject": "Ausgabe 6/2023",
+        "mime": "text/html",
+        "path": null,
+        "tags": [],
+        "correspondent": "Newsletter Wasserwirtschaft",
+        "headers": {
+          "List-Id": "Wasserwirtschaft Newsletter <newsletter.example.net>"
+        },
+        "text": "Niedrigwasser und Grundwasserneubildung"
+      },
+      "expect": {
+        "fired": [],
+        "actions": [],
+        "reviewReason": null
+      }
+    },
+    {
+      "id": "double-negative-needs-the-tag",
+      "ruleFile": "negation.yaml",
+      "why": "none of [ none of [ tag Storno ] ] means the document IS tagged Storno; a flattened negation fires this on the wrong documents",
+      "input": {
+        "source": "scanner",
+        "sender": null,
+        "subject": null,
+        "mime": "application/pdf",
+        "path": "/scans/storno.pdf",
+        "tags": [
+          "Storno"
+        ],
+        "correspondent": "Stadtwerke Ulm",
+        "headers": {},
+        "text": "Stornorechnung"
+      },
+      "expect": {
+        "fired": [
+          "double-negative-storno",
+          "vacuous-none-scanner"
+        ],
+        "actions": [
+          {
+            "add_tag": "Geprüft"
+          },
+          {
+            "set_custom_field": {
+              "key": "geprueft",
+              "value": true
+            }
+          },
+          {
+            "add_tag": "Gescannt"
+          }
+        ],
+        "reviewReason": null
+      }
+    },
+    {
+      "id": "empty-none-is-vacuously-true",
+      "ruleFile": "negation.yaml",
+      "why": "vacuous-none-scanner has an empty none and must fire on every scanner document; an engine that folds an empty none to false never fires it at all",
+      "input": {
+        "source": "scanner",
+        "sender": null,
+        "subject": null,
+        "mime": "application/pdf",
+        "path": "/scans/scan_0041.pdf",
+        "tags": [],
+        "correspondent": "Finanzamt Ulm",
+        "headers": {},
+        "text": "Bescheid"
+      },
+      "expect": {
+        "fired": [
+          "vacuous-none-scanner"
+        ],
+        "actions": [
+          {
+            "add_tag": "Gescannt"
+          }
+        ],
+        "reviewReason": null
+      }
+    },
+    {
+      "id": "missing-correspondent-goes-to-review",
+      "ruleFile": "negation.yaml",
+      "why": "a correspondent that was never extracted is missing, not empty, and the rule distinguishes it from an import",
+      "input": {
+        "source": "watched_folder",
+        "sender": null,
+        "subject": null,
+        "mime": "application/pdf",
+        "path": "/eingang/unbekannt.pdf",
+        "tags": [],
+        "correspondent": null,
+        "headers": {},
+        "text": "unleserlich"
+      },
+      "expect": {
+        "fired": [
+          "no-correspondent-to-review"
+        ],
+        "actions": [
+          {
+            "route_to_review": "low_confidence_metadata"
+          }
+        ],
+        "reviewReason": "low_confidence_metadata"
+      }
+    },
+    {
+      "id": "hostile-regexes-must-not-hang",
+      "ruleFile": "hostile-regex.yaml",
+      "why": "the engine may refuse these patterns at load or bound their execution; either way, evaluating the file against hostile-regex.input.txt must finish",
+      "inputFile": "hostile-regex.input.txt",
+      "expect": {
+        "rejectedAtLoad": [
+          "invalid-syntax",
+          "pcre-inline-flag"
+        ],
+        "engineDependent": [
+          "backreference"
+        ],
+        "budgetMilliseconds": 2000,
+        "mustNotThrow": true
+      }
+    },
+    {
+      "id": "malformed-rule-set-names-every-fault",
+      "ruleFile": "malformed.yaml",
+      "why": "valid YAML, invalid rule set: the loader must report all six faults, not stop at the first",
+      "expect": {
+        "loads": false,
+        "faults": [
+          {
+            "code": "missing_version",
+            "where": "document root"
+          },
+          {
+            "code": "missing_id",
+            "where": "rules[0]"
+          },
+          {
+            "code": "duplicate_id",
+            "where": "rules[1], rules[2]",
+            "id": "duplicate"
+          },
+          {
+            "code": "priority_not_an_integer",
+            "where": "rules[3]",
+            "id": "priority-is-a-string"
+          },
+          {
+            "code": "unknown_action",
+            "where": "rules[4]",
+            "id": "unknown-action",
+            "action": "send_email"
+          },
+          {
+            "code": "unknown_condition",
+            "where": "rules[5]",
+            "id": "unknown-condition",
+            "condition": "weather"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -12,6 +12,12 @@
  *    by exactly one operation, `fs.copyFile`, which opens it `O_RDONLY`. This also removes the one
  *    real hazard of reading in place: a hot journal makes SQLite want to recover on open, recovery
  *    is a write, and a read-only handle then fails — or, worse, an in-place handle succeeds.
+ *
+ *    That "exactly one operation" is a claim about the **default**, and it is false with
+ *    `copy: false`. Opening a WAL database in place — read-only handle or not — makes SQLite create
+ *    or rewrite the `-shm` shared-memory index beside it, in the user's Zotero data directory. So
+ *    `copy: false` refuses a database that has a live write-ahead log rather than quietly writing
+ *    next to it; on a cleanly closed database there is no `-wal` and nothing to rewrite.
  * 2. **`readonly: true`.** SQLite opens the file `O_RDONLY` and refuses every write statement at
  *    the VFS layer.
  * 3. **`PRAGMA query_only = 1`.** Refused at the statement layer as well, and asserted afterwards
@@ -31,8 +37,33 @@ import { basename, join } from 'node:path';
 import Database from 'better-sqlite3';
 import type { Database as SqliteDatabase, Statement } from 'better-sqlite3';
 
-/** What a caller may ask a read-only handle to run. Anything else is refused before SQLite sees it. */
-const READ_ONLY_STATEMENT = /^\s*(?:select\b|with\b|pragma\s+[a-z_]+\s*(?:;|$))/iu;
+/**
+ * What a caller may ask a read-only handle to run. Anything else is refused before SQLite sees it.
+ *
+ * A pragma is admitted in two shapes: bare (`pragma user_version`), or one of the introspection
+ * pragmas below applied to an identifier (`pragma table_info("items")`). The second shape had no
+ * entry at all, which made `hasColumn()` a public method that threw on every call — the regular
+ * expression rejected the parenthesis before SQLite ever saw the statement.
+ *
+ * It is a named list rather than "any pragma with an argument" because several pragmas that take an
+ * argument *do* things: `incremental_vacuum(10)`, `wal_checkpoint(TRUNCATE)`,
+ * `writable_schema(1)`. Those are already refused twice over — the connection is `readonly` and
+ * `query_only` — but a statement allow-list that admits them is not an allow-list.
+ */
+const INTROSPECTION_PRAGMAS = [
+  'table_info',
+  'table_xinfo',
+  'table_list',
+  'index_list',
+  'index_info',
+  'index_xinfo',
+  'foreign_key_list',
+] as const;
+
+const READ_ONLY_STATEMENT = new RegExp(
+  `^\\s*(?:select\\b|with\\b|pragma\\s+(?:[a-z_]+|(?:${INTROSPECTION_PRAGMAS.join('|')})\\s*\\([^;()]*\\))\\s*;?\\s*$)`,
+  'iu',
+);
 
 /** Statements that are shaped like a `PRAGMA` but set something. */
 const PRAGMA_ASSIGNMENT = /^\s*pragma\b[^;]*=/iu;
@@ -119,6 +150,19 @@ export class ReadOnlyDatabase {
     this.sourcePath = sourcePath;
 
     if (options.copy === false) {
+      // A `-wal` beside the file means either Zotero is running or it did not shut down cleanly.
+      // Either way, opening the database in place makes SQLite write the `-shm` index next to the
+      // user's only copy of a decade of work — and possibly recover the log, which is a write to
+      // the database itself. The whole point of this class is that that cannot happen.
+      const wal = `${sourcePath}-wal`;
+      if (existsSync(wal) && statSync(wal).size > 0) {
+        throw new Error(
+          `Refusing to open '${sourcePath}' in place: it has a live write-ahead log ` +
+            `('${basename(wal)}', ${statSync(wal).size} bytes). Opening a WAL database in place ` +
+            'rewrites its shared-memory index in the Zotero data directory, and may recover the ' +
+            'log, which is a write. Close Zotero, or read through a copy (the default).',
+        );
+      }
       this.temporaryDirectory = null;
       this.openedPath = sourcePath;
     } else {
@@ -181,7 +225,12 @@ export class ReadOnlyDatabase {
     );
   }
 
-  /** Whether a table has a column of this name. Zotero adds and removes columns across versions. */
+  /**
+   * Whether a table has a column of this name. Zotero adds and removes columns across versions.
+   *
+   * `pragma table_info(x)` takes an identifier rather than a bound parameter, which is why the
+   * statement allow-list has to admit a pragma with an argument at all.
+   */
   hasColumn(table: string, column: string): boolean {
     if (!this.hasTable(table)) return false;
     return this.all<{ name: string }>(`pragma table_info(${quoteIdentifier(table)})`).some(

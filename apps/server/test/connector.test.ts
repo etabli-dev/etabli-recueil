@@ -2,10 +2,10 @@
  * The Zotero Connector endpoints (ADR-0006).
  *
  * These tests assert what this implementation *does*, against payloads shaped like the ones the
- * extension sends. They cannot assert compatibility with the extension itself — the protocol is
- * undocumented, and only a browser with the extension installed can prove that — so what is
- * verified here is that a translator's output becomes a correct library record, and that the
- * handshake and progress endpoints answer in the shape `routes/connector.ts` documents.
+ * extension sends: that a translator's output becomes a correct library record, and that the
+ * handshake answers in the shape `routes/connector.ts` documents. On their own they are Recueil
+ * agreeing with Recueil, so the compatibility half lives next door in `connector-upstream.test.ts`,
+ * which runs verbatim upstream code over these same responses.
  *
  * The payloads below are the ones a real translator emits: the field names, the two creator forms
  * (`firstName`/`lastName` and single-field `name`), and the tag and note shapes.
@@ -98,6 +98,11 @@ describe('/connector/getSelectedCollection', () => {
       expect(target.editable).toBe(true);
       expect(target.libraryEditable).toBe(true);
       expect(target.name).toBeTypeOf('string');
+      // `targets` is not optional — see `connector-upstream.test.ts` and the captured fixture.
+      expect(target.targets).toEqual([
+        { id: 'L1', name: target.name, filesEditable: true, level: 0 },
+      ]);
+      expect(target.tags).toEqual({ L1: [] });
     } finally {
       await h.close();
     }
@@ -238,38 +243,6 @@ describe('/connector/saveSnapshot', () => {
       expect(item.itemType).toBe('webpage');
       expect((item.bibliographic as Record<string, unknown>).url).toBe('https://example.org/a-page');
       expect(item.extra).toContain('the page bytes were not stored');
-    } finally {
-      await h.close();
-    }
-  });
-});
-
-describe('/connector/sessionProgress', () => {
-  it('reports a completed session, and answers for one it does not know', async () => {
-    const h = await harness();
-    try {
-      await h.app.inject({
-        method: 'POST',
-        url: '/connector/saveItems',
-        payload: { items: [JOURNAL_ARTICLE], sessionID: 'progress-1' },
-      });
-
-      const known = await h.app.inject({
-        method: 'POST',
-        url: '/connector/sessionProgress',
-        payload: { sessionID: 'progress-1' },
-      });
-      expect(known.statusCode).toBe(200);
-      expect(body(known).done).toBe(true);
-      expect((body(known).items as { progress: number }[])[0]?.progress).toBe(100);
-
-      const unknown = await h.app.inject({
-        method: 'POST',
-        url: '/connector/sessionProgress',
-        payload: { sessionID: 'never-heard-of-it' },
-      });
-      expect(unknown.statusCode).toBe(200);
-      expect(body(unknown)).toEqual({ items: [], done: true });
     } finally {
       await h.close();
     }

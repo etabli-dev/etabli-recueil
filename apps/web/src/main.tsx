@@ -11,6 +11,7 @@ import { createRoot } from 'react-dom/client';
 import { App } from './app.js';
 import { RecueilClient } from './api/client.js';
 import { setAttachmentOpener } from './item-pane/sections/index.js';
+import { registerServiceWorker } from './pwa/register.js';
 import { createAppRouter } from './router.js';
 import './styles.css';
 
@@ -31,3 +32,8 @@ createRoot(container).render(
     <App client={client} router={router} />
   </StrictMode>,
 );
+
+// The worker adds the share target and an offline shell, and nothing the application needs to
+// render. It is registered after the first render and its failure is ignored on purpose
+// (`pwa/register.ts`); in development there is no built worker to register.
+void registerServiceWorker({ enabled: import.meta.env.PROD });

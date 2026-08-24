@@ -31,6 +31,9 @@ tokened `.bib` feeds Overleaf and Quarto fetch, and the Zotero Connector endpoin
 | `src/wire.ts` | Database rows → contract shapes. One place, because the schemas are strict |
 | `src/queries.ts` | The few projections `@recueil/core` does not expose, and nothing that decides anything |
 | `src/schemas.ts` | The response and request shapes that belong to this surface rather than to the data model |
+| `src/schemas-ingestion.ts` | The same, for Phase 2: sources, the queue, the review queue, rules and storage |
+| `src/office.ts` | The office facet's ASN constraint: the pre-check that names the clash, and the translation that survives a race |
+| `src/ingestion/` | The Phase 2 services: the configuration tables, the credential box, the sources, the queue, the review queue, the rule store and the runner |
 | `src/events.ts` | The lifecycle event bus and the SSE framing (`spec/hooks.md` §7) |
 | `src/publish.ts` | Building each event payload, post-commit |
 | `src/export.ts` | Choosing a selection and serialising it (CONCEPT.md §5.11, ADR-0016) |
@@ -100,6 +103,10 @@ port and silently uses the default is a server that is not where you left it.
 | `RECUEIL_VERSION` | package version | The release string reported by `/health`. Stamped in at image build time |
 | `RECUEIL_REQUIRE_AUTH` | `false` | Refuse an unauthenticated call to `/api/v1`. Off by default because v1 is a single-user server on loopback; **turn it on for anything reachable beyond it** |
 | `RECUEIL_MAX_UPLOAD_BYTES` | `536870912` | Ceiling on one uploaded file. Enforced during the streaming hash, before anything is recorded |
+| `RECUEIL_SECRET_KEY` | — | 32 bytes, base64 or hex, that encrypt stored source and backend credentials. **Unset means this server will not store a credential at all**: a source with a password is refused with a 409 naming this variable, and a source without one is configured as usual. There is deliberately no derived fallback — a key made from the database path would encrypt nothing while looking as though it did |
+| `RECUEIL_INGEST_ALLOWED_ROOTS` | — | Comma-separated absolute directories a watched-folder source may be pointed at. Unset means no allow-list, and a root is then any absolute directory that exists. Set it wherever the token holder and the machine owner are not the same person |
+| `RECUEIL_INGEST_SCRATCH_PATH` | OS temp | Where the ingestion pipeline extracts archives. Needs room for the largest archive |
+| `RECUEIL_INGEST_CONFIDENCE_THRESHOLD` | `0.75` | The stage-9 gate (CONCEPT.md §5.3). At or above it an item is created; below it the document is stored and a review-queue entry carries the reason (P3) |
 
 ## Endpoints
 
@@ -187,13 +194,20 @@ document and fails on an operation the router does not answer. A third test asse
 | Tags | list, create, fetch, rename, items, merge, trash, restore, and the tag set of one item |
 | Notes | list, create, fetch, update, trash, restore |
 | Fields | define, list, fetch, update, remove, and the typed values on an item |
+| Office facet | `PATCH /items/{id}/office` and `GET /items/by-asn/{asn}` — correspondent, document date, ASN, amount, reference number. The ASN is unique across live items and a clash is a 409 naming the item that holds it |
 | Creators | list, create, fetch, update, works, merge, trash, restore |
 | Search | ranked full-text search over items, notes and extracted document text |
 | Export | BibTeX, BibLaTeX, RIS, CSL-JSON over a selection; the two `.bib` feeds |
 | Trash | list, summary, restore, purge |
 | Tokens | list, mint, fetch, revoke |
 | Events | the SSE lifecycle stream |
-| Connector | `ping`, `getSelectedCollection`, `saveItems`, `saveSnapshot`, `sessionProgress` |
+| Connector | `ping`, `getSelectedCollection`, `saveItems`, `saveSnapshot` |
+| Ingestion sources | list, configure, fetch, change, remove, enable, disable, test-connection, run |
+| Ingestion queue | list, one job with its stage trace, retry, cancel |
+| Ingestion review | list, fetch, accept, accept-with-edits, reject, bulk accept |
+| Ingestion upload | the PWA share target: multipart in, the created item or the review entry out |
+| Rules | list, create, fetch, change, remove, dry-run |
+| Storage | list, configure, fetch, change, remove and health-check the WebDAV and S3 backends |
 
 ### Authentication and scopes
 
@@ -233,9 +247,41 @@ envelope of `spec/hooks.md` §7.1 as JSON in `data:`, and the monotonic `sequenc
 There is no replay — a subscriber receives events from the moment it subscribes (§7.2) — and order
 is by `sequence`, never by `occurredAt`, which has clock resolution and can tie.
 
-This phase can cause `item.created`, `item.updated`, `item.trashed`, `item.restored`,
-`document.ingested` and `attachment.added`. The other six of the twelve arrive with the phases that
-implement them.
+This build can cause `item.created`, `item.updated`, `item.trashed`, `item.restored`,
+`document.ingested`, `attachment.added`, `job.started`, `job.finished` and `job.failed`. The other
+three of the twelve — `item.merged`, `annotation.created`, `check.completed` — arrive with the
+phases that implement them.
+
+The ingestion lifecycle is those last four. Every run — an upload, a source poll, a retry — is a
+`job.started` and then a `job.finished` or a `job.failed`, and every document the pipeline commits
+is a `document.ingested` carrying §7.3's payload: the storage key, whether there is a text layer,
+which items it was attached to, which stages ran, and `reviewQueueEntryId` when the gate routed it
+to a person.
+
+Two decisions worth stating. There is **no `ingest.*` event type**: `@recueil/ingest` has a richer
+vocabulary internally, §8 says there is nothing beyond the twelve, and its `ingest.review_queued`
+and `ingest.candidate_failed` are carried by `document.ingested.reviewQueueEntryId` and by
+`job.failed` rather than invented on the wire. And `document.ingested` is published **after the run
+finishes**, not as the pipeline emits it: the pipeline emits at stage 2 and the gate raises the
+review entry at stage 9, so publishing on arrival would report `undefined` for exactly the documents
+somebody has to look at.
+
+### Ingestion (Phase 2)
+
+`POST /api/v1/ingestion/upload` is the share target: multipart in, streamed and hashed on the way
+past, the whole pipeline of CONCEPT.md §5.3 in the middle, and one of six outcomes out — with the
+created item or the review entry in the body, so a phone renders a result rather than polling.
+
+What this build's pipeline does **not** do, said plainly because the endpoint's behaviour depends on
+it: there is no OCR worker and no resolver, because neither exists without a container runtime. A
+scan with no text layer therefore reaches the confidence gate with nothing to say for itself and
+lands in the review queue. That is P3 working, not a defect, and the job's stage trace shows `ocr`
+absent rather than run-and-failed.
+
+Accepting a review entry executes its `proposedPayload` through the same commit the pipeline uses,
+inside one transaction with the resolution (RQ1) — so a duplicate ASN, a bad collection id or any
+other refusal leaves the entry open and creates nothing. `resolutionPayload` records what was
+actually run, which is not always what was proposed.
 
 **Known deviation.** §7.1 says `sequence` is "persisted, continues across restarts". Here it is
 monotonic within the *process*: persisting it needs a table Phase 1's migrations do not have, and a
@@ -248,10 +294,22 @@ are mounted with no `/api/v1` prefix and no version because that is how the clie
 they are unauthenticated because the extension has no way to hold a token and the client it is
 imitating has none either.
 
-**Matched against:** Zotero Connector 5.0.x and the Zotero 7 client's
-`connector/server_connector.js` request and response shapes. The protocol is undocumented; ADR-0006
-says so and pins versions for exactly this reason. Where a shape could not be confirmed, the reading
-taken is stated in a comment above the handler rather than presented as fact.
+**Matched against:** verbatim excerpts of the upstream sources, captured at pinned commits and kept
+in `fixtures/zotero-connector/` with their provenance — `zotero/zotero-connectors` at
+`c279ccc61d80f99b8d9275e9315d05cb66617f2e` and `zotero/zotero` at
+`f2a42bec150fa8b947ffde57afd72a22e805f085`. `test/connector-upstream.test.ts` evaluates those
+excerpts and runs them over this server's real responses, so the progress window's own
+`response.targets.filter(…)` and the transport's own online-state decision are the oracles rather
+than our reading of them.
+
+**What that does and does not establish.** It establishes that the extension's response-handling
+code does not throw on our responses and reaches the right conclusion about them. It does **not**
+establish that the extension sends the request bodies we assume, that a capture completes end to
+end, or that no endpoint we leave unimplemented is required along the way: those need a browser with
+the extension installed, and nothing in this repository has run one. The protocol is undocumented;
+ADR-0006 says so and pins versions for exactly this reason. Where a shape still could not be
+confirmed, the reading taken is stated in a comment above the handler rather than presented as
+fact.
 
 **Where it listens.** The extension looks for a client on `http://127.0.0.1:23119`. A deployment
 that wants browser capture binds the server — or a reverse proxy for `/connector/*` alone — on that
@@ -266,11 +324,25 @@ its way out of.
 - `/connector/saveSingleFile` — the endpoint the connector posts a SingleFile snapshot to. Without
   it, `saveSnapshot` creates the `webpage` item but stores no page bytes, and says so in the item's
   `extra` rather than implying the page was archived.
-- `targets` on `getSelectedCollection` — the collection-picker list. It is optional in the responses
-  observed, and offering a picker whose choices this implementation would then ignore would be worse
-  than not offering one.
+- The collection tree in `getSelectedCollection`'s `targets`. The field itself **is** sent — it is
+  not optional, the extension dereferences it unguarded — but it carries exactly one row, the
+  library root, because `saveItems` files into the library and not into a collection. Offering the
+  whole tree would be offering choices this implementation ignores.
+- Tag autocomplete has a `tags` map in the shape the extension unwraps, and it is empty. `ping`
+  advertises `supportsTagsAutocomplete`, so the map must be there; querying the tag table
+  synchronously on every capture is the part that is not implemented.
+- `/connector/sessionProgress` **is not a Zotero endpoint** and no longer exists here. It appears
+  nowhere in the client's endpoint table or in the connector source at the pinned commits
+  (`fixtures/zotero-connector/server_connector.endpoints.txt`), the extension never calls it, and
+  the version of it Recueil shipped was public, unauthenticated and echoed saved item ids and
+  titles. Saves are synchronous: the item is committed before `saveItems` answers.
 - `/connector/updateSession`, `/connector/getTranslators`, `/connector/detect`,
-  `/connector/installStyle` and the Google Docs integration calls.
+  `/connector/installStyle` and the Google Docs integration calls. Each of them answers 404 — with
+  `X-Zotero-Version` on the response, which is load-bearing: the extension treats any status of 400
+  or more *without* that header as "Zotero is offline" and flips a global flag, so a bare 404 on one
+  unimplemented sub-call would disable browser capture entirely rather than failing locally. The
+  header is therefore attached by a hook on the root Fastify instance, not inside the connector
+  plugin, because a plugin's `onSend` never runs for the application's `notFoundHandler`.
 - Attachments named in a `saveItems` payload are recorded as part of the item but **not fetched**: a
   server that went and downloaded a publisher URL on its own behalf would be doing something the
   user did not ask for.

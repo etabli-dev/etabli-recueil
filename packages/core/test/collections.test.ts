@@ -243,3 +243,46 @@ describe('CollectionService — trash and restore (C3, P5)', () => {
     expect(rows).toHaveLength(1);
   });
 });
+
+/** m10: a moved collection kept its old `position` and collided with a sibling in the new parent. */
+describe('CollectionService.move and sibling order', () => {
+  it('renumbers a moved collection to the end of its new parent', () => {
+    const home = library.collections.create({ name: 'Home' }, library.actor);
+    const away = library.collections.create({ name: 'Away' }, library.actor);
+
+    // Three children under Away, at positions 0, 1 and 2.
+    for (const name of ['First', 'Second', 'Third']) {
+      library.collections.create({ name, parentId: away.id }, library.actor);
+    }
+
+    // Three under Home, so the traveller starts at position 2 — which Away's third child holds.
+    library.collections.create({ name: 'A', parentId: home.id }, library.actor);
+    library.collections.create({ name: 'B', parentId: home.id }, library.actor);
+    const traveller = library.collections.create({ name: 'Traveller', parentId: home.id }, library.actor);
+    expect(traveller.position).toBe(2);
+
+    const moved = library.collections.move(traveller.id, away.id, library.actor);
+
+    expect(moved.parentId).toBe(away.id);
+    expect(moved.position).toBe(3);
+
+    const siblings = library.db
+      .select({ id: schema.collections.id, position: schema.collections.position })
+      .from(schema.collections)
+      .where(eq(schema.collections.parentKey, away.id))
+      .all();
+    expect(siblings).toHaveLength(4);
+    // No two siblings share a position, which is the property the sidebar order depends on.
+    expect(new Set(siblings.map((row) => row.position)).size).toBe(4);
+    expect(library.collections.get(moved.id).position).toBe(3);
+  });
+
+  it('leaves the position alone when the parent does not change', () => {
+    const parent = library.collections.create({ name: 'Parent' }, library.actor);
+    library.collections.create({ name: 'One', parentId: parent.id }, library.actor);
+    const child = library.collections.create({ name: 'Two', parentId: parent.id }, library.actor);
+    expect(child.position).toBe(1);
+
+    expect(library.collections.move(child.id, parent.id, library.actor).position).toBe(1);
+  });
+});

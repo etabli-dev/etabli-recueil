@@ -1,0 +1,292 @@
+{
+  "count": 11,
+  "next": "http://paperless.invalid/api/documents/?page=2&page_size=8",
+  "previous": null,
+  "all": [
+    1001,
+    1002,
+    1003,
+    1004,
+    1005,
+    1006,
+    1007,
+    1009,
+    1010,
+    1011,
+    1012
+  ],
+  "results": [
+    {
+      "id": 1001,
+      "correspondent": 1,
+      "document_type": 1,
+      "storage_path": 1,
+      "title": "Stromrechnung März 2023",
+      "content": "Stadtwerke Ulm GmbH\nKarlstraße 1, 89073 Ulm\nRECHNUNG\nRechnungsnummer: 2023-004417\nKundennummer: 88-201934\nRechnungsdatum: 14.03.2023\nFällig am: 28.03.2023\nGesamtbetrag 471,50 €",
+      "tags": [
+        1,
+        5
+      ],
+      "created": "2023-03-14T00:00:00+01:00",
+      "created_date": "2023-03-14",
+      "modified": "2023-03-16T20:05:02.118902+01:00",
+      "added": "2023-03-16T20:04:11.612344+01:00",
+      "deleted_at": null,
+      "archive_serial_number": 42,
+      "original_file_name": "Rechnung_2023-004417.pdf",
+      "archived_file_name": "2023-03-14 Stadtwerke Ulm Rechnung.pdf",
+      "owner": 1,
+      "user_can_change": true,
+      "is_shared_by_requester": false,
+      "notes": [],
+      "custom_fields": [
+        {
+          "field": 1,
+          "value": "EUR471.50"
+        },
+        {
+          "field": 2,
+          "value": "2023-03-28"
+        },
+        {
+          "field": 3,
+          "value": "2023-004417"
+        },
+        {
+          "field": 5,
+          "value": "kNRq1sYb"
+        }
+      ],
+      "page_count": 1,
+      "mime_type": "application/pdf"
+    },
+    {
+      "id": 1002,
+      "correspondent": 3,
+      "document_type": 2,
+      "storage_path": 1,
+      "title": "Mietvertrag Lagerraum Nr. 14",
+      "content": "Mietvertrag über einen Lagerraum\nMietzins: 62,00 € monatlich",
+      "tags": [
+        2,
+        6
+      ],
+      "created": "2021-09-21T00:00:00+01:00",
+      "created_date": "2021-09-21",
+      "modified": "2021-09-24T09:12:00.000000+02:00",
+      "added": "2021-09-24T09:12:00.000000+02:00",
+      "deleted_at": null,
+      "archive_serial_number": 17,
+      "original_file_name": "Mietvertrag-Lagerraum-14.pdf",
+      "archived_file_name": "2021-09-21 Hausverwaltung Kessler GmbH Vertrag.pdf",
+      "owner": 1,
+      "user_can_change": true,
+      "is_shared_by_requester": false,
+      "notes": [],
+      "custom_fields": [
+        {
+          "field": 4,
+          "value": true
+        },
+        {
+          "field": 5,
+          "value": "kNRq1sYb"
+        }
+      ],
+      "page_count": 1,
+      "mime_type": "application/pdf"
+    },
+    {
+      "id": 1003,
+      "correspondent": 2,
+      "document_type": 4,
+      "storage_path": null,
+      "title": "Beleg Buchhandlung Jastram",
+      "content": "",
+      "tags": [
+        4
+      ],
+      "created": "2023-09-12T00:00:00+01:00",
+      "created_date": "2023-09-12",
+      "modified": "2023-09-13T07:41:29.004417+02:00",
+      "added": "2023-09-13T07:41:29.004417+02:00",
+      "deleted_at": null,
+      "archive_serial_number": null,
+      "original_file_name": "Beleg-2023-0912.png",
+      "archived_file_name": null,
+      "owner": 1,
+      "user_can_change": true,
+      "is_shared_by_requester": false,
+      "notes": [],
+      "custom_fields": [
+        {
+          "field": 1,
+          "value": "EUR51.90"
+        }
+      ],
+      "page_count": null,
+      "mime_type": "image/png"
+    },
+    {
+      "id": 1004,
+      "correspondent": 5,
+      "document_type": 5,
+      "storage_path": 1,
+      "title": "Protokoll der Sitzung vom 13. März 2023",
+      "content": "Arbeitskreis Gewässergüte — Protokoll\nSitzung vom 13. März 2023\nTOP 3 Beschaffung",
+      "tags": [
+        6
+      ],
+      "created": "2023-03-13T00:00:00+01:00",
+      "created_date": "2023-03-13",
+      "modified": "2023-06-19T11:00:03.229100+02:00",
+      "added": "2023-03-15T18:02:44.881000+01:00",
+      "deleted_at": null,
+      "archive_serial_number": 8,
+      "original_file_name": "Protokoll 2023-03-13.pdf",
+      "archived_file_name": "2023-03-13 Universität Ulm Protokoll.pdf",
+      "owner": 1,
+      "user_can_change": true,
+      "is_shared_by_requester": false,
+      "notes": [
+        {
+          "id": 3,
+          "note": "Beschluss zu TOP 3 wurde in der Sitzung vom 19.06. aufgehoben.",
+          "created": "2023-06-19T11:00:03.229100+02:00",
+          "user": 1
+        }
+      ],
+      "custom_fields": [],
+      "page_count": 2,
+      "mime_type": "application/pdf"
+    },
+    {
+      "id": 1005,
+      "correspondent": 4,
+      "document_type": 3,
+      "storage_path": 2,
+      "title": "Einkommensteuerbescheid 2021",
+      "content": "Finanzamt Ulm\nBescheid für 2021 über Einkommensteuer\nErstattung 1.240,00 EUR",
+      "tags": [
+        3,
+        6,
+        8
+      ],
+      "created": "2022-11-08T00:00:00+01:00",
+      "created_date": "2022-11-08",
+      "modified": "2022-11-14T19:33:07.400000+01:00",
+      "added": "2022-11-14T19:33:07.400000+01:00",
+      "deleted_at": null,
+      "archive_serial_number": 101,
+      "original_file_name": "ESt-Bescheid-2021.pdf",
+      "archived_file_name": "2022-11-08 Finanzamt Ulm Bescheid.pdf",
+      "owner": 1,
+      "user_can_change": true,
+      "is_shared_by_requester": false,
+      "notes": [],
+      "custom_fields": [
+        {
+          "field": 1,
+          "value": "EUR-1240.00"
+        },
+        {
+          "field": 3,
+          "value": "88/201/93456"
+        },
+        {
+          "field": 6,
+          "value": [
+            1002
+          ]
+        }
+      ],
+      "page_count": 3,
+      "mime_type": "application/pdf"
+    },
+    {
+      "id": 1006,
+      "correspondent": null,
+      "document_type": null,
+      "storage_path": null,
+      "title": "Unbekanntes Dokument",
+      "content": "",
+      "tags": [
+        4,
+        5
+      ],
+      "created": "2024-01-19T00:00:00+01:00",
+      "created_date": "2024-01-19",
+      "modified": "2024-01-19T23:58:12.000000+01:00",
+      "added": "2024-01-19T23:58:12.000000+01:00",
+      "deleted_at": null,
+      "archive_serial_number": null,
+      "original_file_name": "scan_0041.pdf",
+      "archived_file_name": null,
+      "owner": 1,
+      "user_can_change": true,
+      "is_shared_by_requester": false,
+      "notes": [],
+      "custom_fields": [],
+      "page_count": 1,
+      "mime_type": "application/pdf"
+    },
+    {
+      "id": 1007,
+      "correspondent": 1,
+      "document_type": null,
+      "storage_path": 1,
+      "title": "Kontoauszug 04/2023",
+      "content": "Kontoauszug 04/2023",
+      "tags": [
+        5
+      ],
+      "created": "2023-05-02T00:00:00+01:00",
+      "created_date": "2023-05-02",
+      "modified": "2023-05-04T08:15:00.000000+02:00",
+      "added": "2023-05-04T08:15:00.000000+02:00",
+      "deleted_at": null,
+      "archive_serial_number": 55,
+      "original_file_name": "Kontoauszug-2023-04.pdf",
+      "archived_file_name": "2023-05-02 Stadtwerke Ulm.pdf",
+      "owner": 1,
+      "user_can_change": true,
+      "is_shared_by_requester": false,
+      "notes": [],
+      "custom_fields": [],
+      "page_count": 2,
+      "mime_type": "application/pdf"
+    },
+    {
+      "id": 1009,
+      "correspondent": 1,
+      "document_type": 1,
+      "storage_path": 1,
+      "title": "Stromrechnung März 2023 (Zweitscan)",
+      "content": "Stadtwerke Ulm GmbH\nRechnungsnummer: 2023-004417\nGesamtbetrag 471,50 €",
+      "tags": [
+        1,
+        5
+      ],
+      "created": "2023-03-14T00:00:00+01:00",
+      "created_date": "2023-03-14",
+      "modified": "2023-04-02T13:22:47.000000+02:00",
+      "added": "2023-04-02T13:22:47.000000+02:00",
+      "deleted_at": null,
+      "archive_serial_number": 43,
+      "original_file_name": "Rechnung_2023-004417_scan2.pdf",
+      "archived_file_name": "2023-03-14 Stadtwerke Ulm Rechnung_01.pdf",
+      "owner": 1,
+      "user_can_change": true,
+      "is_shared_by_requester": false,
+      "notes": [],
+      "custom_fields": [
+        {
+          "field": 1,
+          "value": "EUR471.50"
+        }
+      ],
+      "page_count": 1,
+      "mime_type": "application/pdf"
+    }
+  ]
+}

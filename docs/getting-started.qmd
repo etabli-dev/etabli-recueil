@@ -26,7 +26,7 @@ the Zotero migrator.
 | `recueil backup` / `recueil restore` | The desktop shell, the mobile app, the MCP server |
 | `.bib` feeds for Overleaf and Quarto | translation-server integration for URL/DOI/PMID/ISBN import |
 | Web client: three-pane library, item pane, PDF reader | Annotation, saved-search UI, everything from Phase 2 on |
-| The Zotero connector endpoints answer | Any check against the real Zotero Connector extension |
+| The Zotero connector endpoints answer, and are tested against verbatim upstream connector code | A capture run end to end in a browser with the extension installed |
 
 ## Build it
 

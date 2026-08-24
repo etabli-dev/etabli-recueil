@@ -10,9 +10,10 @@
 import { createHash } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { mkdir, readdir, rename, rm, stat } from 'node:fs/promises';
-import { dirname, join, sep } from 'node:path';
+import { dirname, join, resolve, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 
+import { BackupFormatError } from './errors.js';
 import { SHA256_PATTERN } from './format.js';
 
 /** `LocalFsBackend`'s scratch directory for partial writes. Not blobs, and never backed up. */
@@ -66,6 +67,27 @@ export const copyFileHashing = async (from: string, to: string): Promise<HashedF
   }
 
   return { sha256: hash.digest('hex'), size };
+};
+
+/**
+ * Join a snapshot-relative path onto a root and prove the result is inside it.
+ *
+ * The belt to `assertSnapshotRelativePath`'s braces. The syntactic check runs at the parse and
+ * catches everything a manifest can say; this one runs at the I/O and catches what the filesystem
+ * can do that the syntax cannot express — a symlinked directory inside the snapshot, a root that is
+ * itself a relative path, a platform that treats a character as a separator when we did not.
+ */
+export const resolveWithin = (root: string, relative: string): string => {
+  const base = resolve(root);
+  const target = resolve(base, relative);
+  if (target !== base && !target.startsWith(base.endsWith(sep) ? base : `${base}${sep}`)) {
+    throw new BackupFormatError(
+      `'${relative}' resolves to '${target}', which is outside '${base}'. A snapshot never ` +
+        'addresses anything beyond its own root, on either side of a restore.',
+      { root: base, relative, resolved: target },
+    );
+  }
+  return target;
 };
 
 /** True when the path does not exist, or is a directory containing nothing. */

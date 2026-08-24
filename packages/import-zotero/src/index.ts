@@ -68,6 +68,15 @@ export type {
 export { ZipError, crc32, readZipDirectory, readZipEntry } from './zip.js';
 export type { ZipEntry } from './zip.js';
 
+/* Rediscovering the correspondence from the two databases ------------------------------------------ */
+export {
+  findItemByZoteroKey,
+  importedDocumentIds,
+  importedItemIds,
+  reconcileAttachments,
+} from './reconcile.js';
+export type { AttachmentCorrespondence } from './reconcile.js';
+
 /* The mapping ------------------------------------------------------------------------------------- */
 export {
   CSL_TYPE_BY_ZOTERO_TYPE,
@@ -109,6 +118,7 @@ export type {
   ReportSource,
   ReviewEntry,
   SkippedRecord,
+  SourceLibrarySummary,
   TagReconciliation,
   TrashReconciliation,
   ZoteroImportReport,

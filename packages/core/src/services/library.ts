@@ -145,6 +145,9 @@ export type CountItemsOptions = Omit<ListItemsOptions, 'limit' | 'cursor' | 'ord
  * have to be materialised. Five hundred is the same ceiling `SearchService` puts on a page, and a
  * caller who wants the long tail of a broad query wants `SearchService.search` and its cursor, not
  * a library list view.
+ *
+ * When the ceiling is reached the page says so — `page.textFilterTruncated` — because a caller has
+ * no other way to tell "these are all the matches" from "these are the best five hundred".
  */
 export const TEXT_FILTER_CANDIDATES = 500;
 
@@ -294,10 +297,11 @@ export class LibraryService {
     const limit = resolveLimit(options.limit);
     const order = options.order ?? 'desc';
 
-    const conditions = this.filterConditions(options);
-    if (conditions === null) {
+    const filter = this.filterConditions(options);
+    if (filter === null) {
       return { data: [], page: { nextCursor: null, hasMore: false, limit } };
     }
+    const { conditions, textFilterTruncated } = filter;
 
     if (options.cursor !== undefined) {
       const { k, i } = decodeCursor(options.cursor);
@@ -328,20 +332,21 @@ export class LibraryService {
           hasMore && last !== undefined ? encodeCursor({ k: last.dateModified, i: last.id }) : null,
         hasMore,
         limit,
+        ...(textFilterTruncated ? { textFilterTruncated: true } : {}),
       },
     };
   }
 
   /** How many items match. Cheap enough to expose as `page.total`. */
   countItems(options: CountItemsOptions = {}): number {
-    const conditions = this.filterConditions(options);
-    if (conditions === null) return 0;
+    const filter = this.filterConditions(options);
+    if (filter === null) return 0;
 
     return (
       this.db
         .select({ value: count() })
         .from(items)
-        .where(and(...conditions))
+        .where(and(...filter.conditions))
         .get()?.value ?? 0
     );
   }
@@ -422,6 +427,7 @@ export class LibraryService {
       const currentOffice = tx.select().from(itemOffice).where(eq(itemOffice.itemId, id)).get() ?? null;
 
       const applied: string[] = [];
+      const changed: string[] = [];
       const skipped: SkippedField[] = [];
 
       /* Facets first, because the item title mirrors the bibliographic one (I3). */
@@ -430,6 +436,7 @@ export class LibraryService {
         const outcome = this.applyBibliographic(tx, id, patch.bibliographic, actor, stamp, now);
         bibliographicRow = outcome.row;
         applied.push(...outcome.applied.map((path) => `bibliographic.${path}`));
+        changed.push(...outcome.changed.map((path) => `bibliographic.${path}`));
         skipped.push(...outcome.skipped);
       }
 
@@ -449,6 +456,7 @@ export class LibraryService {
         );
         officeRow = outcome.row;
         applied.push(...outcome.applied.map((path) => `office.${path}`));
+        changed.push(...outcome.changed.map((path) => `office.${path}`));
         skipped.push(...outcome.skipped);
       }
 
@@ -459,56 +467,74 @@ export class LibraryService {
             ? patch.title
             : current.title;
 
-      const nextItem: ItemRow = {
-        ...current,
+      const columns = {
         itemType: patch.itemType ?? current.itemType,
         title: nextTitle ?? null,
         extra: patch.extra !== undefined ? patch.extra : current.extra,
         sourceSystem: patch.sourceSystem !== undefined ? patch.sourceSystem : current.sourceSystem,
         sourceId: patch.sourceId !== undefined ? patch.sourceId : current.sourceId,
-        version: current.version + 1,
-        dateModified: now,
       };
+      const delta = diffFields(current as unknown as Record<string, unknown>, columns);
 
-      tx.update(items)
-        .set({
-          itemType: nextItem.itemType,
-          title: nextItem.title,
-          extra: nextItem.extra,
-          sourceSystem: nextItem.sourceSystem,
-          sourceId: nextItem.sourceId,
-          version: nextItem.version,
-          dateModified: nextItem.dateModified,
-        })
-        .where(eq(items.id, id))
-        .run();
+      /*
+       * A write that changed nothing does not bump the version.
+       *
+       * `items.version` is the REST `ETag` and the token every conditional write is checked
+       * against (§1.7, P1). Bumping it for a write that set every field to the value it already
+       * held invalidates every client's token for nothing — and a re-run of the Zotero importer
+       * does exactly that, re-issuing `writeBibliographic` for every item it has already seen.
+       * Idempotence (P9) is not only "does not create a second row"; it is also "does not look
+       * like an edit to anybody watching".
+       *
+       * The row is still returned, the provenance stamps are still applied — a resolver confirming
+       * a value it agrees with is a fact worth recording — and a refusal by the locks still writes
+       * its audit row, because P4-4 says the caller is told what was refused.
+       */
+      // `diffFields` reports "nothing differs" as `null`, not `undefined`.
+      const untouched = changed.length === 0 && delta.before === null;
 
-      const delta = diffFields(current as unknown as Record<string, unknown>, {
-        itemType: nextItem.itemType,
-        title: nextItem.title,
-        extra: nextItem.extra,
-        sourceSystem: nextItem.sourceSystem,
-        sourceId: nextItem.sourceId,
-      });
+      const nextItem: ItemRow = untouched
+        ? current
+        : { ...current, ...columns, version: current.version + 1, dateModified: now };
 
-      this.audit.record(
-        {
-          actor,
-          action: 'item.updated',
-          entityType: 'item',
-          entityId: id,
-          before: { ...(delta.before ?? {}), version: current.version },
-          after: {
-            ...(delta.after ?? {}),
+      if (!untouched) {
+        tx.update(items)
+          .set({
+            itemType: nextItem.itemType,
+            title: nextItem.title,
+            extra: nextItem.extra,
+            sourceSystem: nextItem.sourceSystem,
+            sourceId: nextItem.sourceId,
             version: nextItem.version,
-            ...(applied.length > 0 ? { applied, provenanceSource: stamp.source } : {}),
-            ...(skipped.length > 0 ? { skippedLockedFields: skipped } : {}),
-          },
-        },
-        tx,
-      );
+            dateModified: nextItem.dateModified,
+          })
+          .where(eq(items.id, id))
+          .run();
+      }
 
-      this.search?.indexItem(id, tx);
+      if (!untouched || skipped.length > 0) {
+        this.audit.record(
+          {
+            actor,
+            action: 'item.updated',
+            entityType: 'item',
+            entityId: id,
+            before: { ...(delta.before ?? {}), version: current.version },
+            after: {
+              ...(delta.after ?? {}),
+              version: nextItem.version,
+              ...(applied.length > 0 ? { applied, provenanceSource: stamp.source } : {}),
+              ...(skipped.length > 0 ? { skippedLockedFields: skipped } : {}),
+            },
+            ...(untouched
+              ? { reason: 'no field changed; the version and date_modified are unchanged' }
+              : {}),
+          },
+          tx,
+        );
+      }
+
+      if (!untouched) this.search?.indexItem(id, tx);
 
       return {
         record: { item: nextItem, bibliographic: bibliographicRow, office: officeRow },
@@ -871,8 +897,11 @@ export class LibraryService {
    * Returns `null` — meaning "no row can match" — when a text filter matched nothing at all, so
    * that the caller short-circuits instead of building `id IN ()`, which SQLite will not parse.
    */
-  private filterConditions(options: ListItemsOptions): ReturnType<typeof and>[] | null {
+  private filterConditions(
+    options: ListItemsOptions,
+  ): { conditions: ReturnType<typeof and>[]; textFilterTruncated: boolean } | null {
     const conditions: ReturnType<typeof and>[] = [sql`${items.libraryState} <> 'merged'`];
+    let textFilterTruncated = false;
     if (options.includeTrashed !== true) conditions.push(isNull(items.trashedAt));
     if (options.itemType !== undefined) conditions.push(eq(items.itemType, options.itemType));
     if (options.ownerUserId !== undefined) conditions.push(eq(items.ownerUserId, options.ownerUserId));
@@ -904,10 +933,13 @@ export class LibraryService {
     if (options.text !== undefined && options.text.trim() !== '') {
       const matched = this.textFilterIds(options.text);
       if (matched.length === 0) return null;
+      // Materialising exactly the ceiling means there were probably more; a caller told only
+      // `hasMore: false` would read "these are all of them" off a truncated candidate set.
+      textFilterTruncated = matched.length >= TEXT_FILTER_CANDIDATES;
       conditions.push(inArray(items.id, matched));
     }
 
-    return conditions;
+    return { conditions, textFilterTruncated };
   }
 
   /**
@@ -947,7 +979,7 @@ export class LibraryService {
     actor: Actor,
     stamp: ProvenanceStamp,
     now: string,
-  ): { row: ItemBibliographicRow; applied: string[]; skipped: SkippedField[] } {
+  ): { row: ItemBibliographicRow; applied: string[]; changed: string[]; skipped: SkippedField[] } {
     const values = normaliseBibliographic(input);
     const current =
       tx.select().from(itemBibliographic).where(eq(itemBibliographic.itemId, itemId)).get() ?? null;
@@ -996,7 +1028,7 @@ export class LibraryService {
       .from(itemBibliographic)
       .where(eq(itemBibliographic.itemId, itemId))
       .get() as ItemBibliographicRow;
-    return { row, applied: allowed, skipped };
+    return { row, applied: allowed, changed: changedKeys(allowed, previous, writable, current === null), skipped };
   }
 
   /** The same gate for the office facet (§3.7). */
@@ -1007,7 +1039,7 @@ export class LibraryService {
     actor: Actor,
     stamp: ProvenanceStamp,
     now: string,
-  ): { row: ItemOfficeRow; applied: string[]; skipped: SkippedField[] } {
+  ): { row: ItemOfficeRow; applied: string[]; changed: string[]; skipped: SkippedField[] } {
     if (input.correspondent.trim() === '') {
       throw new ValidationError('The office facet requires a correspondent (§3.7).');
     }
@@ -1072,7 +1104,7 @@ export class LibraryService {
     }
 
     const row = tx.select().from(itemOffice).where(eq(itemOffice.itemId, itemId)).get() as ItemOfficeRow;
-    return { row, applied: allowed, skipped };
+    return { row, applied: allowed, changed: changedKeys(allowed, previous, writable, current === null), skipped };
   }
 
   /** A public key that is not taken. Eight Crockford characters collide about never, but check. */
@@ -1085,6 +1117,22 @@ export class LibraryService {
     throw new ConflictError('Could not mint an unused public id in eight attempts.');
   }
 }
+
+/**
+ * Which of the fields the provenance gate allowed actually hold a different value now.
+ *
+ * "Allowed" and "changed" are not the same set, and treating them as one is what made a re-run of
+ * an importer bump `items.version` on every row it touched. That column is the REST `ETag`, so a
+ * no-op write invalidated every client's conditional-write token for no reason (P1, §1.7).
+ *
+ * A facet row that did not exist counts as wholly changed: everything written to it is new.
+ */
+const changedKeys = (
+  allowed: readonly string[],
+  previous: Record<string, unknown>,
+  writable: Record<string, unknown>,
+  isNew: boolean,
+): string[] => (isNew ? [...allowed] : allowed.filter((key) => !Object.is(previous[key], writable[key])));
 
 /** The transaction handle Drizzle hands a `db.transaction` callback. */
 type RecueilTransaction = Parameters<Parameters<RecueilDatabase['transaction']>[0]>[0];

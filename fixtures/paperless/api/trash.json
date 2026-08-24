@@ -1,0 +1,17 @@
+{
+  "count": 1,
+  "next": null,
+  "previous": null,
+  "all": [
+    1008
+  ],
+  "results": [
+    {
+      "id": 1008,
+      "title": "Doppelte Stromrechnung März 2023 (gelöscht)",
+      "created": "2023-03-14T00:00:00+01:00",
+      "deleted_at": "2023-05-02T10:04:00.000000+02:00",
+      "remaining_days": 21
+    }
+  ]
+}

@@ -1,0 +1,84 @@
+{
+  "count": 6,
+  "next": null,
+  "previous": null,
+  "all": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6
+  ],
+  "results": [
+    {
+      "id": 1,
+      "name": "Betrag",
+      "data_type": "monetary",
+      "extra_data": {
+        "default_currency": "EUR",
+        "select_options": null
+      },
+      "document_count": 4
+    },
+    {
+      "id": 2,
+      "name": "Fälligkeit",
+      "data_type": "date",
+      "extra_data": {
+        "default_currency": null,
+        "select_options": null
+      },
+      "document_count": 1
+    },
+    {
+      "id": 3,
+      "name": "Aktenzeichen",
+      "data_type": "string",
+      "extra_data": {
+        "default_currency": null,
+        "select_options": null
+      },
+      "document_count": 2
+    },
+    {
+      "id": 4,
+      "name": "Geprüft",
+      "data_type": "boolean",
+      "extra_data": {
+        "default_currency": null,
+        "select_options": null
+      },
+      "document_count": 1
+    },
+    {
+      "id": 5,
+      "name": "Kategorie",
+      "data_type": "select",
+      "extra_data": {
+        "default_currency": null,
+        "select_options": [
+          {
+            "id": "kNRq1sYb",
+            "label": "privat"
+          },
+          {
+            "id": "Zt7pW0ce",
+            "label": "dienstlich"
+          }
+        ]
+      },
+      "document_count": 2
+    },
+    {
+      "id": 6,
+      "name": "Gehört zu",
+      "data_type": "documentlink",
+      "extra_data": {
+        "default_currency": null,
+        "select_options": null
+      },
+      "document_count": 1
+    }
+  ]
+}

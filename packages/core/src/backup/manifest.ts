@@ -1,7 +1,12 @@
 /**
  * The manifest: what is in a snapshot, and what each file has to hash to.
  *
- * Two rules shape it.
+ * Three rules shape it.
+ *
+ * **Its paths are checked before they are used.** A manifest is data off removable media, and its
+ * `path` fields are joined onto the snapshot root to read and onto the restore target to write. An
+ * entry that escapes either root is rejected at the parse (`assertSnapshotRelativePath`), so no
+ * consumer has to remember to check.
  *
  * **It is the only index.** Nothing in a snapshot is discovered by walking the directory — a
  * restore reads the manifest and asks for exactly the files it names. A blob that is on disk but
@@ -15,7 +20,7 @@
  * that is what makes the layout restic-friendly: the deduplicating backup program sees a tree in
  * which almost nothing changed.
  */
-import { BACKUP_FORMAT, BACKUP_FORMAT_VERSION } from './format.js';
+import { assertSnapshotRelativePath, BACKUP_FORMAT, BACKUP_FORMAT_VERSION } from './format.js';
 import { BackupFormatError } from './errors.js';
 
 /** A file in the snapshot, addressed by its snapshot-relative path. */
@@ -116,7 +121,11 @@ const asNumber = (value: unknown, what: string): number => {
 const asFileEntry = (value: unknown, what: string): BackupFileEntry => {
   const record = asRecord(value, what);
   return {
-    path: asString(record['path'], `${what}.path`),
+    // Checked here, at the parse, rather than at each use: this is the earliest point at which the
+    // string exists, and it is the only point that every consumer — `verifyBackup`, `restoreBackup`
+    // and anything a later phase adds — is guaranteed to pass through. A path that escapes the
+    // snapshot root never becomes a `BackupFileEntry` at all.
+    path: assertSnapshotRelativePath(asString(record['path'], `${what}.path`), `${what}.path`),
     sha256: asString(record['sha256'], `${what}.sha256`),
     size: asNumber(record['size'], `${what}.size`),
   };

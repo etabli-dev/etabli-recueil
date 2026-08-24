@@ -7,7 +7,7 @@
  * cross-entity view: what is in the bin, restoring by dispatch, and purge.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNotNull, isNull } from 'drizzle-orm';
 
 import {
   ConflictError,
@@ -332,5 +332,123 @@ describe('documents and attachments in the bin (AT2, D4, TR3)', () => {
     library.trash.restore('document', documentId, library.actor);
     expect(library.documents.getDocument(documentId).trashedAt).toBeNull();
     expect(library.trash.find('document', documentId)).toBeUndefined();
+  });
+
+  /*
+   * M3. D4 was enforced in one direction only: `trashDocument` refused while a live attachment
+   * existed, and nothing refused a live attachment being created over a document already in the
+   * bin. The forbidden state is the same state whichever end arrives second, so each of the three
+   * ways of reaching it gets a case.
+   */
+  it('refuses to attach a trashed document to an item (D4, the other direction)', async () => {
+    const { attachmentId } = await furnishedItem();
+    const documentId = library.db
+      .select()
+      .from(schema.attachments)
+      .where(eq(schema.attachments.id, attachmentId))
+      .get()?.documentId as string;
+
+    library.documents.detachDocument(attachmentId, library.actor);
+    library.documents.trashDocument(documentId, library.actor);
+
+    const other = library.library.createItem({ itemType: 'article' }, library.actor).item;
+    expect(() =>
+      library.documents.attachDocument({ itemId: other.id, documentId }, library.actor),
+    ).toThrow(InvariantError);
+    expect(() =>
+      library.documents.attachDocument({ itemId: other.id, documentId }, library.actor),
+    ).toThrow(/D4/u);
+
+    // Nothing was written on the way to the refusal.
+    expect(
+      library.db
+        .select()
+        .from(schema.attachments)
+        .where(and(eq(schema.attachments.itemId, other.id), isNull(schema.attachments.trashedAt)))
+        .all(),
+    ).toEqual([]);
+
+    // And it is allowed again once the document is out of the bin.
+    library.trash.restore('document', documentId, library.actor);
+    expect(library.documents.attachDocument({ itemId: other.id, documentId }, library.actor)).toBeTypeOf(
+      'string',
+    );
+  });
+
+  it('refuses a re-ingest of bytes whose document is in the trash (D4)', async () => {
+    const bytes = Buffer.from('%PDF-1.7\nre-ingested\n');
+    const first = await library.documents.ingestBuffer(bytes, { sourceKind: 'upload' });
+    library.documents.trashDocument(first.document.id, library.actor);
+
+    const item = library.library.createItem({ itemType: 'article' }, library.actor).item;
+    await expect(
+      library.documents.ingestBuffer(bytes, { sourceKind: 'upload', attachTo: { itemId: item.id } }),
+    ).rejects.toThrow(/D4/u);
+
+    expect(library.documents.getDocument(first.document.id).trashedAt).not.toBeNull();
+    expect(
+      library.db
+        .select()
+        .from(schema.attachments)
+        .where(eq(schema.attachments.itemId, item.id))
+        .all(),
+    ).toEqual([]);
+  });
+
+  it('refuses to restore an attachment whose document was trashed meanwhile (D4)', async () => {
+    const { attachmentId } = await furnishedItem();
+    const documentId = library.db
+      .select()
+      .from(schema.attachments)
+      .where(eq(schema.attachments.id, attachmentId))
+      .get()?.documentId as string;
+
+    // Legitimate at every step: the attachment goes first, so nothing live points at the document
+    // when it follows. Restoring the attachment on its own is what would break D4.
+    library.documents.detachDocument(attachmentId, library.actor);
+    library.documents.trashDocument(documentId, library.actor);
+
+    expect(() => library.documents.restoreAttachment(attachmentId, library.actor)).toThrow(
+      InvariantError,
+    );
+    expect(() => library.documents.restoreAttachment(attachmentId, library.actor)).toThrow(/D4/u);
+
+    library.trash.restore('document', documentId, library.actor);
+    library.documents.restoreAttachment(attachmentId, library.actor);
+    expect(
+      library.db
+        .select()
+        .from(schema.attachments)
+        .where(eq(schema.attachments.id, attachmentId))
+        .get()?.trashedAt,
+    ).toBeNull();
+  });
+
+  it('holds the invariant as a query: no live attachment points at a trashed document', async () => {
+    const { attachmentId } = await furnishedItem();
+    const documentId = library.db
+      .select()
+      .from(schema.attachments)
+      .where(eq(schema.attachments.id, attachmentId))
+      .get()?.documentId as string;
+
+    library.documents.detachDocument(attachmentId, library.actor);
+    library.documents.trashDocument(documentId, library.actor);
+    const item = library.library.createItem({ itemType: 'article' }, library.actor).item;
+    for (const attempt of [
+      () => library.documents.attachDocument({ itemId: item.id, documentId }, library.actor),
+      () => library.documents.restoreAttachment(attachmentId, library.actor),
+    ]) {
+      expect(attempt).toThrow(InvariantError);
+    }
+
+    // The state the invariant forbids, asked of the database rather than of the code that guards it.
+    const violations = library.db
+      .select({ id: schema.attachments.id })
+      .from(schema.attachments)
+      .innerJoin(schema.documents, eq(schema.documents.id, schema.attachments.documentId))
+      .where(and(isNull(schema.attachments.trashedAt), isNotNull(schema.documents.trashedAt)))
+      .all();
+    expect(violations).toEqual([]);
   });
 });

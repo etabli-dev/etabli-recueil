@@ -49,7 +49,8 @@ export class DryRunStorage implements StorageBackend {
     const created = !this.#seen.has(sha256);
     this.#seen.set(sha256, size);
 
-    return { sha256, size, key: storageKeyFor(sha256), created };
+    // Nothing is on disk to have rotted, so a dry run never repairs.
+    return { sha256, size, key: storageKeyFor(sha256), created, repaired: false };
   }
 
   get(sha256: string): Promise<Readable> {

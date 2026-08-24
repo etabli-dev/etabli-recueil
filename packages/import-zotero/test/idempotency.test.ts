@@ -233,6 +233,35 @@ describe('running the same import twice', () => {
     expect(second.report.pass).toBe(true);
   }, 180_000);
 
+  /**
+   * m5. A second import re-issued `writeBibliographic` for every non-trashed item and bumped
+   * `items.version` on 64 of 68 rows with nothing changed behind it. That column is the REST
+   * `ETag`, so every re-run invalidated every client's conditional-write token.
+   */
+  it('leaves items.version and date_modified alone when nothing changed', async () => {
+    await importZoteroLibrary(library, fixtureImportOptions());
+    const versions = () =>
+      new Map(
+        library.db
+          .select({
+            id: schema.items.id,
+            version: schema.items.version,
+            dateModified: schema.items.dateModified,
+          })
+          .from(schema.items)
+          .all()
+          .map((row) => [row.id, `${row.version}@${row.dateModified}`]),
+      );
+    const before = versions();
+    expect(before.size).toBeGreaterThan(50);
+
+    await importZoteroLibrary(library, fixtureImportOptions());
+
+    const after = versions();
+    const bumped = [...after].filter(([id, value]) => before.get(id) !== value);
+    expect(bumped).toEqual([]);
+  }, 180_000);
+
   it('reuses the one job row, so the run is the same run (IK1)', async () => {
     const first = await importZoteroLibrary(library, fixtureImportOptions());
     const second = await importZoteroLibrary(library, fixtureImportOptions());

@@ -1,0 +1,79 @@
+# Recueil ingestion rules — hostile regular expressions.
+#
+# Seven patterns that a rule engine must not simply hand to its regex implementation and hope.
+# hostile-regex.input.txt is the input that detonates them. Evaluating this whole file against that
+# input must finish inside the budget stated in cases.json; the engine may get there by refusing
+# these patterns at load or by bounding their execution, and the corpus does not care which.
+#
+# Nothing in this file describes a document anyone would want to file. The actions are placeholders.
+
+version: 1
+name: hostile-regex
+
+rules:
+  # (a+)+ against a long run of "a" that fails at the end: the classic exponential backtrack.
+  - id: catastrophic-nested-quantifier
+    priority: 10
+    match:
+      all:
+        - text: { regex: '^(a+)+$' }
+    actions:
+      - add_tag: Niemals
+
+  # The same shape wearing a suit. This one turns up in real "validate a line" rules.
+  - id: catastrophic-word-loop
+    priority: 10
+    match:
+      all:
+        - text: { regex: '^(\w+\s?)*$' }
+    actions:
+      - add_tag: Niemals
+
+  # Overlapping alternatives inside a quantifier.
+  - id: catastrophic-overlap
+    priority: 10
+    match:
+      all:
+        - text: { regex: '(x+x+)+y' }
+    actions:
+      - add_tag: Niemals
+
+  # Not a regular expression at all. This must be refused when the file is loaded, naming the rule
+  # and the position — never at match time, on the twelve-thousandth document.
+  - id: invalid-syntax
+    priority: 10
+    match:
+      all:
+        - text: { regex: '^(unclosed' }
+    actions:
+      - add_tag: Niemals
+
+  # A backreference. Valid in JavaScript, absent from RE2. An engine backed by RE2 must say it
+  # cannot compile this, rather than compile something that never matches.
+  - id: backreference
+    priority: 10
+    match:
+      all:
+        - text: { regex: '(\w+)\s+\1' }
+    actions:
+      - add_tag: Doppelwort
+
+  # A PCRE/Python inline flag. `new RegExp('(?i)rechnung')` throws in JavaScript. Treating the
+  # failure as "no match" makes the rule quietly dead.
+  - id: pcre-inline-flag
+    priority: 10
+    match:
+      all:
+        - text: { regex: '(?i)rechnung' }
+    actions:
+      - add_tag: Rechnung
+
+  # A Unicode property escape. Without the u flag JavaScript reads \p as a literal "p", so this
+  # matches the text "p{Script=Greek}" and nothing else — a wrong answer, not an error.
+  - id: unicode-property-escape
+    priority: 10
+    match:
+      all:
+        - text: { regex: '\p{Script=Greek}{4,}', flags: u }
+    actions:
+      - add_tag: Griechisch

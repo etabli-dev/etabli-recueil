@@ -6,6 +6,9 @@
  * the non-empty case on the same fresh database: a constant `items: 0` would pass the first test
  * and fail the second, which is the whole point of writing them as a pair.
  */
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import { ServerHealthResponseSchema } from '../src/health.js';
@@ -67,6 +70,32 @@ describe('GET /health on a fresh library', () => {
       expect(health.storage.ok).toBe(true);
       expect(health.storage.backend).toBe('local');
       expect(health.storage.path).toBe(h.config.storagePath);
+      // m1: partial writes in the store's `.tmp` are invisible to everything else, so the probe
+      // reports them. Zero on a store nothing has interrupted — but the field must be there.
+      expect(health.storage.strayTempFiles).toBe(0);
+      expect(health.storage.strayTempBytes).toBe(0);
+    } finally {
+      await h.close();
+    }
+  });
+
+  it('counts the partial writes an interrupted upload left in the store', async () => {
+    const h = await harness();
+    try {
+      // What a killed process leaves behind: a `.part` file in `<store>/.tmp`. Nothing else in the
+      // system ever mentions it — `listStoredBlobs` skips it, a backup ignores it, a restore does
+      // not know it exists — so if the probe does not say so, nobody finds out until the disk is
+      // full.
+      const temporary = join(h.config.storagePath, '.tmp');
+      mkdirSync(temporary, { recursive: true });
+      writeFileSync(join(temporary, '01JHALFWRITTENHALFWRITTEN.part'), Buffer.alloc(4096));
+
+      const health = ServerHealthResponseSchema.parse((await getHealth(h)).body);
+      expect(health.storage.strayTempFiles).toBe(1);
+      expect(health.storage.strayTempBytes).toBe(4096);
+      // Not itself a fault: a `.part` file may belong to an upload still in flight.
+      expect(health.storage.ok).toBe(true);
+      expect(health.status).toBe('ok');
     } finally {
       await h.close();
     }

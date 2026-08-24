@@ -26,6 +26,7 @@ import type {
   Attachment,
   Collection,
   CustomField,
+  Document,
   FieldPath,
   FieldValue,
   FieldValueContent,
@@ -45,6 +46,28 @@ import {
   problemFromStatus,
   problemFromTransportFailure,
 } from './problem.js';
+import type {
+  IngestUploadFields,
+  IngestUploadResult,
+  IngestionJob,
+  IngestionJobDetail,
+  IngestionSource,
+  IngestionSourceCreate,
+  IngestionSourceUpdate,
+  ReviewAcceptRequest,
+  ReviewAcceptResult,
+  ReviewEntry,
+  ReviewListQuery,
+  ReviewRejectRequest,
+  Rule,
+  RuleCreate,
+  RuleDryRunRequest,
+  RuleDryRunResponse,
+  RuleUpdate,
+  SourceRunAccepted,
+  SourceRunRequest,
+  TestConnectionResult,
+} from './ingestion.js';
 
 /**
  * Where the versioned resources live.
@@ -288,6 +311,17 @@ export class RecueilClient {
    * `linked_url` attachment has no document and therefore no content URL, which is why this takes
    * the id rather than the attachment and the reader checks before calling it.
    */
+  /**
+   * One document row.
+   *
+   * The review workspace needs it: a review entry carries `subjectType` and `subjectId` and no
+   * expanded subject, so the media type, the size, the digest and whether there is a text layer are
+   * read from here — which is the record for all four.
+   */
+  getDocument(id: string, signal?: AbortSignal): Promise<Document> {
+    return this.api<Document>(`/documents/${encodeURIComponent(id)}`, { signal });
+  }
+
   documentContentUrl(documentId: string): string {
     return this.url(`/documents/${encodeURIComponent(documentId)}/content`);
   }
@@ -328,6 +362,201 @@ export class RecueilClient {
       `/items/${encodeURIComponent(itemId)}/field-values/${encodeURIComponent(fieldKey)}`,
       { method: 'DELETE', query: { ...options } },
     );
+  }
+
+  /* Ingestion: the review queue --------------------------------------------------------------- */
+
+  /**
+   * The queue, filtered.
+   *
+   * `status` defaults to `open` on the server, which is the only default that makes sense for a
+   * work list; the workspace asks for it explicitly all the same, because a filter applied by
+   * someone else's default is a filter nobody can see. There is no cursor: the endpoint pages by
+   * `limit` and reports `hasMore` from the page being full.
+   */
+  listReviewEntries(query: ReviewListQuery = {}, signal?: AbortSignal): Promise<Page<ReviewEntry>> {
+    return this.api<Page<ReviewEntry>>('/ingestion/review', { query: { ...query }, signal });
+  }
+
+  getReviewEntry(id: string, signal?: AbortSignal): Promise<ReviewEntry> {
+    return this.api<ReviewEntry>(`/ingestion/review/${encodeURIComponent(id)}`, { signal });
+  }
+
+  /**
+   * Execute the entry's proposal, with the reviewer's corrections applied to it.
+   *
+   * RQ1: the item and the resolution commit in one transaction, so a refusal anywhere leaves the
+   * entry open and nothing created. `edits` is a patch over the proposal, not a replacement.
+   */
+  acceptReviewEntry(id: string, body: ReviewAcceptRequest = {}): Promise<ReviewAcceptResult> {
+    return this.api<ReviewAcceptResult>(`/ingestion/review/${encodeURIComponent(id)}/accept`, {
+      method: 'POST',
+      body,
+    });
+  }
+
+  rejectReviewEntry(id: string, body: ReviewRejectRequest = {}): Promise<ReviewEntry> {
+    return this.api<ReviewEntry>(`/ingestion/review/${encodeURIComponent(id)}/reject`, {
+      method: 'POST',
+      body,
+    });
+  }
+
+  /**
+   * Move an item to the trash.
+   *
+   * The review queue has no reopen — `ReviewService.accept` refuses anything that is not `open`, so
+   * a resolved entry stays resolved — and this is therefore the only reversal available once an
+   * acceptance has been sent: the item it created goes to the trash, where it can be restored (P5).
+   */
+  trashItem(id: string, reason?: string): Promise<void> {
+    return this.api<void>(`/items/${encodeURIComponent(id)}/trash`, {
+      method: 'POST',
+      body: reason === undefined ? {} : { reason },
+    });
+  }
+
+  /* Ingestion: sources ------------------------------------------------------------------------- */
+
+  listIngestionSources(signal?: AbortSignal): Promise<Page<IngestionSource>> {
+    return this.api<Page<IngestionSource>>('/ingestion/sources', { signal });
+  }
+
+  getIngestionSource(id: string, signal?: AbortSignal): Promise<IngestionSource> {
+    return this.api<IngestionSource>(`/ingestion/sources/${encodeURIComponent(id)}`, { signal });
+  }
+
+  createIngestionSource(body: IngestionSourceCreate): Promise<IngestionSource> {
+    return this.api<IngestionSource>('/ingestion/sources', { method: 'POST', body });
+  }
+
+  updateIngestionSource(id: string, body: IngestionSourceUpdate): Promise<IngestionSource> {
+    return this.api<IngestionSource>(`/ingestion/sources/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body,
+    });
+  }
+
+  deleteIngestionSource(id: string): Promise<void> {
+    return this.api<void>(`/ingestion/sources/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  }
+
+  setIngestionSourceEnabled(id: string, enabled: boolean): Promise<IngestionSource> {
+    return this.api<IngestionSource>(
+      `/ingestion/sources/${encodeURIComponent(id)}/${enabled ? 'enable' : 'disable'}`,
+      { method: 'POST' },
+    );
+  }
+
+  /** Probe the far side. Each check is reported, and `ok` is their conjunction, not a verdict. */
+  testIngestionSource(id: string): Promise<TestConnectionResult> {
+    return this.api<TestConnectionResult>(
+      `/ingestion/sources/${encodeURIComponent(id)}/test-connection`,
+      { method: 'POST' },
+    );
+  }
+
+  /** Start a run. Answers `202` with the job, because an OCR pass is not a request/response affair. */
+  runIngestionSource(id: string, body: SourceRunRequest = {}): Promise<SourceRunAccepted> {
+    return this.api<SourceRunAccepted>(`/ingestion/sources/${encodeURIComponent(id)}/run`, {
+      method: 'POST',
+      body,
+    });
+  }
+
+  /* Ingestion: the work queue -------------------------------------------------------------------- */
+
+  listIngestionJobs(
+    query: { state?: string; jobType?: string; limit?: number } = {},
+    signal?: AbortSignal,
+  ): Promise<Page<IngestionJob>> {
+    return this.api<Page<IngestionJob>>('/ingestion/queue', { query: { ...query }, signal });
+  }
+
+  /** One job with its stage trace and log — what the run recorded, which is what a reviewer reads. */
+  getIngestionJob(id: string, signal?: AbortSignal): Promise<IngestionJobDetail> {
+    return this.api<IngestionJobDetail>(`/ingestion/queue/${encodeURIComponent(id)}`, { signal });
+  }
+
+  /* Rules ---------------------------------------------------------------------------------------- */
+
+  listRules(
+    query: { kind?: string; enabled?: boolean } = {},
+    signal?: AbortSignal,
+  ): Promise<Page<Rule>> {
+    return this.api<Page<Rule>>('/rules', { query: { ...query }, signal });
+  }
+
+  getRule(id: string, signal?: AbortSignal): Promise<Rule> {
+    return this.api<Rule>(`/rules/${encodeURIComponent(id)}`, { signal });
+  }
+
+  createRule(body: RuleCreate): Promise<Rule> {
+    return this.api<Rule>('/rules', { method: 'POST', body });
+  }
+
+  updateRule(id: string, body: RuleUpdate): Promise<Rule> {
+    return this.api<Rule>(`/rules/${encodeURIComponent(id)}`, { method: 'PATCH', body });
+  }
+
+  deleteRule(id: string): Promise<void> {
+    return this.api<void>(`/rules/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  }
+
+  /**
+   * Evaluate rules over subjects, changing nothing.
+   *
+   * `rules` in the body replaces the stored set for the call, which is what makes a dry run of an
+   * unsaved edit possible — and the endpoint is safe because `evaluateRules` is a pure function of
+   * a rule set and a subject: it is handed no database, so there is no apply path to switch off.
+   */
+  dryRunRules(body: RuleDryRunRequest): Promise<RuleDryRunResponse> {
+    return this.api<RuleDryRunResponse>('/rules/dry-run', { method: 'POST', body });
+  }
+
+  /* Upload ------------------------------------------------------------------------------------- */
+
+  /**
+   * Post one file to `POST /api/v1/ingestion/upload`.
+   *
+   * The share target posts here rather than to `/documents` because this endpoint runs the whole
+   * pipeline: hash, duplicate check, type detection, OCR, rules, gate. The answer therefore says
+   * which of the six outcomes happened and carries either the item that was created or the review
+   * entry that says why there is not one — so a phone that has just shared a scan learns what
+   * became of it in one round trip (CONCEPT.md §7, Phase 2).
+   *
+   * It does not go through `request`, which is a JSON transport: `FormData` must reach `fetch`
+   * without a `content-type` header so that the browser sets the multipart boundary. Everything
+   * else — the bearer token, the credentials mode, the problem-document handling — is the same.
+   */
+  async uploadForIngestion(
+    file: Blob,
+    fields: IngestUploadFields,
+    signal?: AbortSignal,
+  ): Promise<IngestUploadResult> {
+    const form = new FormData();
+    form.append('file', file, fields.filename);
+    for (const key of ['sourceKind', 'sourceId', 'title', 'sender', 'subject', 'runLabel'] as const) {
+      const value = fields[key];
+      if (value !== undefined) form.append(key, value);
+    }
+
+    const url = `${this.baseUrl}${API_BASE_PATH}/ingestion/upload`;
+    const headers: Record<string, string> = { accept: `${JSON_CONTENT_TYPE}, application/problem+json` };
+    if (this.token !== undefined) headers.authorization = `Bearer ${this.token}`;
+
+    const init: RequestInit = { method: 'POST', headers, body: form, credentials: 'same-origin' };
+    if (signal !== undefined) init.signal = signal;
+
+    let response: Response;
+    try {
+      response = await this.doFetch(url, init);
+    } catch (cause) {
+      if (cause instanceof DOMException && cause.name === 'AbortError') throw cause;
+      throw new ApiError(problemFromTransportFailure(cause), { method: 'POST', url });
+    }
+    if (!response.ok) throw new ApiError(await readProblem(response), { method: 'POST', url });
+    return (await response.json()) as IngestUploadResult;
   }
 }
 

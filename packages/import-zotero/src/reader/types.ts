@@ -29,6 +29,22 @@ export interface ZoteroLibraryRow {
   filesEditable: number;
 }
 
+/**
+ * How many items of one type one library holds, straight out of `items`.
+ *
+ * The importer reads a single library, so everything else in the file is invisible to every other
+ * reader here. This is the one query that looks across all of them, and it exists so that the
+ * verification report can say "there are five items in a group library and they were not imported"
+ * instead of counting only what it chose to read and finding, unsurprisingly, no discrepancy.
+ */
+export interface ZoteroLibraryItemCount {
+  libraryID: number;
+  /** `user` or `group`. Null when `libraries` has no row for this id. */
+  libraryType: string | null;
+  itemType: string;
+  count: number;
+}
+
 /** One row of `items`, joined to its type name and its trash state. */
 export interface ZoteroItemRow {
   itemID: number;

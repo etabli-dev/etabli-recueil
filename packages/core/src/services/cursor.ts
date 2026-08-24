@@ -53,6 +53,16 @@ export interface PageInfo {
   nextCursor: string | null;
   hasMore: boolean;
   limit: number;
+  /**
+   * True when a text filter matched more rows than it was allowed to materialise, so this page is
+   * drawn from the best-ranked `TEXT_FILTER_CANDIDATES` matches rather than from all of them.
+   *
+   * A caller cannot otherwise tell truncation from exhaustion: `hasMore: false` on the last page of
+   * a truncated candidate set looks exactly like the end of the results, and "these are all of
+   * them" is a different statement from "these are the best five hundred". Absent when no text
+   * filter was applied.
+   */
+  textFilterTruncated?: boolean;
 }
 
 export interface Page<TRow> {
