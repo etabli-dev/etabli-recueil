@@ -4,8 +4,10 @@ subtitle: "The real surface of the product"
 ---
 
 ::: {.callout-important}
-Partly implemented. The Phase 1 surface is served today — 93 operations over 70 paths, all of them
-in [`spec/openapi.yaml`](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/openapi.yaml),
+Partly implemented. The Phase 1 and Phase 2 surface is served today — 124 operations over 92 paths,
+including ingestion sources, the ingestion queue and review, the rule sets and the storage backends,
+all of them in
+[`spec/openapi.yaml`](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/openapi.yaml),
 which is the authority. Anything on this page that the committed document does not declare belongs
 to a later phase and is intent, not contract.
 :::

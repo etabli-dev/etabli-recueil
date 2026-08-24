@@ -129,6 +129,37 @@ describe('/api/v1/storage/backends', () => {
     expect(result.detail).toMatch(/hash|digest|verif/iu);
   });
 
+  it('names the read-back, not the write, when a store cannot serve what it accepted', async () => {
+    const id = body<{ id: string }>(await create()).id;
+
+    // The `PUT` is accepted; every `GET` after it fails. A probe that wrapped the write and the
+    // read-back in one `try` would report this as a failed write and send an operator to look at
+    // permissions on a store that took the bytes quite happily.
+    server.setFault({ method: 'GET', failFirst: 50, status: 500 });
+
+    const result = await health(id, 'roundtrip');
+    expect(result.status).toBe('failed');
+
+    const write = result.checks.filter((check) => check.check === 'write');
+    expect(write.length).toBe(1);
+    expect(write[0]?.ok).toBe(true);
+    expect(result.checks.find((check) => check.check === 'verify')?.ok).toBe(false);
+
+    // And the probe still tidied up after itself.
+    expect(server.requests.some((request) => request.method === 'DELETE')).toBe(true);
+  });
+
+  it('does not claim to have cleaned up a probe blob it never wrote', async () => {
+    const id = body<{ id: string }>(await create()).id;
+    server.setFault({ method: 'PUT', failFirst: 50, status: 507 });
+
+    const result = await health(id, 'roundtrip');
+    expect(result.status).toBe('failed');
+    expect(result.checks.find((check) => check.check === 'write')?.ok).toBe(false);
+    expect(result.checks.some((check) => check.check === 'verify')).toBe(false);
+    expect(result.checks.some((check) => check.check === 'cleanup')).toBe(false);
+  });
+
   it('reports a wrong credential as a failed read rather than a 500', async () => {
     const id = body<{ id: string }>(await create({ secret: { password: 'wrong' } })).id;
     const result = await health(id);

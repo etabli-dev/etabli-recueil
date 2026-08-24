@@ -10,9 +10,14 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { listStoredBlobs } from '@recueil/core';
+
 import { startFakeWebDavServer } from '@recueil/storage-backends/testing';
 import type { FakeWebDavServer } from '@recueil/storage-backends/testing';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+import { startFakeImap } from './fakes/imap-server.js';
+import type { FakeImapServer } from './fakes/imap-server.js';
 
 import {
   TEST_SECRET_KEY,
@@ -365,6 +370,138 @@ describe('a WebDAV source', () => {
 /* The share-target upload, the queue and the review queue                                          */
 /* ============================================================================================== */
 
+describe('an IMAP source', () => {
+  let h: Harness;
+  let server: FakeImapServer;
+
+  beforeEach(async () => {
+    server = await startFakeImap({
+      username: 'rh',
+      password: 'mailbox-secret',
+      mailboxes: { INBOX: 3, Rechnungen: 0 },
+    });
+    h = await harness({ env: { RECUEIL_SECRET_KEY: TEST_SECRET_KEY } });
+  });
+
+  afterEach(async () => {
+    await h.close();
+    await server.close();
+  });
+
+  const create = async (
+    secret: Record<string, string>,
+    overrides: Record<string, unknown> = {},
+  ) =>
+    h.app.inject({
+      method: 'POST',
+      url: '/api/v1/ingestion/sources',
+      payload: {
+        name: 'Scanner mailbox',
+        sourceKind: 'imap',
+        config: {
+          kind: 'imap',
+          host: server.host,
+          port: server.port,
+          // Loopback, and the fake speaks plain IMAP: implicit TLS on a socket with no certificate
+          // would fail at the handshake and prove nothing about the three checks under test.
+          secure: false,
+          username: 'rh',
+          mailbox: 'INBOX',
+        },
+        secret,
+        ...overrides,
+      },
+    });
+
+  it('connects, logs in and selects the mailbox', async () => {
+    const id = body<{ id: string }>(await create({ password: 'mailbox-secret' })).id;
+
+    const result = body<{ ok: boolean; checks: { check: string; ok: boolean; detail: string }[] }>(
+      await h.app.inject({
+        method: 'POST',
+        url: `/api/v1/ingestion/sources/${id}/test-connection`,
+      }),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.checks.map((check) => check.check)).toEqual(['connect', 'login', 'select']);
+    // The count in the answer is the server's own EXISTS, not something the route invented.
+    expect(result.checks[2]?.detail).toMatch(/3 message/u);
+
+    // And the far side really was spoken to, in the order the checks claim.
+    const verbs = server.commands.map((line) => line.split(' ')[1]?.toUpperCase());
+    expect(verbs).toContain('LOGIN');
+    expect(verbs).toContain('SELECT');
+    expect(verbs).toContain('LOGOUT');
+  });
+
+  it('reports a wrong password as a failed login rather than a green tick', async () => {
+    const id = body<{ id: string }>(await create({ password: 'not-the-password' })).id;
+
+    const result = body<{ ok: boolean; checks: { check: string; ok: boolean }[]; detail: string }>(
+      await h.app.inject({
+        method: 'POST',
+        url: `/api/v1/ingestion/sources/${id}/test-connection`,
+      }),
+    );
+
+    expect(result.ok).toBe(false);
+    // The socket opened — that check is honest — and the login is the one that failed.
+    expect(result.checks.find((check) => check.check === 'connect')?.ok).toBe(true);
+    expect(result.checks.find((check) => check.check === 'login')?.ok).toBe(false);
+    expect(result.detail).toMatch(/login|credential/iu);
+  });
+
+  it('reports a mailbox that is not there', async () => {
+    const id = body<{ id: string }>(
+      await create(
+        { password: 'mailbox-secret' },
+        {
+          config: {
+            kind: 'imap',
+            host: server.host,
+            port: server.port,
+            secure: false,
+            username: 'rh',
+            mailbox: 'Nowhere',
+          },
+        },
+      ),
+    ).id;
+
+    const result = body<{ ok: boolean; checks: { check: string; ok: boolean }[] }>(
+      await h.app.inject({
+        method: 'POST',
+        url: `/api/v1/ingestion/sources/${id}/test-connection`,
+      }),
+    );
+
+    expect(result.ok).toBe(false);
+    // The login was fine; it is the SELECT that failed, and the report says so. Reporting this as
+    // a failed login would send an operator to reset a password that was never wrong.
+    expect(result.checks.find((check) => check.check === 'login')?.ok).toBe(true);
+    expect(result.checks.find((check) => check.check === 'select')?.ok).toBe(false);
+  });
+
+  it('refuses to test a mailbox it holds no password for', async () => {
+    const id = body<{ id: string }>(await create({})).id;
+
+    const result = body<{ ok: boolean; checks: { check: string; ok: boolean; detail: string }[] }>(
+      await h.app.inject({
+        method: 'POST',
+        url: `/api/v1/ingestion/sources/${id}/test-connection`,
+      }),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.checks).toEqual([
+      { check: 'credentials', ok: false, detail: 'no password is stored for this mailbox' },
+    ]);
+    // Nothing was dialled: a source with no credential is refused before the socket.
+    expect(server.commands).toEqual([]);
+  });
+});
+
 describe('POST /api/v1/ingestion/upload', () => {
   let h: Harness;
 
@@ -465,6 +602,17 @@ describe('POST /api/v1/ingestion/upload', () => {
       .get(result.document?.id) as { original_filename: string | null; source_ref: string | null };
     expect(document.original_filename).toBe('passwd');
     expect(document.source_ref ?? '').not.toContain('..');
+  });
+
+  it('leaves nothing of its own in the content store', async () => {
+    const { result } = await upload(h, INVOICE);
+    expect(result.document).not.toBeNull();
+
+    // `listStoredBlobs` reports everything in the store root that is not ADR-0004's layout, so a
+    // spool directory of the upload route's own would show up here — on every backup, for ever.
+    const store = await listStoredBlobs(h.config.storagePath);
+    expect(store.ignored).toEqual([]);
+    expect(store.blobs.length).toBeGreaterThan(0);
   });
 
   it('refuses a request that is not multipart', async () => {
@@ -672,6 +820,46 @@ describe('running a configured source', () => {
       .get() as { n: number };
     expect(audit.n).toBe(1);
   }, 45_000);
+
+  it('shows the trace of every pass, not the first one, after a retry', async () => {
+    const first = body<{ jobId: string }>(
+      await h.app.inject({
+        method: 'POST',
+        url: `/api/v1/ingestion/sources/${sourceId}/run`,
+        payload: { runLabel: 'nightly' },
+      }),
+    );
+    await settle(first.jobId);
+
+    // A third scan lands between the passes, so the retried poll has something to offer and mints
+    // a second pipeline run rather than returning empty-handed.
+    writeFileSync(join(watched.path, 'scan-003.txt'), `${INVOICE}\nDritte Rechnung`);
+
+    const retried = await h.app.inject({
+      method: 'POST',
+      url: `/api/v1/ingestion/queue/${first.jobId}/retry`,
+    });
+    expect(retried.statusCode).toBe(202);
+    await settle(first.jobId);
+
+    // Two polls under one source job, so two pipeline runs beneath it. Read from the table rather
+    // than from the response, so the premise of the assertion below is itself checked.
+    const children = h.recueil.connection
+      .prepare('select id from jobs where parent_job_id = ? order by id')
+      .all(first.jobId) as { id: string }[];
+    expect(children.length).toBe(2);
+
+    const detail = body<{ stages: { jobId: string; stage: string }[] }>(
+      await h.app.inject({ method: 'GET', url: `/api/v1/ingestion/queue/${first.jobId}` }),
+    );
+
+    // The trace names both runs. Taking the earliest child alone would answer a question about the
+    // job as it stands with the pass before last.
+    const traced = new Set(detail.stages.map((stage) => stage.jobId));
+    for (const child of children) {
+      expect([...traced], `no stage rows for run ${child.id}`).toContain(child.id);
+    }
+  }, 60_000);
 
   it('refuses a second run of the same source under the same label while one is in flight', async () => {
     const first = await h.app.inject({

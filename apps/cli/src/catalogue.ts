@@ -28,7 +28,7 @@ export const PHASE_TITLES: Readonly<Record<number, string>> = {
 };
 
 /** The phase this build belongs to. Not every command in it is finished; see `implemented`. */
-export const CURRENT_PHASE = 1;
+export const CURRENT_PHASE = 2;
 
 export interface CommandSpec {
   /** The subcommand name, as typed. */
@@ -88,17 +88,40 @@ export const COMMANDS: readonly CommandSpec[] = [
   },
   {
     name: 'job',
-    summary: 'Inspect and control background jobs',
+    summary: 'Follow a running job and read its log',
     phase: 1,
     implemented: false,
-    promise: 'List, follow, retry and cancel the jobs in the queue.',
+    promise:
+      'Follow a job live and read its log. Listing, retrying and cancelling arrived in Phase 2 as ' +
+      '`recueil queue`; what is still missing is the live follow and the per-job log.',
   },
   {
     name: 'ingest',
-    summary: 'Push files in and work the review queue',
+    summary: 'Push files into the ingestion pipeline',
     phase: 2,
-    implemented: false,
-    promise: 'Push files into the pipeline, manage ingestion sources, and work the review queue.',
+    implemented: true,
+    promise: 'Push files into the pipeline and run the configured sources.',
+  },
+  {
+    name: 'queue',
+    summary: 'Inspect, retry and cancel work-queue jobs',
+    phase: 2,
+    implemented: true,
+    promise: 'List the jobs in the queue, retry one that failed, and cancel one that is waiting.',
+  },
+  {
+    name: 'review',
+    summary: 'Work the review queue',
+    phase: 2,
+    implemented: true,
+    promise: 'List the entries the confidence gate raised, and accept or reject each one.',
+  },
+  {
+    name: 'rules',
+    summary: 'Validate and dry-run rule sets',
+    phase: 2,
+    implemented: true,
+    promise: 'Validate a rule set and run it over a corpus without writing anything.',
   },
   {
     name: 'check',

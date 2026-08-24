@@ -37,7 +37,9 @@ dark, with `repo-actions` pointing at this subdirectory so every page has a work
 
 - **British English**, matching `CONCEPT.md` and the ADRs.
 - **Nothing is described as working when it is not.** Every page that documents unimplemented
-  behaviour says so at the top and names the roadmap phase that delivers it. The project is in
-  Phase 0; almost everything on the site is a contract rather than a description.
+  behaviour says so at the top and names the roadmap phase that delivers it. Phases 1 and 2 are in
+  the tree, so the pages covering the library, the API, the CLI, the importers, ingestion and
+  storage now describe working software; everything from Phase 3 on is still a contract. Where a
+  page mixes the two, the table says which row is which.
 - Links to files outside `docs/` — `CONCEPT.md`, `spec/`, `CONTRIBUTING.md` — go to GitHub, because
   they are not part of the rendered site.

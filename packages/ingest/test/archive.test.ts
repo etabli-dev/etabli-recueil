@@ -226,6 +226,81 @@ describe('parsing a message', () => {
     expect(existsSync(join(root, '..', 'escape.pdf'))).toBe(false);
   });
 
+  it('assembles an RFC 2231 continued filename, so the attachment keeps its name', () => {
+    // The spelling Thunderbird and Outlook both produce for a non-ASCII filename that is long
+    // enough to fold: numbered continuations, percent-encoded, with the charset only on segment 0.
+    // Losing it does not fail loudly — the part is simply called `part-2.bin` and is gone.
+    const raw = Buffer.from(
+      [
+        'From: a@example.org',
+        'Subject: two parts',
+        'MIME-Version: 1.0',
+        'Content-Type: multipart/mixed; boundary="b"',
+        '',
+        '--b',
+        'Content-Type: text/plain; charset=utf-8',
+        '',
+        'body',
+        '--b',
+        'Content-Type: application/pdf',
+        "Content-Disposition: attachment; filename*0*=utf-8''Protokoll%20Sitzung%20;",
+        ' filename*1*=13.%20M%C3%A4rz%202023; filename*2*=.pdf',
+        '',
+        '%PDF-1.4',
+        '--b--',
+        '',
+      ].join('\r\n'),
+      'utf8',
+    );
+
+    const parsed = parseEmail(raw);
+    expect(parsed.attachments).toHaveLength(1);
+    expect(parsed.attachments[0]!.filename).toBe('Protokoll Sitzung 13. März 2023.pdf');
+  });
+
+  it('assembles the single extended RFC 2231 form as well', () => {
+    const raw = Buffer.from(
+      [
+        'From: a@example.org',
+        'Subject: one part',
+        'MIME-Version: 1.0',
+        'Content-Type: multipart/mixed; boundary="b"',
+        '',
+        '--b',
+        'Content-Type: application/pdf',
+        "Content-Disposition: attachment; filename*=iso-8859-1''Gr%FC%DFe.pdf",
+        '',
+        '%PDF-1.4',
+        '--b--',
+        '',
+      ].join('\r\n'),
+      'utf8',
+    );
+
+    expect(parseEmail(raw).attachments[0]!.filename).toBe('Grüße.pdf');
+  });
+
+  it('leaves an ordinary quoted parameter exactly as it was', () => {
+    const raw = Buffer.from(
+      [
+        'From: a@example.org',
+        'MIME-Version: 1.0',
+        'Content-Type: multipart/mixed; boundary="=_9c1f4d2e"',
+        '',
+        '--=_9c1f4d2e',
+        'Content-Type: application/pdf; name="Rechnung_2023-004417.pdf"',
+        'Content-Disposition: attachment; filename="Rechnung_2023-004417.pdf"',
+        '',
+        '%PDF-1.4',
+        '--=_9c1f4d2e--',
+        '',
+      ].join('\r\n'),
+      'utf8',
+    );
+
+    expect(parseEmail(raw).attachments[0]!.filename).toBe('Rechnung_2023-004417.pdf');
+  });
+
   it('decodes an RFC 2047 encoded subject', () => {
     const raw = Buffer.from(
       ['From: a@example.org', 'Subject: =?utf-8?B?R2Vidcyock?=', '', 'body'].join('\r\n'),

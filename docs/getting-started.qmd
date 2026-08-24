@@ -15,17 +15,21 @@ The Phase column in [the roadmap](roadmap.qmd) says when the rest arrives.
 
 ## What is in the tree
 
-Phase 1 of [the roadmap](roadmap.qmd): the library, the REST contract, the CLI, the web client and
-the Zotero migrator.
+Phases 1 and 2 of [the roadmap](roadmap.qmd): the library, the REST contract, the CLI, the web
+client, the Zotero and Paperless-ngx migrators, the ingestion pipeline and the storage backends.
 
 | Works now | Not yet |
 |---|---|
-| `recueil serve` — 93 operations over 70 paths | Published Docker image; the `deploy/` files are written but have never been run |
+| `recueil serve` — 124 operations over 92 paths | Published Docker image; the `deploy/` files are written but have never been run |
 | `recueil import zotero` with a verification report | `recueil token`, `recueil job` — mint tokens over the API for now |
-| `recueil export bibtex \| biblatex \| csl-json \| ris` | The ingestion pipeline, enrichment, checks, dedup (Phases 2–3) |
-| `recueil backup` / `recueil restore` | The desktop shell, the mobile app, the MCP server |
-| `.bib` feeds for Overleaf and Quarto | translation-server integration for URL/DOI/PMID/ISBN import |
-| Web client: three-pane library, item pane, PDF reader | Annotation, saved-search UI, everything from Phase 2 on |
+| `recueil import paperless` with a verification report | Enrichment, the checks engine, dedup (Phase 3) |
+| `recueil ingest`, `recueil ingest watch` — the ten stages of CONCEPT.md §5.3 | OCR and GROBID *proved*: both adapters exist, neither has been run against the real sidecar here |
+| Folder, WebDAV and IMAP sources; the YAML rule engine; the review queue | Per-page OCR — the decision is per document, so a scanned page inside a text PDF is missed |
+| Local filesystem, WebDAV and S3 stores, all passing one conformance suite | The desktop shell, the mobile app, the MCP server |
+| `recueil export bibtex \| biblatex \| csl-json \| ris` | translation-server integration for URL/DOI/PMID/ISBN import |
+| `recueil backup` / `recueil restore` | Everything from Phase 3 on |
+| `.bib` feeds for Overleaf and Quarto | |
+| Web client: three-pane library, item pane, PDF reader, sources, review queue, rules editor | Annotation and saved-search UI |
 | The Zotero connector endpoints answer, and are tested against verbatim upstream connector code | A capture run end to end in a browser with the extension installed |
 
 ## Build it
@@ -82,8 +86,8 @@ curl -s http://localhost:3000/health
 
 (Timestamps elided.)
 
-That response on an empty library is the Phase 0 exit criterion, and it is the first thing that is
-true of this project.
+That response on an empty library was the Phase 0 exit criterion, and it is still the first thing to
+check after a start.
 
 The contract the server answers is at `/openapi.json`, and the same document is committed as
 [`spec/openapi.yaml`](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/openapi.yaml).
@@ -183,8 +187,74 @@ recueil import ris export.ris
 recueil import csl-json refs.json
 ```
 
-Each has a matching exporter, because a format you can only read is a trap. Paperless-ngx, EndNote
-XML, JabRef groups, Mendeley and CSV are later phases.
+Each has a matching exporter, because a format you can only read is a trap. EndNote XML, JabRef
+groups, Mendeley and CSV are later phases.
+
+## Importing a Paperless-ngx library
+
+```sh
+recueil import paperless \
+  --url https://paperless.example \
+  --token "$PAPERLESS_TOKEN" \
+  --database ./library.db \
+  --storage ./storage \
+  --report ./paperless-import
+```
+
+It walks `/api/documents/` and the tag, correspondent, document-type, storage-path and custom-field
+endpoints, downloads every original, hashes it into the content store, and writes the same shape of
+report the Zotero importer does — with the same exit codes, the same idempotency and the same
+`--resume`. Documents become items with the Office facet: correspondent, document date, archive
+serial number, reference number, amount, due date.
+
+Against the committed corpus in `fixtures/paperless` — 11 documents, 9 tags, 6 correspondents, 5
+document types, 6 custom fields, 7 archive serial numbers — every count in the report matches
+`fixtures/expected-counts.json`, and the one document whose original the server refuses to serve is
+routed to the review queue with the reason rather than failing the run.
+
+Two things to know before pointing it at a real install:
+
+- **It speaks DRF API versions 9 and 10**, i.e. Paperless-ngx 3.x. Against a server that allows
+  neither, it refuses with a named error rather than guessing at an older envelope.
+- **It has never spoken to a real Paperless-ngx server.** Every wire type was transcribed from the
+  published source of the release the package names, and the tests run against an in-process fake of
+  it. Run it with `--dry-run` first and read the report.
+
+## Ingesting scans, mail and shares
+
+```sh
+# One file, or a directory, straight through the pipeline
+recueil ingest ~/scans/2026-03-14.pdf --source-kind scanner --rules office.yaml
+
+# The daemon: every configured source, plus any --folder given here
+recueil ingest watch --rules office.yaml
+```
+
+Sources are configured over the API — `POST /api/v1/ingestion/sources` for a watched folder, a
+WebDAV collection or an IMAP mailbox — and `recueil ingest watch` polls all of them. A scanner is
+not a fourth kind: an ADS-4700W writing to a share is a folder source with `sourceKind: scanner`,
+and one mailing its scans is an IMAP source.
+
+Every arrival goes through the same ten stages: hash, duplicate check, archive expansion (`.zip` and
+`.eml`, recursively), type detection, OCR, metadata extraction, identifier resolution, the rule
+engine, the confidence gate, and one transactional commit. A file that scores below the gate is
+stored and queued for a person with the reason written down; it is never guessed at.
+
+```sh
+recueil review list          # what needs a decision, and why
+recueil review accept <id>   # commit the proposal
+recueil rules test office.yaml --against ~/scans   # which rules fire on what
+```
+
+Rules are YAML or JSON, editable in the web client, and a rule that sets a high confidence is what
+turns a recognised scanner convention into filing with no manual step. Measured here, with a folder
+source, a rule set and the daemon running: six scans dropped into a watched directory became six
+searchable items in under two seconds with nothing else typed.
+
+**OCR is off unless you turn it on.** `recueil ingest --ocr ocrmypdf` (or `RECUEIL_OCR_ENGINE` on
+the server) runs the OCRmyPDF adapter against a binary on `PATH`. Without it a scan with no text
+layer is stored, indexed on nothing, and queued for review — which is honest, and useless for
+finding it again. The adapter has not been run against a real OCRmyPDF in this repository.
 
 ## Getting data back out
 
@@ -248,8 +318,9 @@ pnpm --filter @recueil/web run dev
 ```
 
 A keyboard-first three-pane library — collections, item list, item pane — with editing that sends
-only the changed field and a PDF.js reader for the attached document. It is a client of the same
-REST contract as everything else; there is no privileged back channel.
+only the changed field and a PDF.js reader for the attached document, plus the Phase 2 screens: the
+configured sources, the review queue, and an editor for the ingestion rule sets. It is a client of
+the same REST contract as everything else; there is no privileged back channel.
 
 `pnpm --filter @recueil/web run build` produces the static bundle in `apps/web/dist`. The server
 does not serve it yet — put it behind any static host or reverse proxy and point it at the API.

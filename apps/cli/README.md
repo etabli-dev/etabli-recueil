@@ -7,32 +7,38 @@ the CLI cannot do, the API cannot do either (P6). Where the two overlap there is
 behind both — `recueil export` calls the same selection and citation-key code the `.bib` endpoint
 does, so the file a LaTeX build fetches and the file this command writes are the same bytes.
 
-The data commands — `serve`, `import`, `export`, `backup`, `restore` — open the library directly
-rather than talking to a running server (ADR-0001). That is not a shortcut: an importer writes fifty
-thousand records through the service layer in one process, and its idempotency key and resume cursor
-live in the same database as the records. They take the same flags and the same environment
-variables `serve` does.
+The data commands — `serve`, `import`, `export`, `backup`, `restore`, `ingest`, `queue`, `review` —
+open the library directly rather than talking to a running server (ADR-0001). That is not a
+shortcut: an importer writes fifty thousand records through the service layer in one process, and
+its idempotency key and resume cursor live in the same database as the records. They take the same
+flags and the same environment variables `serve` does. `rules test` opens neither a library nor a
+socket: the rule evaluator is a pure function, which is what makes its dry run believable.
 
 The intended command surface, the connection variables and the exit codes are documented in
 [`docs/cli.qmd`](../../docs/cli.qmd). This README covers what the package actually does today.
 
-## Status: Phase 1
+## Status: Phase 2
 
-Phase 1 delivers the core library and the Zotero migration (CONCEPT.md §7). Five commands work;
-the rest exist, are listed in `recueil --help` with the phase that delivers them, and — when run —
-say so and exit `1`. Two of those belong to Phase 1 as well and are not built yet; the help text
-says so rather than pretending otherwise.
+Phase 2 delivers ingestion and the storage backends (CONCEPT.md §7). Nine commands work; the rest
+exist, are listed in `recueil --help` with the phase that delivers them, and — when run — say so and
+exit `1`. Two of those belong to Phase 1 and are still not built; the help text says so rather than
+pretending otherwise.
 
 | Command | Does | Status |
 |---|---|---|
 | `serve` | Start the server | **works** |
 | `import zotero` | A whole Zotero library, with the verification report | **works** |
+| `import paperless` | A whole Paperless-ngx server, with the verification report | **works** |
 | `import bibtex\|biblatex\|ris\|csl-json` | A bibliography file | **works** |
 | `export bibtex\|biblatex\|csl-json\|ris` | A selection, in an interchange format | **works** |
 | `backup` / `restore` | Consistent snapshot and verified recovery | **works** |
+| `ingest` | Push files through the ten stages of §5.3 | **works** |
+| `ingest watch` | Run the configured sources in the foreground | **works** |
+| `queue` | List, retry and cancel work-queue jobs | **works** |
+| `review` | List, accept and reject review queue entries | **works** |
+| `rules test` | Dry-run a rule set over a corpus | **works** |
 | `token` | Create, list and revoke scoped API tokens | Phase 1 |
-| `job` | List, follow, retry and cancel jobs | Phase 1 |
-| `ingest` | Push files in, manage sources, work the review queue | Phase 2 |
+| `job` | Follow a running job and read its log | Phase 1 |
 | `check` | Run the verification engine over a scope or a reference list | Phase 3 |
 | `dedup` | File and record deduplication, dry run by default | Phase 3 |
 | `plugin` | Install, enable, disable, configure, list | Phase 3 |
@@ -48,7 +54,8 @@ $ recueil check bibliography --file refs.txt
 error `recueil check` is not implemented yet.
 
   It arrives in Phase 3 — Enrichment, checks, dedup (CONCEPT.md §7).
-  This build is Phase 1, and ships: serve, import, export, backup, restore.
+  This build is Phase 2, and ships: serve, import, export, backup, restore, ingest, queue,
+  review, rules.
 ...
 $ echo $?
 1
@@ -87,8 +94,130 @@ is keyed by something Zotero owns (P9).
 The bibliography importers keep the entry key as the item's citation key **and** as its source id,
 so `\cite{}` keeps resolving (ADR-0016) and re-importing the same file updates the same items
 rather than doubling them (P9). A key or a DOI a live item already holds is dropped and reported,
-never reassigned (P3). Files named in a `file` field are reported, not fetched — that is the
-ingestion pipeline's job and it arrives in Phase 2.
+never reassigned (P3). Files named in a `file` field are reported, not fetched — that is
+`recueil ingest`'s job.
+
+### `recueil import paperless`
+
+```sh
+recueil import paperless --url https://paperless.example --dry-run
+PAPERLESS_TOKEN=… recueil import paperless --url https://paperless.example
+recueil import paperless --url https://paperless.example --resume
+```
+
+The same shape as the Zotero migration, and judged the same way: `report.json`, `report.md` and
+`_REVIEW/` under `--report` (default `./paperless-import`), a parity table, the named checks, and an
+exit code that carries the verdict. Every request is a `GET`; nothing in Paperless is changed.
+
+Both sides of every count are queried — the Paperless side from what the API returned, the Recueil
+side from the target library's own tables — so a report and a library that disagree fail the check
+rather than agreeing with each other.
+
+`@recueil/import-paperless` **has never spoken to a real Paperless-ngx server.** It was transcribed
+from the published source of the release it names and is tested against an in-process fake of it.
+The report records which release that was and whether the server that answered is that release, and
+the summary prints that line rather than hiding it.
+
+## `recueil ingest`
+
+```sh
+recueil ingest ~/Scans/2026-08-19.pdf
+recueil ingest ~/Consume --source scanner --source-kind scanner --rules office.yaml
+recueil ingest ~/Consume --dry-run --trace
+recueil ingest ~/Scans --ocr ocrmypdf --ocr-lang deu --ocr-lang eng
+```
+
+The ten stages of CONCEPT.md §5.3, from `@recueil/ingest`. A run is idempotent by
+`(hash, source, path)` and resumable by `--run-label`. The per-file table names, for each file, the
+media type and text state read back off its `documents` row, the rules that fired, the score the
+stage-9 gate compared against the threshold, and the outcome — and every one of those is queried
+rather than remembered while deciding.
+
+| Exit | Means |
+|---|---|
+| `0` | Everything offered was filed or already held |
+| `4` | Filed, but documents went to the review queue or were refused by a rule |
+| `5` | A file failed, or the run's own verification did not pass |
+
+**Paths are hostile until resolved.** Every entry under a directory is resolved with `realpath` and
+refused if it leaves the root; an archive member that climbs out of its scratch directory is refused
+by name and the archive is refused whole rather than partly extracted. Both are reported: a file
+that was not offered is listed with the reason.
+
+**OCR is behind an interface, and `--ocr` says which implementation.**
+
+| `--ocr` | What it is |
+|---|---|
+| `none` (default) | Nothing recognises anything. A scan is filed without text and the gate queues it. |
+| `ocrmypdf` | Shells out to a real `ocrmypdf`. **No test in this repository exercises it**, and there is no container here to run one against. |
+| `fake` | The in-process engine, driven by `--ocr-corpus` (a JSON map of sha256 → text). It proves the route — no text layer, engine called, text indexed, document findable — and recognises nothing it has not been given. |
+
+`--dry-run` is a real run against a consistent copy of the library and a store that hashes and
+discards, exactly as `import zotero --dry-run` is.
+
+### `recueil ingest watch`
+
+```sh
+recueil ingest watch --folder ~/Consume --once
+recueil ingest watch --folder ~/Scans --source-kind scanner --consume move
+```
+
+Runs the sources configured in the library, plus any `--folder` given, in the foreground, with a
+line per pass. Ctrl-C finishes the pass in flight and stops.
+
+A configured WebDAV or IMAP source keeps its password encrypted with `RECUEIL_SECRET_KEY`, which
+only `apps/server` can open, so this command **names those rows and does not run them** rather than
+skipping them in silence. They belong to `recueil serve`.
+
+Nothing on the far side is moved or deleted until `@recueil/ingest-sources` has read the bytes back
+out of the content store and matched them to their `documents` row.
+
+## `recueil review` and `recueil queue`
+
+```sh
+recueil review list
+recueil review accept 01M0T5… --note "checked by hand"
+recueil review reject 01M0T5… --note "a blank separator page"
+recueil queue list --state failed
+recueil queue retry 01M0T5…
+recueil queue cancel 01M0T5…
+```
+
+`review` works the queue P3 fills: the gate's reason code, its score, and the proposal accepting
+will execute. This build can execute three of the seven proposed actions of
+`spec/data-model.md` §6.1 — `create_item`, `discard` and `none` — and refuses the other four **by
+name** rather than marking an entry accepted and doing nothing.
+
+`queue` is the `jobs` table of ADR-0010. Retrying re-queues, keeping the cursor so the second
+attempt resumes; a `running` job is refused, because two workers on one job is what the lease
+prevents. Cancelling stops a job being picked up again and does not undo what it already committed —
+the message says so.
+
+An id may be given as a unique prefix.
+
+## `recueil rules`
+
+```sh
+recueil rules validate office.yaml
+recueil rules test office.yaml --against ~/Consume
+recueil rules test office.yaml --against corpus.json --trace --markdown report.md
+```
+
+`--against` takes a directory of real documents — each file sniffed, and, for a PDF or a text file,
+carrying the text a `text` condition will actually see — or a JSON/YAML file of subjects for the
+cases a directory cannot express (a sender, a resolver outcome, a tag an earlier stage set).
+
+Nothing is written, and not because of a flag: `@recueil/rules` evaluates a rule set as a pure
+function of the set and a plain subject, with no database, no storage and no HTTP client to write
+through. It is the same engine `recueil ingest --rules` puts at stage 8, which is what makes the dry
+run a prediction rather than a report about a program nobody runs.
+
+| Exit | Means |
+|---|---|
+| `0` | Every subject matched at least one rule |
+| `1` | The rule set is not valid, or the corpus could not be read |
+| `4` | Some subjects matched no rule and would still be filed by hand |
+| `5` | A rule could not be evaluated over some subject |
 
 ## `recueil export`
 
@@ -228,7 +357,7 @@ the reason rather than reporting green for something it never ran.
 build implements it. Help output, the placeholder messages and the tests all render from it, so they
 cannot disagree. The phase and the implementation flag are separate facts on purpose — Phase 1
 delivers `token` and `job` too, and until those exist a table that inferred one from the other would
-have to claim either that the phase had not started or that the commands worked.
+have to claim either that Phase 1 had not started or that the two commands worked.
 
 `buildProgram` checks the table against the registered implementations in both directions and throws
 at start-up on either mismatch: a command marked as shipping with nothing behind it, and an

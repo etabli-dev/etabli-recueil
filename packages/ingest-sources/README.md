@@ -285,6 +285,15 @@ That buys a great deal — a listing that names a path outside its own collectio
 changes between the poll and the read, a store that has rotted under a committed document, a crash
 between the commit and the acknowledgement — none of which a real server will perform on request.
 
+`test/mail-corpus.test.ts` adds the other half for the mailbox: all eight committed messages in
+`fixtures/mail/`, seeded into the fake server and polled by the real `ImapSource`, asserted against
+the counts `fixtures/expected-counts.json` fixed before the pipeline existed. It is what checks that
+attachments become documents under the names the messages gave them, that bodies become notes, that
+a forwarded message is descended into, that a message carrying one traversal filename is refused
+*whole* rather than partly extracted, and that a sender rule reaches the item — including the
+awkward material the hand-written tests do not carry: an RFC 2231 continued filename, a subject that
+is not valid UTF-8, and a multipart whose closing boundary is missing.
+
 It does **not** buy a compatibility claim. A fake written by the same hand as the client cannot prove
 interoperability with Nextcloud, ownCloud, `mod_dav`, Dovecot, Cyrus, Exchange or Proton Bridge. The
 Phase 1 review's finding applies: *a compatibility claim needs a captured fixture from the real
@@ -321,6 +330,7 @@ src/folder/           scan.ts (safe walk) · stability.ts · watcher.ts · sourc
 src/webdav/           client.ts (six methods, no dependency) · source.ts
 src/imap/             client.ts (literal-aware) · headers.ts · rules.ts · source.ts
 test/fakes/           an in-process WebDAV feed server and an in-process IMAP server
+test/mail-corpus.test.ts   fixtures/mail/, end to end, against fixtures/expected-counts.json
 ```
 
 Licence: AGPL-3.0-or-later.

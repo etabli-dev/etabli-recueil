@@ -2,12 +2,15 @@
  * The pipeline, as the server holds it: one factory, one registry of runs in flight, one bridge.
  *
  * **The factory.** `@recueil/ingest` takes its sidecars behind interfaces, and this server has
- * none of them: no OCRmyPDF, no GROBID, no resolver, because none is reachable without a container
- * runtime. So the pipeline is built with the office heuristics, `UnavailableOcrEngine` and no
- * resolvers, and stage 5 is switched off rather than failing per document — the job's stage trace
- * then shows `ocr` absent rather than run-and-failed, and `README.md` says so where an operator
- * will read it. What the pipeline *is* given is the stored rule set, through `StoredRuleEvaluator`,
- * so `/api/v1/rules` is wired to the thing that files documents rather than to a form.
+ * none of them by default: no GROBID and no resolver, because neither is reachable without a
+ * container runtime, and no OCR unless an operator names one. `RECUEIL_OCR_ENGINE=ocrmypdf` builds
+ * the adapter in `@recueil/ingest` against a binary on `PATH`; anything else leaves stage 5 switched
+ * off rather than failing per document — the job's stage trace then shows `ocr` absent rather than
+ * run-and-failed, and `README.md` says so where an operator will read it. Nothing in this
+ * repository's tests runs the real adapter: see `packages/ingest/src/ocr/ocrmypdf.ts` for what that
+ * does and does not prove. What the pipeline *is* given is the stored rule set, through
+ * `StoredRuleEvaluator`, so `/api/v1/rules` is wired to the thing that files documents rather than
+ * to a form.
  *
  * **The registry.** A run started through the API keeps running after the response has been sent,
  * because a folder with four hundred scans is not a request-response operation. The registry is
@@ -32,9 +35,11 @@ import type { Actor, Recueil } from '@recueil/core';
 import {
   IngestCancelledError,
   IngestPipeline,
+  OcrMyPdfEngine,
   OfficeHeuristicExtractor,
   UnavailableOcrEngine,
 } from '@recueil/ingest';
+import type { OcrEngine } from '@recueil/ingest';
 import type { IngestCandidate, IngestOutcome, IngestRef, IngestRunReport } from '@recueil/ingest';
 import { SourceRunner } from '@recueil/ingest-sources';
 import type { SourceRunReport } from '@recueil/ingest-sources';
@@ -126,6 +131,7 @@ export class IngestionRunner {
     flushDocumentEvents: (runId: string) => void;
   } {
     const currentRunId = options.runId ?? (() => null);
+    const ocr = this.ocrEngine();
     const evaluator = new StoredRuleEvaluator({
       recueil: this.deps.recueil,
       store: this.deps.rules,
@@ -147,14 +153,14 @@ export class IngestionRunner {
       actor: options.actor,
       config: {
         confidenceThreshold: this.deps.config.ingestConfidenceThreshold,
-        // No OCR worker is reachable from this process (no container runtime), so stage 5 is off
-        // rather than failing per document. `ocr_status` becomes `skipped`, which is the truth.
-        ocrEnabled: false,
+        // With no adapter configured, stage 5 is off rather than failing per document:
+        // `ocr_status` becomes `skipped`, which is the truth.
+        ocrEnabled: ocr !== null,
         ...(this.deps.config.ingestScratchPath === undefined
           ? {}
           : { scratchRoot: this.deps.config.ingestScratchPath }),
       },
-      ocr: new UnavailableOcrEngine(),
+      ocr: ocr ?? new UnavailableOcrEngine(),
       extractors: [new OfficeHeuristicExtractor()],
       resolvers: [],
       ruleEngine: evaluator,
@@ -183,6 +189,26 @@ export class IngestionRunner {
     };
 
     return { pipeline, ruleCount: evaluator.size, flushDocumentEvents };
+  }
+
+  /**
+   * The stage-5 adapter this server was configured with, or null for "do not OCR".
+   *
+   * Built per pipeline rather than once, because the adapter holds no state worth sharing and
+   * because a configuration read at boot is a configuration a reader can find: there is exactly one
+   * place that turns `RECUEIL_OCR_ENGINE` into an engine.
+   */
+  private ocrEngine(): OcrEngine | null {
+    if (this.deps.config.ocrEngine !== 'ocrmypdf') return null;
+    return new OcrMyPdfEngine({
+      ...(this.deps.config.ocrBinary === undefined ? {} : { binary: this.deps.config.ocrBinary }),
+      ...(this.deps.config.ocrLanguages.length === 0
+        ? {}
+        : { languages: this.deps.config.ocrLanguages }),
+      ...(this.deps.config.ingestScratchPath === undefined
+        ? {}
+        : { scratchRoot: this.deps.config.ingestScratchPath }),
+    });
   }
 
   /* ---- one upload ----------------------------------------------------------------------------- */

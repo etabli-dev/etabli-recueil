@@ -210,3 +210,9 @@ pnpm --filter @recueil/web test:e2e
 
 `test:e2e` is deliberately not part of `pnpm test`: it needs a browser binary and a built bundle,
 and a suite that fails for the want of either on a fresh checkout teaches people to ignore it.
+
+**Rebuild before every e2e run.** The harness serves `dist/`, so an edit to `src/` that has not been
+rebuilt is invisible to the suite — it would report on the previous build, which is worse than
+failing, because a fix under test appears not to work. The harness therefore compares the newest
+mtime under `src/` against the bundle's and refuses to start when the bundle is older, naming the
+command that fixes it.

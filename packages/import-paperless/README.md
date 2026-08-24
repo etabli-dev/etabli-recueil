@@ -48,13 +48,33 @@ server's own source cannot discover that the server behaves differently from its
 deployment sends a field this package does not know about, or that a reverse proxy in front of it
 changes something on the way past.
 
+There is a second corpus, and it is worth being precise about what it adds.
+`test/fixture-corpus.test.ts` runs the importer against `fixtures/paperless/` — the API dump, route
+table and eleven originals the repository committed as its Paperless reference — loaded through
+`paperlessFixtureCorpus()` and served by the same fake. That corpus's counts were written by hand in
+`fixtures/lib/paperless.mjs` *before* its generator ran, and are published in
+`fixtures/expected-counts.json`, so the parity assertions compare the importer against a figure it
+had no part in choosing rather than against a library written by the same hand. It also carries
+awkward material `src/testing/fixtures.ts` does not: a Greek original filename that cannot go in a
+`Content-Disposition` header unencoded, a filename with `:`, `*`, `?` and a trailing dot, a 303-character
+title, and a document whose download answers 500.
+
+What it does **not** add is a compatibility claim. The dump was written from the documented API, not
+captured from a running server — and it declares Paperless-ngx 2.14.7 / API 6, which is older than
+this client speaks. Stood up behind those headers, the importer refuses with
+`PaperlessApiVersionError` rather than guessing at the older envelope; there is a test for that. The
+parity run therefore serves the corpus's *data* through the fake's modelled 3.0.5 envelope, and
+`source.versionMatchesModel` in that report is a property of the fake.
+
 What would make it a claim, in order of value:
 
-1. **A captured fixture.** Run against a real instance with `RECUEIL_CAPTURE=1`-style tooling — or
-   simply `curl` the six list endpoints plus one `metadata` response with a real token — and commit
-   the responses, scrubbed, under `fixtures/paperless/`. Then assert the fake's output against them
-   field by field. Until that exists, `source.versionMatchesModel` in the report is the only signal a
-   reader gets, and it compares version strings, not behaviour.
+1. **A captured fixture.** Run against a real instance — or simply `curl` the six list endpoints plus
+   one `metadata` response with a real token — and commit the responses, scrubbed, beside the
+   generated ones in `fixtures/paperless/`, with the release they came from recorded. Then assert the
+   fake's output against them field by field. The loader already turns that directory into a
+   `FakeLibrary`, so a captured dump would drop straight into the existing test. Until one exists,
+   `source.versionMatchesModel` in the report is the only signal a reader gets, and it compares
+   version strings, not behaviour.
 2. **One real migration, verified.** The M2 exit criterion is not "the importer runs"; it is
    "Paperless decommissioned after verified import". That means a real run, a report that says PASS,
    and a person who has read the review queue.

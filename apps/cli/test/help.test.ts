@@ -41,7 +41,17 @@ describe('recueil --help', () => {
   it('does not mark the commands it ships as unimplemented, because they are not', async () => {
     const { stdout } = await runCli(['--help']);
     const shipped = COMMANDS.filter(isImplemented);
-    expect(shipped.map((spec) => spec.name)).toEqual(['serve', 'import', 'export', 'backup', 'restore']);
+    expect(shipped.map((spec) => spec.name)).toEqual([
+      'serve',
+      'import',
+      'export',
+      'backup',
+      'restore',
+      'ingest',
+      'queue',
+      'review',
+      'rules',
+    ]);
     for (const spec of shipped) {
       expect(commandEntry(stdout, spec.name), `\`${spec.name}\` works`).not.toContain('not implemented');
     }

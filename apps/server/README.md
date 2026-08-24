@@ -107,6 +107,9 @@ port and silently uses the default is a server that is not where you left it.
 | `RECUEIL_INGEST_ALLOWED_ROOTS` | — | Comma-separated absolute directories a watched-folder source may be pointed at. Unset means no allow-list, and a root is then any absolute directory that exists. Set it wherever the token holder and the machine owner are not the same person |
 | `RECUEIL_INGEST_SCRATCH_PATH` | OS temp | Where the ingestion pipeline extracts archives. Needs room for the largest archive |
 | `RECUEIL_INGEST_CONFIDENCE_THRESHOLD` | `0.75` | The stage-9 gate (CONCEPT.md §5.3). At or above it an item is created; below it the document is stored and a review-queue entry carries the reason (P3) |
+| `RECUEIL_OCR_ENGINE` | `none` | Stage 5. `none` does no OCR and records `ocr_status = skipped`; `ocrmypdf` runs the adapter in `@recueil/ingest` against a local binary. The default is off because nothing may be assumed installed, and one missing binary would otherwise fill the review queue with identical entries. Untested against a real OCRmyPDF here — see below |
+| `RECUEIL_OCR_BINARY` | `ocrmypdf` | The executable, or a wrapper around one. Read only when the engine is `ocrmypdf` |
+| `RECUEIL_OCR_LANGUAGES` | — | Tesseract language codes, comma-separated, in preference order (`deu,eng`) |
 
 ## Endpoints
 
@@ -268,15 +271,31 @@ somebody has to look at.
 
 ### Ingestion (Phase 2)
 
-`POST /api/v1/ingestion/upload` is the share target: multipart in, streamed and hashed on the way
-past, the whole pipeline of CONCEPT.md §5.3 in the middle, and one of six outcomes out — with the
-created item or the review entry in the body, so a phone renders a result rather than polling.
+`POST /api/v1/ingestion/upload` is the share target: multipart in, spooled and hashed a chunk at a
+time so the size limit bites before the whole file exists anywhere, the pipeline of CONCEPT.md §5.3
+in the middle, and one of six outcomes out — with the created item or the review entry in the body,
+so a phone renders a result rather than polling. The spool goes under `RECUEIL_INGEST_SCRATCH_PATH`
+(the OS temporary directory by default) and never inside the content store, whose root has a layout
+and whose backup reports everything that is not that layout. Streaming stops at the pipeline:
+`IngestCandidate.read()` returns a `Buffer`, so the file is materialised once, after the limit has
+been enforced.
+
+`GET /api/v1/ingestion/queue/{id}` answers with the job, its stage trace, its log and the review
+entries it raised. Asked for a source job, the trace spans every pipeline run beneath it rather than
+the first — a retried poll mints another — and each row names the run that wrote it.
 
 What this build's pipeline does **not** do, said plainly because the endpoint's behaviour depends on
-it: there is no OCR worker and no resolver, because neither exists without a container runtime. A
-scan with no text layer therefore reaches the confidence gate with nothing to say for itself and
+it: there is no metadata resolver and, unless you configure one, no OCR. With `RECUEIL_OCR_ENGINE`
+unset, a scan with no text layer reaches the confidence gate with nothing to say for itself and
 lands in the review queue. That is P3 working, not a defect, and the job's stage trace shows `ocr`
 absent rather than run-and-failed.
+
+`RECUEIL_OCR_ENGINE=ocrmypdf` turns stage 5 on against an `ocrmypdf` binary on `PATH` — no container
+is involved, and none is available on the machine this was written on, which is exactly why the
+default is off. **That adapter has never been run against a real OCRmyPDF in this repository**: the
+suite exercises the `OcrEngine` interface through an in-process fake, and
+`packages/ingest/src/ocr/ocrmypdf.ts` says so at the top. Run one scan through it and read the
+result before trusting it with a folder.
 
 Accepting a review entry executes its `proposedPayload` through the same commit the pipeline uses,
 inside one transaction with the resolution (RQ1) — so a duplicate ASN, a bad collection id or any

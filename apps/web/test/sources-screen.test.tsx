@@ -16,8 +16,10 @@ import { SourcesScreen } from '../src/sources/sources-screen.js';
 import { createFakeServer } from './fake-server.js';
 import type { FakeServer, Handler } from './fake-server.js';
 import { renderWithApi } from './helpers.js';
+import { MAX_PAGE_SIZE } from '../src/api/client.js';
 import {
   JOB_ID,
+  PIPELINE_JOB_ID,
   SOURCE_ID,
   folderSource,
   ingestionJob,
@@ -72,9 +74,68 @@ describe('the sources screen', () => {
     expect(await screen.findByTestId('backlog-open')).toHaveTextContent('1 open review entry');
     const asked = server.requestsTo('GET', REVIEW);
     expect(asked).toHaveLength(1);
-    expect(asked[0]?.query.get('jobId')).toBe(JOB_ID);
     expect(asked[0]?.query.get('status')).toBe('open');
     expect(screen.getByText(/not by adding up what the run said it did/u)).toBeInTheDocument();
+  });
+
+  /**
+   * The join, asserted on its own.
+   *
+   * A source run is two jobs: the `ingest.source` job the source stores as `lastRunJobId`, and the
+   * `ingest.run` job it spawns, whose id is the one stamped on every review entry. Filtering the
+   * queue by the former matches nothing — and answers "0 open review entries", which reads exactly
+   * like an empty backlog. So the id sent is asserted to be the pipeline job's, and asserted *not*
+   * to be the source run's.
+   */
+  it('filters the queue by the pipeline job the run spawned, not by the run itself', async () => {
+    const { server } = render({}, SOURCE_ID);
+
+    await screen.findByTestId('backlog-open');
+    const asked = server.requestsTo('GET', REVIEW);
+    expect(asked[0]?.query.get('jobId')).toBe(PIPELINE_JOB_ID);
+    expect(asked[0]?.query.get('jobId')).not.toBe(JOB_ID);
+  });
+
+  /**
+   * The page size, asserted because exceeding it is not a soft failure.
+   *
+   * `PageInfoSchema` validates `page.limit` on the response, so a request above `MAX_PAGE_SIZE`
+   * comes back as a 500 rather than as a short page — which is how this screen used to render an
+   * error where the backlog should be.
+   */
+  it('asks for no more than one page, because the ceiling is enforced on the response too', async () => {
+    const { server } = render({}, SOURCE_ID);
+
+    await screen.findByTestId('backlog-open');
+    const limit = Number(server.requestsTo('GET', REVIEW)[0]?.query.get('limit'));
+    expect(limit).toBeLessThanOrEqual(MAX_PAGE_SIZE);
+  });
+
+  it('says the run reached no pipeline rather than showing a zero it never asked for', async () => {
+    const { server } = render(
+      {
+        [`GET /api/v1/ingestion/queue/:id`]: () =>
+          jobDetail({ job: ingestionJob({ result: { offered: 0, skipped: 3, counts: null } }) }),
+      },
+      SOURCE_ID,
+    );
+
+    expect(await screen.findByTestId('backlog-none')).toHaveTextContent(/offered nothing to the pipeline/u);
+    expect(screen.queryByTestId('backlog-open')).not.toBeInTheDocument();
+    // The claim is not made by asking and getting nothing back; it is made by not asking.
+    expect(server.requestsTo('GET', REVIEW)).toHaveLength(0);
+  });
+
+  it('distinguishes a run still in flight from one that offered nothing', async () => {
+    render(
+      {
+        [`GET /api/v1/ingestion/queue/:id`]: () =>
+          jobDetail({ job: ingestionJob({ state: 'running', finishedAt: null, result: null }) }),
+      },
+      SOURCE_ID,
+    );
+
+    expect(await screen.findByTestId('backlog-none')).toHaveTextContent(/has not reached the pipeline yet/u);
   });
 
   it('does not read "no error logged" as "everything arrived"', async () => {

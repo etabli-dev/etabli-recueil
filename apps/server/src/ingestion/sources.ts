@@ -490,18 +490,29 @@ export class IngestionSourceService {
       return [{ check: 'connect', ok: false, detail: describe(error) }];
     }
 
+    // Login and SELECT are checked separately, and not because it reads better. A single `try`
+    // around both reports a mailbox that is not there as a failed *login*, which sends an operator
+    // to reset a password that was never wrong. A check names the step that failed or it is not
+    // evidence.
     try {
       await client.login();
       checks.push({ check: 'login', ok: true, detail: `authenticated as ${config.username}` });
+    } catch (error) {
+      checks.push({ check: 'login', ok: false, detail: describe(error) });
+      await client.logout().catch(() => undefined);
+      return checks;
+    }
 
-      const status = await client.select(config.mailbox ?? 'INBOX');
+    const mailbox = config.mailbox ?? 'INBOX';
+    try {
+      const status = await client.select(mailbox);
       checks.push({
         check: 'select',
         ok: true,
         detail: `mailbox '${status.mailbox}' holds ${String(status.exists)} message(s)`,
       });
     } catch (error) {
-      checks.push({ check: 'login', ok: false, detail: describe(error) });
+      checks.push({ check: 'select', ok: false, detail: describe(error) });
     } finally {
       await client.logout().catch(() => undefined);
     }

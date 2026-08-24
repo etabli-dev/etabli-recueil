@@ -21,6 +21,11 @@ export const LOG_LEVELS = ['trace', 'debug', 'info', 'warn', 'error', 'fatal', '
 
 export type LogLevel = (typeof LOG_LEVELS)[number];
 
+/** The stage-5 adapters this server can be pointed at. `fake` belongs to tests and is not here. */
+export const OCR_ENGINES = ['none', 'ocrmypdf'] as const;
+
+export type OcrEngineName = (typeof OCR_ENGINES)[number];
+
 /** Docker and local mode run identical code; only the shell differs (CONCEPT.md §5.1). */
 export const RUN_MODES = ['server', 'sidecar'] as const;
 
@@ -133,6 +138,25 @@ export const ServerEnvSchema = z.object({
       .transform((value) => Number.parseFloat(value)),
     '0.75',
   ),
+  /**
+   * The stage-5 OCR adapter (CONCEPT.md §5.3).
+   *
+   * `none` — the default — means this server does not OCR: `ocr_status` becomes `skipped` and a
+   * scan is filed with whatever text layer it already had. `ocrmypdf` runs the adapter in
+   * `@recueil/ingest`, which needs an `ocrmypdf` on `PATH` (or a wrapper named by
+   * `RECUEIL_OCR_BINARY`). The default is `none` because nothing may be assumed present, and the
+   * alternative — trying and failing per document — turns one missing binary into a review queue
+   * full of identical entries.
+   *
+   * The CLI has had `--ocr` since the pipeline landed. This variable is the same choice for the
+   * server, so that `recueil ingest watch` and `POST /ingestion/sources/{id}/run` over the same
+   * folder do the same thing.
+   */
+  RECUEIL_OCR_ENGINE: withDefault(z.enum(OCR_ENGINES), 'none'),
+  /** The `ocrmypdf` executable, or a wrapper around one. Only read when the engine is `ocrmypdf`. */
+  RECUEIL_OCR_BINARY: optionalString.optional(),
+  /** Tesseract language codes, comma-separated and in preference order, e.g. `deu,eng`. */
+  RECUEIL_OCR_LANGUAGES: optionalString.optional(),
   /** The largest single uploaded file. Default 512 MiB — a large scan, not a disk image. */
   RECUEIL_MAX_UPLOAD_BYTES: withDefault(
     z
@@ -174,6 +198,12 @@ export interface ServerConfig {
   readonly ingestScratchPath?: string;
   /** The stage-9 confidence gate. */
   readonly ingestConfidenceThreshold: number;
+  /** Which stage-5 adapter to build, if any. */
+  readonly ocrEngine: OcrEngineName;
+  /** The executable, when the engine is `ocrmypdf` and a non-default one was named. */
+  readonly ocrBinary?: string;
+  /** Tesseract language codes, in preference order. Empty means the adapter's own default. */
+  readonly ocrLanguages: readonly string[];
 }
 
 /**
@@ -244,8 +274,20 @@ export const loadConfig = (env: NodeJS.ProcessEnv = process.env): ServerConfig =
         ? undefined
         : resolve(parsed.RECUEIL_INGEST_SCRATCH_PATH),
     ingestConfidenceThreshold: parsed.RECUEIL_INGEST_CONFIDENCE_THRESHOLD,
+    ocrEngine: parsed.RECUEIL_OCR_ENGINE,
+    ocrBinary: parsed.RECUEIL_OCR_BINARY,
+    ocrLanguages: Object.freeze(parseList(parsed.RECUEIL_OCR_LANGUAGES)),
   });
 };
+
+/** A comma-separated list, trimmed and emptied of blanks. */
+const parseList = (value: string | undefined): string[] =>
+  value === undefined
+    ? []
+    : value
+        .split(',')
+        .map((entry) => entry.trim())
+        .filter((entry) => entry !== '');
 
 /**
  * The allow-list, resolved to absolute paths.

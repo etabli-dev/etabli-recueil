@@ -56,7 +56,27 @@ export const scanDocument = (overrides: Partial<Document> = {}): Document =>
 export const REVIEW_ENTRY_ID = '01J8F3Z9K4REVIEW0000000001';
 export const SECOND_ENTRY_ID = '01J8F3Z9K4REVIEW0000000002';
 export const CREATED_ITEM_ID = '01J8F3Z9K4ITEM0000000000A1';
+/**
+ * The `ingest.source` job — the source run.
+ *
+ * This is what `POST /ingestion/sources/{id}/run` returns and what the source stores as
+ * `lastRunJobId`. It is **not** the id a review entry carries; see `PIPELINE_JOB_ID`.
+ */
 export const JOB_ID = '01J8F3Z9K4JOB00000000000A1';
+
+/**
+ * The `ingest.run` job the source run spawned — and the id review entries are stamped with.
+ *
+ * These two are deliberately different values, because on a real server they are different values,
+ * and a fixture that reused one id for both would let the screen filter the review queue by the
+ * wrong key and still pass. That is not hypothetical: it is the defect this pair was introduced to
+ * catch, found by the end-to-end suite against a real server after the component tests had gone
+ * green against a fixture where the two ids were the same.
+ *
+ * The shape below — `result.pipelineJobId` alongside `counts` and `offered` — is transcribed from
+ * what `GET /api/v1/ingestion/queue/{id}` actually returned for a folder run.
+ */
+export const PIPELINE_JOB_ID = '01J8F3Z9K4PIPELINEJOB00001';
 
 export const reviewEntry = (overrides: Partial<ReviewEntry> = {}): ReviewEntry => ({
   id: REVIEW_ENTRY_ID,
@@ -81,7 +101,9 @@ export const reviewEntry = (overrides: Partial<ReviewEntry> = {}): ReviewEntry =
   severity: 'warning',
   status: 'open',
   sourceStage: 'ingest.9',
-  jobId: JOB_ID,
+  // The pipeline job, not the source run: this is the column the server writes and the one the
+  // review queue's `jobId` filter matches against.
+  jobId: PIPELINE_JOB_ID,
   createdAt: NOW,
   updatedAt: NOW,
   resolvedAt: null,
@@ -114,10 +136,10 @@ export const acceptResult = (overrides: Partial<ReviewAcceptResult> = {}): Revie
 
 export const ingestionJob = (overrides: Partial<IngestionJob> = {}): IngestionJob => ({
   id: JOB_ID,
-  jobType: 'ingest.source-run',
+  jobType: 'ingest.source',
   state: 'waiting_review',
-  idempotencyKey: 'folder:/srv/consume:2026-08-22T09:15',
-  params: { sourceId: '01J8F3Z9K4SOURCE000000001A' },
+  idempotencyKey: 'ingest.source:01J8F3Z9K4SOURCE000000001A:api-2026-08-22T09:15:00.000Z',
+  params: { sourceId: '01J8F3Z9K4SOURCE000000001A', sourceName: 'Scanner drop', runLabel: 'api-2026-08-22T09:15:00.000Z' },
   priority: 0,
   attempts: 1,
   maxAttempts: 3,
@@ -126,7 +148,19 @@ export const ingestionJob = (overrides: Partial<IngestionJob> = {}): IngestionJo
   startedAt: NOW,
   finishedAt: '2026-08-22T09:16:04.000Z',
   heartbeatAt: null,
-  result: null,
+  // The run's own report. `pipelineJobId` is the only part of it this client reads — it is the
+  // foreign key the review queue is then asked about. `counts.review` is deliberately left
+  // disagreeing with the queue in some tests, because a backlog taken from here rather than from
+  // the queue is exactly the mistake worth failing on.
+  result: {
+    offered: 7,
+    skipped: 0,
+    recovered: 0,
+    refusedAcknowledgements: 0,
+    pipelineJobId: PIPELINE_JOB_ID,
+    counts: { ingested: 6, duplicates: 0, review: 1, containers: 0, stopped: 0, failed: 0 },
+    verificationPassed: true,
+  },
   error: null,
   createdAt: NOW,
   updatedAt: NOW,

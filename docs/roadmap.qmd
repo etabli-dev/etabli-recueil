@@ -56,12 +56,25 @@ Zotero.
 
 ## Phase 2 — Ingestion and storage backends → M2
 
-The full pipeline: watched folders, WebDAV feed, IMAP, the scanner path, the rule engine and the
-review-queue UI. The OCRmyPDF worker, the Office facet, the Paperless-ngx importer. WebDAV and S3
-storage backends, and PWA upload as interim mobile capture.
+**In the tree.** The ten-stage pipeline of CONCEPT.md §5.3; watched folder, WebDAV and IMAP sources;
+the scanner path as a folder or mailbox source; the YAML rule engine with its dry-run report; the
+confidence gate and the review queue, with screens for sources, review and rules in the web client;
+the Office facet; the Paperless-ngx importer and its verification report; the WebDAV and S3 storage
+backends behind one conformance suite; PWA upload.
 
 **Exit:** scanner to searchable item with zero manual steps; mail to library; Paperless-ngx
 decommissioned after a verified import.
+
+**Where that stands.** The first two were rehearsed against the repository's fixture corpora and
+pass: six scans dropped into a watched folder became six searchable items in under two seconds
+with nothing typed, and all eight fixture messages went through an in-process IMAP server into documents,
+notes and rule-filed items. The Paperless importer reaches every count the fixture corpus states.
+
+**M2 is not claimed**, because the criterion is about a real scanner, a real mailbox and a real
+Paperless-ngx instance being switched off — none of which a fixture can stand in for. Two known
+limits carry forward: the OCRmyPDF adapter exists but has never been run against a real OCRmyPDF
+here, and the decision to OCR is taken per document rather than per page, so a scanned page inside an
+otherwise digital PDF is missed.
 
 ## Phase 3 — Enrichment, checks, dedup → M3
 

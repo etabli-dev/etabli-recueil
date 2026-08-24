@@ -88,9 +88,14 @@ test('configures a watched folder from the sources screen', async ({ page }) => 
   await expect(page.getByTestId('source-detail')).toBeVisible();
   await expect(page.getByRole('option', { name: new RegExp(SOURCE_NAME, 'u') })).toBeVisible();
 
-  // The source is the server's now, not the form's: reloading reads it back over the API.
+  // The source is the server's now, not the form's: reloading reads it back over the API. The
+  // assertion is scoped to the row in the list rather than to the page, because the collapsed
+  // configuration block on the detail pane prints the same path — matching either would pass, and
+  // only the row is populated from `GET /api/v1/ingestion/sources`.
   await page.reload();
-  await expect(page.getByText(api.consumeDirectory)).toBeVisible();
+  await expect(page.getByRole('option', { name: new RegExp(SOURCE_NAME, 'u') })).toContainText(
+    api.consumeDirectory,
+  );
 });
 
 test('tests the connection, and names the checks behind the answer', async ({ page }) => {
@@ -140,8 +145,24 @@ test('the entry carries its reason, its proposal and what the run recorded', asy
   await expect(page.getByTestId('subject-preview')).toContainText('application/pdf');
 
   // What the run recorded, which is the stage checkpoints and the log — not a summary invented here.
+  //
+  // The pipeline writes one checkpoint per candidate per *completed* stage, and a candidate routed
+  // to review terminates at `commit`; on this run that is the only row `ingest_checkpoints` holds.
+  // So the assertion is on `commit` rather than on an earlier stage name: the trace is the run's
+  // record, and asserting a stage the run does not checkpoint would be asserting against an
+  // imagined server.
   await expect(page.getByTestId('run-trace')).toBeVisible();
-  await expect(page.getByTestId('trace-stages')).toContainText('rules');
+  await expect(page.getByTestId('trace-stages')).toContainText('commit');
+
+  // And it is *this* entry's trace, not a generic panel: the commit payload names the review entry
+  // the workspace has open. That is the checkpoint table and the review queue agreeing about one
+  // id, each read through its own endpoint.
+  const entryId = await page.getByTestId('review-detail').getAttribute('data-entry');
+  expect(entryId).toBeTruthy();
+  await expect(page.getByTestId('trace-stages')).toContainText(entryId as string);
+
+  // The run's log, which is where the routing decision is stated in words.
+  await expect(page.getByTestId('trace-log')).toContainText('routed to review');
 });
 
 test('accepting with an edit files the document into the library', async ({ page }) => {
@@ -151,10 +172,13 @@ test('accepting with an edit files the document into the library', async ({ page
 
   await page.getByRole('button', { name: /^Edit and accept/u }).click();
   await page.getByLabel('Item type').fill('invoice');
-  const correspondent = page.locator('#edits-office\\.correspondent');
-  if ((await correspondent.count()) > 0) {
-    await correspondent.fill(CORRESPONDENT);
-  }
+
+  // Filled unconditionally. This used to be guarded by a `count() > 0` check, which meant the whole
+  // office edit was skipped whenever the field was missing — and it *was* missing, because the
+  // editor only rendered fields the proposal already named and this proposal names none. The test
+  // went green while the reviewer had no way to supply a correspondent at all. A locator that may
+  // legitimately be absent does not belong in the one test that proves the facet is editable.
+  await page.locator('#edits-office\\.correspondent').fill(CORRESPONDENT);
   await page.getByLabel(/Why/u).fill('the correspondent is on the letterhead');
   await page.getByRole('button', { name: 'Accept with these edits' }).click();
 

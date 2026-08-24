@@ -23,6 +23,9 @@ describe('loadConfig defaults', () => {
     expect(config.mode).toBe('server');
     expect(config.corsOrigin).toBe(false);
     expect(config.trustProxy).toBe(false);
+    // Nothing may be assumed installed, so the default is to do no OCR at all rather than to try.
+    expect(config.ocrEngine).toBe('none');
+    expect(config.ocrLanguages).toEqual([]);
   });
 
   it('treats an empty variable as unset, because `FOO=` is what a .env file looks like', () => {
@@ -53,6 +56,24 @@ describe('loadConfig overrides', () => {
     expect(config.databaseUrl).toBe('file:/data/recueil.sqlite');
     expect(config.storagePath).toBe('/data/storage');
     expect(config.logLevel).toBe('warn');
+  });
+
+  it('takes the OCR adapter and its languages from the environment', () => {
+    const config = loadConfig({
+      RECUEIL_OCR_ENGINE: 'ocrmypdf',
+      RECUEIL_OCR_BINARY: '/usr/local/bin/ocrmypdf-wrapper',
+      RECUEIL_OCR_LANGUAGES: 'deu, eng ,',
+    });
+
+    expect(config.ocrEngine).toBe('ocrmypdf');
+    expect(config.ocrBinary).toBe('/usr/local/bin/ocrmypdf-wrapper');
+    expect(config.ocrLanguages).toEqual(['deu', 'eng']);
+  });
+
+  it('refuses an OCR adapter this server has no code for, rather than silently doing none', () => {
+    expect(() => loadConfig({ RECUEIL_OCR_ENGINE: 'tesseract' })).toThrow(ConfigError);
+    // `fake` is the tests' in-process engine and must not be reachable from a deployment.
+    expect(() => loadConfig({ RECUEIL_OCR_ENGINE: 'fake' })).toThrow(ConfigError);
   });
 
   it('parses a CORS origin list, and `*` on its own', () => {

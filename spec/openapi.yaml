@@ -6492,6 +6492,11 @@ paths:
         intermediate ones once it commits; a candidate that stopped halfway shows where.
 
 
+        Asked for a source job, `stages` covers the job and *every* pipeline run beneath it, not
+        only the earliest: a retried poll mints another run under the same source job, and each row
+        names the run that wrote it in `jobId`.
+
+
         `reviewEntryIds` is queried from `review_queue` by job id, not read out of the run's result
         summary, so the two can be compared.
 
@@ -14757,6 +14762,10 @@ components:
     StageTraceEntry:
       type: object
       properties:
+        jobId:
+          description: The pipeline run that wrote this row. A source job that has been retried owns more than
+            one run, and their rows are interleaved by time, so this is what separates the passes.
+          $ref: '#/components/schemas/Id'
         candidateKey:
           type: string
           maxLength: 64
@@ -14774,6 +14783,7 @@ components:
         createdAt:
           $ref: '#/components/schemas/Timestamp'
       required:
+        - jobId
         - candidateKey
         - stage
         - sha256

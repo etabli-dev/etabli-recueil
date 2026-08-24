@@ -12,8 +12,8 @@
  * trusts a filename, and every part is bounded by the caller's limits before it is decoded.
  *
  * Deliberately absent: S/MIME and PGP (encrypted or signed payloads are passed through as the
- * attachments they are, unverified and marked so), `message/partial` reassembly, and RFC 2231
- * continued parameters beyond the single-line form.
+ * attachments they are, unverified and marked so) and `message/partial` reassembly. RFC 2231
+ * continued and extended parameters *are* assembled — see `assembleParameters`.
  */
 import { ArchiveFormatError } from '../errors.js';
 
@@ -156,19 +156,117 @@ interface ContentType {
   parameters: Record<string, string>;
 }
 
+/** One `key=value` as it was written, before RFC 2231 assembly. */
+interface RawParameter {
+  /** The name with any `*n` / `*` suffix still on it, lower-cased. */
+  key: string;
+  value: string;
+}
+
+/** `%C3%A4` and the like, over an octet string that is otherwise ASCII. */
+const percentDecode = (value: string): Buffer => {
+  const bytes: number[] = [];
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index]!;
+    if (character === '%' && index + 2 < value.length) {
+      const hex = value.slice(index + 1, index + 3);
+      if (/^[0-9a-f]{2}$/iu.test(hex)) {
+        bytes.push(Number.parseInt(hex, 16));
+        index += 2;
+        continue;
+      }
+    }
+    bytes.push(...Buffer.from(character, 'utf8'));
+  }
+  return Buffer.from(bytes);
+};
+
+/** Decode with the charset the parameter named, falling back to Latin-1 rather than throwing. */
+const decodeCharset = (bytes: Buffer, charset: string | null): string => {
+  try {
+    return new TextDecoder((charset ?? 'utf-8').toLowerCase()).decode(bytes);
+  } catch {
+    return bytes.toString('latin1');
+  }
+};
+
+/**
+ * Assemble RFC 2231 parameters: `name*`, `name*0`, `name*1*`, …
+ *
+ * A client that has to write a non-ASCII filename has three spellings to choose from — the single
+ * extended form, a numbered continuation, and a numbered continuation where only some segments are
+ * extended — and which one it emits depends on which paragraph its author read. All three are in
+ * the wild, `fixtures/mail/two-attachments.eml` carries the third, and a parser that handles only
+ * the first turns a real filename into `part-2.bin`, which is a document nobody will find again.
+ *
+ * A plain `name=` is left exactly as it was; only names that were actually split or extended are
+ * reassembled, and an extended spelling wins over a plain one for the same name, as RFC 2231 §4
+ * requires.
+ */
+const assembleParameters = (raw: readonly RawParameter[]): Record<string, string> => {
+  const parameters: Record<string, string> = {};
+  const continued = new Map<string, Array<{ index: number; value: string; extended: boolean }>>();
+
+  for (const { key, value } of raw) {
+    const parsed = /^([^*]+)(?:\*(\d+))?(\*)?$/u.exec(key);
+    if (parsed === null) {
+      parameters[key] = value;
+      continue;
+    }
+    const name = parsed[1]!;
+    const extended = parsed[3] === '*';
+    if (parsed[2] === undefined && !extended) {
+      parameters[name] = value;
+      continue;
+    }
+    const segments = continued.get(name) ?? [];
+    segments.push({
+      index: parsed[2] === undefined ? 0 : Number.parseInt(parsed[2], 10),
+      value,
+      extended,
+    });
+    continued.set(name, segments);
+  }
+
+  for (const [name, segments] of continued) {
+    segments.sort((left, right) => left.index - right.index);
+    let charset: string | null = null;
+    let text = '';
+    for (const segment of segments) {
+      if (!segment.extended) {
+        text += segment.value;
+        continue;
+      }
+      let payload = segment.value;
+      // Only the first segment carries `charset'language'`; the rest are bare percent-encoding.
+      if (charset === null) {
+        const parts = payload.split("'");
+        if (parts.length >= 3) {
+          charset = parts[0]!.length > 0 ? parts[0]! : null;
+          payload = parts.slice(2).join("'");
+        }
+      }
+      text += decodeCharset(percentDecode(payload), charset);
+    }
+    parameters[name] = text;
+  }
+
+  return parameters;
+};
+
 const parseContentType = (raw: string): ContentType => {
   const [head, ...rest] = raw.split(';');
   const mediaType = (head ?? '').trim().toLowerCase() || 'text/plain';
-  const parameters: Record<string, string> = {};
+  const raws: RawParameter[] = [];
   for (const chunk of rest) {
     const equals = chunk.indexOf('=');
     if (equals === -1) continue;
     const key = chunk.slice(0, equals).trim().toLowerCase();
     let value = chunk.slice(equals + 1).trim();
     if (value.startsWith('"') && value.endsWith('"') && value.length >= 2) value = value.slice(1, -1);
-    parameters[key] = value;
+    raws.push({ key, value });
   }
-  return { mediaType, parameters };
+  return { mediaType, parameters: assembleParameters(raws) };
 };
 
 /* ------------------------------------------------------------------------------------------ */

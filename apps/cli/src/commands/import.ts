@@ -24,6 +24,7 @@ import { resolveLibraryLocation, withLibrary, type LibraryFlags } from '../libra
 import { Progress } from '../progress.js';
 import { count, renderTable } from '../table.js';
 import type { Ui } from '../ui.js';
+import { registerImportPaperless } from './import-paperless.js';
 import { registerImportZotero } from './import-zotero.js';
 import { droppedFromLosses, importRecords } from './import-records.js';
 import type { DroppedValue, RecordImportOutcome } from './import-records.js';
@@ -283,23 +284,26 @@ export const registerImport = (
         'Sources',
         '  zotero     a whole Zotero library: items, files, annotations, collections and trash,',
         '             with the verification report the Phase 1 exit criterion is judged on',
+        '  paperless  a whole Paperless-ngx server over its API: documents, tags, correspondents,',
+        '             document types, custom fields, ASN and originals, into the Office facet',
         '  bibtex     a .bib file',
         '  biblatex   a .bib file, read as BibLaTeX',
         '  ris        an RIS file',
         '  csl-json   a CSL-JSON file',
         '',
-        'Paperless-ngx, EndNote XML, JabRef and CSV arrive in later phases (CONCEPT.md §6).',
+        'EndNote XML, JabRef and CSV arrive in later phases (CONCEPT.md §6).',
       ].join('\n'),
     );
 
   registerImportZotero(command, ui);
+  registerImportPaperless(command, ui);
   for (const format of BIBLIOGRAPHY_FORMATS) registerBibliography(command, format, ui);
 
   // Reached only when the first argument matched no source. `recueil import` on its own prints the
   // help and fails; `recueil import endnote refs.enl` says which sources exist, because "too many
   // arguments for 'import'" is a true statement that helps nobody.
   command
-    .argument('[source]', 'zotero, bibtex, biblatex, ris or csl-json')
+    .argument('[source]', 'zotero, paperless, bibtex, biblatex, ris or csl-json')
     .allowExcessArguments(true)
     .action((source?: string) => {
       if (source === undefined) command.help({ error: true });
@@ -307,11 +311,11 @@ export const registerImport = (
         exitCode: ExitCode.Usage,
         detail: [
           '',
-          `  This build imports: zotero, ${BIBLIOGRAPHY_FORMATS.join(', ')}.`,
+          `  This build imports: zotero, paperless, ${BIBLIOGRAPHY_FORMATS.join(', ')}.`,
           '',
-          '  Paperless-ngx, EndNote XML, JabRef and CSV arrive in later phases (CONCEPT.md §6).',
+          '  EndNote XML, JabRef and CSV arrive in later phases (CONCEPT.md §6).',
         ],
-        payload: { error: 'unknown_source', source, known: ['zotero', ...BIBLIOGRAPHY_FORMATS] },
+        payload: { error: 'unknown_source', source, known: ['zotero', 'paperless', ...BIBLIOGRAPHY_FORMATS] },
       });
     });
 

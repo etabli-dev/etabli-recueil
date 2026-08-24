@@ -61,9 +61,11 @@ pnpm dev              # server and web UI in watch mode
 ```
 
 ::: {.callout-important appearance="simple"}
-**Phase 0 caveat.** There are no scripts in the root `package.json` yet and nothing runs. `pnpm
-install` succeeds and that is all. The commands above are the contract Phase 1 implements — if they
-do not exist, the code has not landed yet rather than your setup being wrong.
+`pnpm build` and `pnpm test` are real and pass across the whole workspace. `pnpm lint` and `pnpm dev`
+are declared at the root but not implemented in every package yet, so they are no-ops where a
+package has no such script. The test suite needs **no container**: everything a sidecar would provide
+— OCR, GROBID, a Paperless-ngx server, WebDAV, S3, IMAP — is behind an interface with an in-process
+fake, and a test that required a container would be a test nobody runs.
 :::
 
 ## Where the specification lives

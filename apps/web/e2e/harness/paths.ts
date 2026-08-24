@@ -18,3 +18,6 @@ export const repositoryRoot = resolve(webPackageRoot, '..', '..');
 
 /** The built SPA the browser is served. Produced by `pnpm --filter @recueil/web build`. */
 export const webDistDirectory = join(webPackageRoot, 'dist');
+
+/** The client source the bundle is built from, for the staleness check in `spa-server.ts`. */
+export const webSourceDirectory = join(webPackageRoot, 'src');

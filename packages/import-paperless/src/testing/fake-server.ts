@@ -324,7 +324,7 @@ export class FakePaperlessServer {
     const filename = original.filename ?? `${id}.pdf`;
     this.send(response, 200, bytes, {
       'content-type': original.contentType ?? 'application/pdf',
-      'content-disposition': `attachment; filename="${filename.replaceAll('"', '')}"`,
+      'content-disposition': contentDisposition(filename),
     });
   }
 
@@ -401,6 +401,23 @@ const clampInt = (raw: string | null, fallback: number, low: number, high: numbe
   const parsed = Number(raw);
   if (!Number.isSafeInteger(parsed)) return fallback;
   return Math.min(Math.max(parsed, low), high);
+};
+
+/**
+ * `Content-Disposition`, the way Django writes it.
+ *
+ * `django.http.FileResponse.set_headers` tries to encode the filename as ASCII and, when that
+ * fails, sends RFC 5987's extended form instead of the plain parameter — never both. Reproducing
+ * that split matters here because `fixtures/paperless/` contains a document whose original filename
+ * is Greek: a fake that puts those bytes straight into a header does not merely differ from Django,
+ * it makes Node throw `ERR_INVALID_CHAR` and the response never arrives at all.
+ */
+const contentDisposition = (filename: string): string => {
+  const asciiOnly = /^[\u0020-\u007e]*$/u.test(filename);
+  if (asciiOnly) {
+    return `attachment; filename="${filename.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`;
+  }
+  return `attachment; filename*=utf-8''${encodeURIComponent(filename).replaceAll("'", '%27')}`;
 };
 
 /** Paperless records an MD5 of the original; the fake computes the same thing. */

@@ -335,6 +335,13 @@ export const useIngestionJob = (id: string | null): UseQueryResult<IngestionJobD
     queryKey: queryKeys.job(id ?? ''),
     queryFn: ({ signal }) => client.getIngestionJob(id as string, signal),
     enabled: id !== null,
+    // A run is asynchronous: the request that starts it returns before it has done anything, so the
+    // first read of it almost always shows a job with no result yet. Polling stops as soon as the
+    // job has a `finishedAt`, which is what makes this a progress display rather than a permanent
+    // timer on an idle screen. `waiting_review` counts as finished — the run is over and waiting on
+    // a human (IK6), and nothing further will change until one acts.
+    refetchInterval: (query) => (query.state.data?.job.finishedAt === null ? 2_000 : false),
+    staleTime: 0,
   });
 };
 

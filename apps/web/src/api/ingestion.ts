@@ -242,6 +242,33 @@ export interface IngestionJobDetail {
   reviewEntryIds: string[];
 }
 
+/**
+ * The pipeline job a source run spawned, or `null` if it spawned none.
+ *
+ * A source run is two jobs, not one, and this is the join between them. `POST
+ * /ingestion/sources/{id}/run` starts an `ingest.source` job — that is the id it returns and the id
+ * the source stores as `lastRunJobId` — and that job then starts one `ingest.run` job to put the
+ * candidates it offered through the pipeline. **Review entries are stamped with the `ingest.run`
+ * id, never the `ingest.source` id**, so filtering the review queue by `lastRunJobId` matches
+ * nothing at all: not "no backlog", but a query against the wrong key, which answers zero however
+ * large the backlog is.
+ *
+ * The run's `result` is an untyped bag on the wire (`z.record(z.string(), z.unknown())`), so the id
+ * is read defensively rather than asserted. `null` is a real answer with two causes worth keeping
+ * apart from an error: the run offered nothing, so no pipeline job exists; or it has not got that
+ * far yet.
+ *
+ * Note what this does and does not take from the run. It takes the *key* — a foreign key the
+ * review queue is then asked about — and never the *answer*. The same object carries
+ * `result.counts.review` and `reviewEntryIds`, either of which would be a backlog figure computed
+ * from the importer's own tally of what it thinks it did; such a figure cannot disagree with the
+ * importer and so can never reveal that the importer is wrong.
+ */
+export const pipelineJobIdOf = (detail: IngestionJobDetail | undefined): string | null => {
+  const value = detail?.job.result?.['pipelineJobId'];
+  return typeof value === 'string' && value.length > 0 ? value : null;
+};
+
 /* -------------------------------------------------------------------------------------------- */
 /* The review queue — /api/v1/ingestion/review, spec/data-model.md §6.1                            */
 /* -------------------------------------------------------------------------------------------- */

@@ -84,14 +84,17 @@ export const ingestionQueueRoutes: FastifyPluginAsync = async (app) => {
     const { id } = parseOrThrow(z.object({ id: IdSchema }), request.params, 'path');
     const job = ingestion.queue.get(id);
 
-    // The stage trace belongs to the pipeline run. Asked for a source job, follow the child so that
-    // a caller who has only the id they were handed by `POST /sources/{id}/run` still gets it.
+    // The stage trace belongs to the pipeline run. Asked for a source job, follow its children so
+    // that a caller who has only the id they were handed by `POST /sources/{id}/run` still gets it
+    // — every child, not the first: a retried poll mints a second pipeline run under the same
+    // source job, and showing only the earliest would answer a question about the latest run with
+    // the trace of the one before it.
     const children = ingestion.queue.children(id);
-    const traceJobId = children[0]?.id ?? id;
+    const runIds = [id, ...children.map((child) => child.id)];
 
     return sendJson(reply, IngestionJobDetailSchema, {
       job: jobToWire(job),
-      stages: ingestion.queue.stageTrace(traceJobId),
+      stages: ingestion.queue.stageTrace(runIds),
       log: [...ingestion.queue.logs(id), ...children.flatMap((child) => ingestion.queue.logs(child.id))]
         .sort((left, right) => left.id.localeCompare(right.id))
         .map(jobLogToWire),
@@ -212,6 +215,9 @@ export const ingestionQueuePaths: ZodOpenApiPathsObject = {
         'to start — rather than from the run\'s narration, so the trace and the resume point cannot ' +
         'disagree. A finished candidate shows one `commit` row, because the pipeline compacts the ' +
         'intermediate ones once it commits; a candidate that stopped halfway shows where.\n\n' +
+        'Asked for a source job, `stages` covers the job and *every* pipeline run beneath it, not ' +
+        'only the earliest: a retried poll mints another run under the same source job, and each ' +
+        'row names the run that wrote it in `jobId`.\n\n' +
         '`reviewEntryIds` is queried from `review_queue` by job id, not read out of the run\'s ' +
         'result summary, so the two can be compared.',
       tags: QUEUE_TAGS,

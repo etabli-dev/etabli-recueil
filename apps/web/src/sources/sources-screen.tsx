@@ -19,6 +19,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 
+import { MAX_PAGE_SIZE } from '../api/client.js';
 import { useApiClient } from '../api/context.js';
 import {
   queryKeys,
@@ -30,6 +31,7 @@ import {
   useTestIngestionSource,
   useUpdateIngestionSource,
 } from '../api/queries.js';
+import { pipelineJobIdOf } from '../api/ingestion.js';
 import type {
   IngestionJobDetail,
   IngestionSource,
@@ -165,15 +167,30 @@ const SourceDetail = ({ source, onDeleted }: { source: IngestionSource; onDelete
   /**
    * The backlog: the review entries this source's last run raised and nobody has decided.
    *
-   * Queried from the review queue by `jobId` — the other side of the comparison — rather than read
-   * out of the run's own report. A count taken from the importer's log cannot fail, and is worse
-   * than no count because it reads as evidence.
+   * Queried from the review queue — the other side of the comparison — rather than read out of the
+   * run's own report. A count taken from the importer's log cannot fail, and is worse than no count
+   * because it reads as evidence.
+   *
+   * The key is the *pipeline* job, not the source run: entries are stamped with the `ingest.run`
+   * id, and filtering by the `ingest.source` id silently answers zero. `pipelineJobIdOf` explains
+   * the two-job shape; until the run reports one there is nothing to ask about, which is a
+   * different state from "asked, and the answer was none".
+   *
+   * The page is asked for at `MAX_PAGE_SIZE` and no more. A backlog larger than one page is
+   * reported as "at least this many" off `page.hasMore` rather than by asking for a bigger page:
+   * the ceiling is enforced on the response as well as the request, so exceeding it does not
+   * truncate the answer, it replaces it with a 500.
    */
+  const pipelineJobId = pipelineJobIdOf(job.data);
+
   const backlog = useQuery<Page<ReviewEntry>>({
-    queryKey: [...queryKeys.reviewQueue(), 'for-job', source.lastRunJobId ?? ''],
+    queryKey: [...queryKeys.reviewQueue(), 'for-job', pipelineJobId ?? ''],
     queryFn: ({ signal }) =>
-      client.listReviewEntries({ status: 'open', jobId: source.lastRunJobId as string, limit: 500 }, signal),
-    enabled: source.lastRunJobId !== null,
+      client.listReviewEntries(
+        { status: 'open', jobId: pipelineJobId as string, limit: MAX_PAGE_SIZE },
+        signal,
+      ),
+    enabled: pipelineJobId !== null,
   });
 
   if (editing) {
@@ -247,6 +264,19 @@ const SourceDetail = ({ source, onDeleted }: { source: IngestionSource; onDelete
         <h3 className="section__title">Backlog</h3>
         {source.lastRunJobId === null ? (
           <p className="section__note">Nothing has run, so nothing is waiting.</p>
+        ) : job.isPending ? (
+          <LoadingState label="Reading the run…" />
+        ) : job.isError ? (
+          <ErrorState label="Could not read the run" error={job.error} onRetry={() => void job.refetch()} />
+        ) : pipelineJobId === null ? (
+          // No pipeline job to ask about. Said plainly rather than shown as a zero, because the two
+          // are different claims: this one is "the run put nothing through the pipeline", which is
+          // what an empty folder looks like, and a zero would assert that the queue was asked.
+          <p className="section__note" data-testid="backlog-none">
+            {job.data.job.finishedAt === null
+              ? 'The run has not reached the pipeline yet, so there is nothing to count.'
+              : 'The run offered nothing to the pipeline, so it raised nothing to review.'}
+          </p>
         ) : backlog.isPending ? (
           <LoadingState label="Counting what is waiting…" />
         ) : backlog.isError ? (

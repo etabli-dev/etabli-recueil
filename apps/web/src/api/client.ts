@@ -78,6 +78,19 @@ import type {
  */
 export const API_BASE_PATH = '/api/v1';
 
+/**
+ * The largest page any listing endpoint will return.
+ *
+ * `@recueil/schemas` exports this as `MAX_PAGE_SIZE`, and it is restated here for the same reason
+ * as the base path above; `test/contract.test.ts` asserts that the two agree.
+ *
+ * It is a hard ceiling, not a suggestion. `PageInfoSchema` validates `page.limit` on the way *out*,
+ * so a request for more than this does not come back truncated — it comes back as a 500, because
+ * the response fails its own serialisation. No caller may exceed it, and a caller that wants
+ * "everything" reads `page.hasMore` and says so rather than asking for a bigger number.
+ */
+export const MAX_PAGE_SIZE = 200;
+
 /** `/health` is deliberately unversioned: a probe that knows the API version breaks when it changes. */
 export const HEALTH_PATH = '/health';
 
@@ -288,7 +301,7 @@ export class RecueilClient {
   }
 
   listTags(signal?: AbortSignal): Promise<Page<Tag>> {
-    return this.api<Page<Tag>>('/tags', { query: { limit: 200 }, signal });
+    return this.api<Page<Tag>>('/tags', { query: { limit: MAX_PAGE_SIZE }, signal });
   }
 
   /* Item-pane resources ---------------------------------------------------------------------- */

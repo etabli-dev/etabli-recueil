@@ -11,17 +11,26 @@ enriches references against the open scholarly graph, and exposes the whole libr
 and LLMs as data. Systematic reviews and bibliometric mapping are native workflows, not exports.
 
 ::: {.callout-important}
-## Status: Phase 0. Nothing runs yet.
+## Status: Phases 1 and 2 in the tree. No release.
 
-This repository is a specification and a scaffold. There is no release, no Docker image and no
-binary; `pnpm install` succeeds and that is the extent of it. Every command, endpoint and screen
-described on this site is a **contract to be implemented**, not a description of working software.
+There is no tag, no Docker image and no binary. From a source checkout, `pnpm install && pnpm -r
+build` produces a working server, CLI and web client, and the library, the REST contract, the Zotero
+and Paperless-ngx migrators, the ingestion pipeline and the three storage backends all run — see
+[Getting started](getting-started.qmd) for the tested list and
+[the README](https://github.com/etabli-dev/etabli-recueil/blob/main/README.md) for what was measured.
 
-Each page marks which roadmap phase brings its subject into existence. Phase 0's own exit criterion
-is `recueil serve` answering a health check on an empty library.
+Everything from Phase 3 onwards — enrichment, the checks engine, deduplication, the graph, the
+systematic-review module, the desktop and mobile shells, the MCP server — is still a **contract to
+be implemented**. Each page marks which roadmap phase brings its subject into existence, and a
+command belonging to a later phase says so and exits non-zero rather than half-working.
 
-The documentation is written first on purpose: writing the manual before the code is a cheap way to
-find out that a design is unpleasant to explain.
+Neither **M1** (Zotero replaced) nor **M2** (Paperless replaced) is claimed: both ask for the
+author's real library and real hardware, and both have so far only been proved against the fixture
+corpora in the repository.
+
+Much of this site was written before the code, on purpose: writing the manual first is a cheap way
+to find out that a design is unpleasant to explain. Pages that are still ahead of the code say so at
+the top.
 :::
 
 ## What it is meant to be

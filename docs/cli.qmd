@@ -4,8 +4,9 @@ subtitle: "`recueil` — the API with a shell in front of it"
 ---
 
 ::: {.callout-important}
-Not yet implemented. The `recueil` binary arrives in Phase 1; subcommands follow the features they
-drive. This page is the intended command surface.
+**Partly implemented.** The commands marked ✓ below are in the tree and tested; the rest report the
+phase they arrive in and exit non-zero rather than half-working. This page is the intended command
+surface, and the table says which part of it exists.
 :::
 
 The CLI is a client of the [REST API](api.qmd) like everything else, with one exception: `recueil
@@ -16,20 +17,32 @@ Machine-readable output on every command via `--json`, so `jq` is the intended c
 
 ## Commands
 
-| Command | Does | Phase |
-|---|---|---|
-| `recueil serve` | Start the server | 0 |
-| `recueil import` | Zotero, Paperless-ngx, BibTeX, RIS, EndNote XML, CSL-JSON, JabRef, CSV | 1 |
-| `recueil export` | BibTeX, BibLaTeX, CSL-JSON, RIS, JSON-LD, CSV, Parquet | 1 |
-| `recueil check` | Run the verification engine over a scope, or over a pasted reference list | 3 |
-| `recueil dedup` | File and record deduplication, dry run by default | 3 |
-| `recueil ingest` | Push files in, manage sources, work the review queue | 2 |
-| `recueil graph` | Build edges, run a deep dive, export a network | 5 |
-| `recueil sr` | Systematic review: search runs, screening, extraction, PRISMA counts | 7 |
-| `recueil backup` / `restore` | Consistent snapshot and recovery | 1 |
-| `recueil token` | Create, list and revoke scoped API tokens | 1 |
-| `recueil plugin` | Install, enable, disable, configure, list | 3 |
-| `recueil job` | List, follow, retry and cancel jobs | 1 |
+| Command | Does | Phase | In the tree |
+|---|---|---|---|
+| `recueil serve` | Start the server | 0 | ✓ |
+| `recueil import zotero` | Migrate a Zotero library, with a verification report | 1 | ✓ |
+| `recueil import paperless` | Migrate a Paperless-ngx server, with a verification report | 2 | ✓ |
+| `recueil import bibtex \| biblatex \| ris \| csl-json` | Bibliographic records from a file | 1 | ✓ |
+| `recueil import` — EndNote XML, JabRef groups, Mendeley, CSV | The remaining bulk formats | later | — |
+| `recueil export` | BibTeX, BibLaTeX, CSL-JSON, RIS | 1 | ✓ |
+| `recueil export` — JSON-LD, CSV, Parquet | The analytics formats | 5 | — |
+| `recueil ingest` | Push files or a directory through the pipeline | 2 | ✓ |
+| `recueil ingest watch` | Poll every configured source, and any `--folder` given | 2 | ✓ |
+| `recueil review` | Work the review queue: list, accept, reject | 2 | ✓ |
+| `recueil rules` | Validate a rule set, and dry-run it over a corpus | 2 | ✓ |
+| `recueil queue` | List, retry and cancel ingestion jobs | 2 | ✓ |
+| `recueil backup` / `restore` | Consistent snapshot and recovery | 1 | ✓ |
+| `recueil token` | Create, list and revoke scoped API tokens | 1 | — mint them over the API |
+| `recueil job` | List, follow, retry and cancel jobs generally | 1 | — `recueil queue` covers ingestion |
+| `recueil check` | Run the verification engine over a scope, or over a pasted reference list | 3 | — |
+| `recueil dedup` | File and record deduplication, dry run by default | 3 | — |
+| `recueil plugin` | Install, enable, disable, configure, list | 3 | — |
+| `recueil graph` | Build edges, run a deep dive, export a network | 5 | — |
+| `recueil sr` | Systematic review: search runs, screening, extraction, PRISMA counts | 7 | — |
+
+Sources themselves are configured over the API rather than from the shell:
+`POST /api/v1/ingestion/sources` for a watched folder, a WebDAV collection or an IMAP mailbox.
+`recueil ingest watch` then polls whatever it finds configured.
 
 ## Connecting
 
@@ -44,10 +57,33 @@ Global flags: `--json`, `--quiet`, `--verbose`, `--no-colour`, `--yes` (skip con
 
 ## Examples
 
+The first four exist today. The rest are the intended surface of later phases and are written in the
+shape they are meant to take.
+
 Import a Zotero library and get a verification report:
 
 ```sh
-recueil import zotero --data-dir ~/Zotero --report import-report.md
+recueil import zotero ~/Zotero/zotero.sqlite \
+  --database ./library.db --storage ./storage --report ./zotero-import
+```
+
+Migrate a Paperless-ngx server, rehearsing first:
+
+```sh
+recueil import paperless --url https://paperless.example --token "$PAPERLESS_TOKEN" \
+  --database ./library.db --storage ./storage --dry-run
+```
+
+Run the pipeline over everything a scanner has left on a share, with a rule set:
+
+```sh
+recueil ingest watch --rules office.yaml --ocr ocrmypdf --database ./library.db --storage ./storage
+```
+
+See what still needs a decision, and why:
+
+```sh
+recueil review list --json --database ./library.db --storage ./storage | jq '.entries[].explanation'
 ```
 
 Audit a reference list that is not in your library — the peer-review deliverable:
@@ -68,10 +104,11 @@ Look at what a dedup run would do before it does it:
 recueil dedup records --scope collection:phd --dry-run --json | jq '.merges | length'
 ```
 
-Refresh a bibliography for a manuscript:
+Refresh a bibliography for a manuscript (today: `recueil export biblatex --search '…'`; the
+saved-search selector arrives with the saved-search UI):
 
 ```sh
-recueil export --format biblatex --saved-search "thesis chapter 3" > chapter3.bib
+recueil export biblatex --search 'tag:"thesis chapter 3"' --out chapter3.bib
 ```
 
 Snowball from a seed with a budget:

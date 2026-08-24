@@ -151,7 +151,17 @@ admits it:
 
 A `.eml` is content: the message is the thing, its body becomes a Note and its envelope fills the
 Office facet, so the message is kept as a Document and its attachments become Documents of their
-own with `parent_document_id` pointing at it.
+own with `parent_document_id` pointing at it. Nesting is followed: a forwarded message inside a
+message is expanded, and the PDF inside *that* becomes a Document two levels down.
+
+The message parser is hand-written (`src/archive/eml.ts`) and reads RFC 2047 encoded words in
+headers and RFC 2231 extended and continued parameters — `filename*=utf-8''…`, and the numbered
+`filename*0*` / `filename*1*` form Thunderbird and Outlook emit for a long non-ASCII filename.
+That last one is not a nicety: without it the part arrives as `part-2.bin` and nobody finds it
+again. `fixtures/mail/two-attachments.eml` carries exactly that case and
+`packages/ingest-sources/test/mail-corpus.test.ts` asserts the name survives. Still deliberately
+absent: S/MIME and PGP verification (signed and encrypted payloads pass through as the attachments
+they are, unverified and marked so) and `message/partial` reassembly.
 
 A `.zip` is a lorry. Keeping it means keeping every member's bytes twice, so by default it is *not*
 kept, and each member instead records `sourceDetail.archive` — the archive's digest, the member's

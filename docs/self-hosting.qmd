@@ -4,8 +4,10 @@ subtitle: "Running the server yourself, which is the only way it runs"
 ---
 
 ::: {.callout-important}
-Not yet implemented. Ships across Phases 1 to 3; the storage backends land in Phase 2. This page is
-the operator contract those phases must satisfy.
+**Partly implemented.** The server, its configuration, the three storage backends, tokens, backup
+and restore all exist and are tested. The Docker image and compose file in `deploy/` are written and
+have **never been run**; the metrics endpoint, the sidecar profiles and the enrichment keys belong to
+later phases. Each section below says which it is.
 :::
 
 Recueil has no hosted edition and no account. You run it, or it does not run. That constrains the
@@ -32,6 +34,9 @@ run them elsewhere or not at all.
 
 The `deploy/` directory holds a `docker-compose.yml` with the server, and the heavy optional
 components behind **compose profiles** so that none of them start unless you ask.
+
+None of the compose profiles has been run. They are written from the upstream images' documented
+interfaces and are a starting point, not a tested deployment.
 
 | Profile | Service | Adds |
 |---|---|---|
@@ -65,31 +70,65 @@ pnpm install && pnpm build && pnpm --filter @recueil/server start
 Configuration is environment variables, because that is what containers, systemd and secret
 managers all already speak. Every variable has a default that works.
 
+These are the variables the server reads today. It refuses to start on an invalid one, naming every
+offender, rather than falling back to a default.
+
 | Variable | Default | Purpose |
 |---|---|---|
-| `RECUEIL_DATA_DIR` | `/data` | Database, search index, scratch space |
-| `RECUEIL_STORAGE_DIR` | `/storage` | Content-addressed file store |
-| `RECUEIL_PORT` | `8080` | Listen port |
-| `RECUEIL_BASE_URL` | — | Public URL. Required behind a reverse proxy so generated links are correct |
-| `RECUEIL_LOG_LEVEL` | `info` | `trace` … `error`; output is structured JSON |
-| `RECUEIL_UNPAYWALL_EMAIL` | — | Required by Unpaywall's terms |
-| `RECUEIL_CROSSREF_MAILTO` | — | Puts you in Crossref's polite pool. Set it |
-| `RECUEIL_OPENALEX_KEY` | — | Optional; needed at scale |
-| `RECUEIL_S2_KEY`, `RECUEIL_NCBI_KEY` | — | Optional; raise rate limits |
-| `RECUEIL_GROBID_URL`, `RECUEIL_MEILI_URL`, `RECUEIL_TRANSLATION_URL` | — | Sidecar endpoints; unset means the feature is off |
+| `RECUEIL_DATABASE_URL` | `file:./data/recueil.db` | A path, a `file:`/`sqlite:` URL, or `:memory:` |
+| `RECUEIL_STORAGE_PATH` | `./data/storage` | Root of the content-addressed store. Resolved to an absolute path |
+| `RECUEIL_PORT` | `3000` | Listen port. `0` asks the OS for a free one |
+| `RECUEIL_HOST` | `127.0.0.1` | Bind address. The container image sets `0.0.0.0` |
+| `RECUEIL_BASE_URL` | — | Public URL behind a reverse proxy; also the `servers` entry of the served OpenAPI document |
+| `RECUEIL_LOG_LEVEL` | `info` | `trace` … `fatal`, or `silent`; output is structured JSON |
+| `RECUEIL_CORS_ORIGIN` | — | Comma-separated origins, or `*`. Unset means no cross-origin browser access |
+| `RECUEIL_TRUST_PROXY` | `false` | Trust `X-Forwarded-*`. Only behind a proxy you control |
+| `RECUEIL_REQUIRE_AUTH` | `false` | Refuse an unauthenticated `/api/v1` call. **Turn it on for anything reachable beyond loopback** |
+| `RECUEIL_MAX_UPLOAD_BYTES` | `536870912` | Ceiling on one uploaded file, enforced during the streaming hash |
+| `RECUEIL_SECRET_KEY` | — | 32 bytes, base64 or hex, encrypting stored source and backend credentials. **Unset means the server will not store a credential at all** — there is deliberately no derived fallback |
+| `RECUEIL_INGEST_ALLOWED_ROOTS` | — | Comma-separated absolute directories a watched folder may be pointed at. Set it wherever the token holder and the machine owner differ |
+| `RECUEIL_INGEST_SCRATCH_PATH` | OS temp | Where archives are expanded. Needs room for the largest one |
+| `RECUEIL_INGEST_CONFIDENCE_THRESHOLD` | `0.75` | The stage-9 gate. Below it a document is stored and queued for review |
+| `RECUEIL_OCR_ENGINE` | `none` | `none` or `ocrmypdf`. See the caveat below |
+| `RECUEIL_OCR_BINARY` | `ocrmypdf` | The executable, or a wrapper around one |
+| `RECUEIL_OCR_LANGUAGES` | — | Tesseract codes, comma-separated, in preference order (`deu,eng`) |
+| `RECUEIL_SHUTDOWN_TIMEOUT_MS` | `10000` | How long a shutdown waits for in-flight requests |
 
-Secrets are read from the environment, and `_FILE` suffixed variants read from a file path for
-Docker and Kubernetes secrets.
+The enrichment keys — `RECUEIL_CROSSREF_MAILTO`, `RECUEIL_OPENALEX_KEY`, `RECUEIL_UNPAYWALL_EMAIL`
+and the rest — arrive with the resolvers in Phase 3 and are not read yet. `_FILE`-suffixed variants
+for Docker and Kubernetes secrets are planned and not implemented.
+
+### OCR
+
+`RECUEIL_OCR_ENGINE=ocrmypdf` turns stage 5 on against an `ocrmypdf` binary on `PATH`; point
+`RECUEIL_OCR_BINARY` at a wrapper script if you would rather run it in a container. The default is
+`none` because nothing may be assumed installed, and one missing binary would otherwise put an
+identical failure on every scan.
+
+**The adapter has not been run against a real OCRmyPDF in this repository.** The test suite exercises
+the `OcrEngine` interface through an in-process fake — a suite that needs a container is a suite
+nobody runs — so treat the integration as unproven until you have watched one scan through it.
+
+A further limit worth knowing: the decision to OCR is taken per *document*, not per page. A PDF whose
+first page carries a text layer and whose second is a scan is treated as having a text layer, and the
+scanned page is neither recognised nor indexed.
 
 ## Storage backends
 
 The content store is pluggable, and the choice is per-instance rather than per-item.
 
-| Backend | Notes | Phase |
+| Backend | Notes | Status |
 |---|---|---|
-| Local filesystem | Content-addressed layout derived from the SHA-256. The default | 1 |
-| WebDAV | A Nextcloud or ownCloud share as the store | 2 |
-| S3 | Any S3-compatible object store; MinIO, Backblaze B2, Wasabi | 2 |
+| Local filesystem | Content-addressed layout derived from the SHA-256. The default | Implemented |
+| WebDAV | A Nextcloud or ownCloud share as the store | Implemented; tested against a local WebDAV server, not against Nextcloud |
+| S3 | Any S3-compatible object store; MinIO, Backblaze B2, Wasabi | Implemented; tested against a local in-process S3 fake, not against AWS or MinIO |
+
+All three pass one shared conformance suite of sixteen cases — hashing, streaming, the empty blob,
+the multipart path, concurrent puts of the same bytes, repair of a truncated blob, detection of rot
+that kept the length — so they are interchangeable rather than merely similarly named. One
+difference is declared rather than smoothed over: the two remote backends verify the digest as they
+read and fail the read on a mismatch; the local one hands back what is on disk and offers `verify()`
+separately.
 
 Whichever you choose, the layout is documented and derived from the hash, so the store can be read,
 verified and re-imported without the application running. That is the concrete meaning of the

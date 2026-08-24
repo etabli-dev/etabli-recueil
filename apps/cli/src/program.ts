@@ -4,8 +4,12 @@ import { COMMANDS, CURRENT_PHASE, IMPLEMENTED_COMMANDS, isImplemented, phaseLabe
 import { registerBackup } from './commands/backup.js';
 import { registerExport } from './commands/export.js';
 import { registerImport } from './commands/import.js';
+import { registerIngest } from './commands/ingest.js';
 import { registerPending } from './commands/pending.js';
+import { registerQueue } from './commands/queue.js';
 import { registerRestore } from './commands/restore.js';
+import { registerReview } from './commands/review.js';
+import { registerRules } from './commands/rules.js';
 import { registerServe } from './commands/serve.js';
 import { Ui } from './ui.js';
 import { VERSION } from './version.js';
@@ -37,9 +41,10 @@ const HELP_EPILOGUE = [
   '  RECUEIL_TOKEN    scoped API token',
   '  RECUEIL_PROFILE  named profile from ~/.config/recueil/config.toml',
   '',
-  '  `serve`, `import`, `export`, `backup` and `restore` work on the library directly rather than',
-  '  through the API, and read RECUEIL_HOST, RECUEIL_PORT, RECUEIL_DATABASE_URL and',
-  '  RECUEIL_STORAGE_PATH instead. See deploy/.env.example.',
+  '  The data commands — `serve`, `import`, `export`, `backup`, `restore`, `ingest`, `queue`,',
+  '  `review` — work on the library directly rather than through the API, and read RECUEIL_HOST,',
+  '  RECUEIL_PORT, RECUEIL_DATABASE_URL and RECUEIL_STORAGE_PATH instead. `rules test` reads',
+  '  neither: the evaluator is a pure function. See deploy/.env.example.',
   '',
   'Exit codes',
   '  0 success · 1 usage or unimplemented · 2 auth · 3 server unreachable · 4 items routed to the',
@@ -72,8 +77,9 @@ export const buildProgram = (): BuiltProgram => {
     .description(
       'Recueil — a self-hosted, API-first document and reference manager. Everything the CLI can ' +
         'do, the REST API can do, because there is one implementation of each of them ' +
-        '(CONCEPT.md §5.12). The data commands — serve, import, export, backup, restore — open ' +
-        'the library directly rather than talking to a server; the rest are API clients.',
+        '(CONCEPT.md §5.12). The data commands — serve, import, export, backup, restore, ingest, ' +
+        'queue, review — open the library directly rather than talking to a server; the rest are ' +
+        'API clients.',
     )
     .version(VERSION, '-V, --version', 'print the version and exit')
     .option('--json', 'machine-readable output on stdout', false)
@@ -113,6 +119,10 @@ export const buildProgram = (): BuiltProgram => {
     export: registerExport,
     backup: registerBackup,
     restore: registerRestore,
+    ingest: registerIngest,
+    queue: registerQueue,
+    review: registerReview,
+    rules: registerRules,
   };
 
   for (const spec of COMMANDS) {

@@ -25,6 +25,8 @@ export type JobRow = typeof schema.jobs.$inferSelect;
 export type JobLogRow = typeof schema.jobLogs.$inferSelect;
 
 export interface StageTraceRow {
+  /** Which pipeline run wrote the row. A source job retried twice has three, and they differ. */
+  jobId: string;
   candidateKey: string;
   stage: string;
   sha256: string | null;
@@ -41,8 +43,20 @@ export interface ListJobsFilter {
   order: 'asc' | 'desc';
 }
 
-/** The four states from which a job may be retried. */
-const RETRYABLE_STATES: readonly JobRow['state'][] = ['failed', 'cancelled', 'dead', 'waiting_review'];
+/**
+ * The states from which a job may be retried.
+ *
+ * `succeeded` is on the list on purpose: "poll that folder again" is the commonest reason anybody
+ * presses retry on a source job, and a run that ended cleanly is exactly the one they mean. What
+ * is *not* on the list is `running` and `queued`, which are refused with their own sentence below.
+ */
+const RETRYABLE_STATES: readonly JobRow['state'][] = [
+  'succeeded',
+  'failed',
+  'cancelled',
+  'dead',
+  'waiting_review',
+];
 
 export class QueueService {
   constructor(private readonly recueil: Recueil) {}
@@ -101,7 +115,7 @@ export class QueueService {
   }
 
   /**
-   * The stage trace: one row per candidate per stage that finished.
+   * The stage trace: one row per candidate per stage that finished, across every run asked for.
    *
    * Read from `ingest_checkpoints` with plain SQL rather than through a Drizzle table, because the
    * table belongs to `@recueil/ingest` and is installed by it; borrowing its definition here would
@@ -110,15 +124,23 @@ export class QueueService {
    * A pipeline run compacts a candidate's intermediate checkpoints once it commits, keeping the
    * terminal `commit` row — so a finished run shows one row per candidate and a run that stopped
    * halfway shows where it stopped, which is exactly the two questions asked of a trace.
+   *
+   * Several run ids rather than one because a source job is not a pipeline run: it owns however
+   * many the polls under it minted, and a retried poll mints another. Showing one of them would
+   * mean the detail view of a retried source job showed the *first* pass and called it the trace.
+   * Every row carries the run that wrote it, so the passes stay distinguishable.
    */
-  stageTrace(jobId: string, limit = 2000): StageTraceRow[] {
+  stageTrace(jobIds: readonly string[], limit = 2000): StageTraceRow[] {
+    if (jobIds.length === 0) return [];
+    const placeholders = jobIds.map(() => '?').join(', ');
     const rows = this.recueil.connection
       .prepare(
-        `select candidate_key, stage, sha256, payload, created_at
-         from ingest_checkpoints where run_id = ?
-         order by candidate_key, created_at limit ?`,
+        `select run_id, candidate_key, stage, sha256, payload, created_at
+         from ingest_checkpoints where run_id in (${placeholders})
+         order by created_at, candidate_key limit ?`,
       )
-      .all(jobId, limit) as {
+      .all(...jobIds, limit) as {
+      run_id: string;
       candidate_key: string;
       stage: string;
       sha256: string | null;
@@ -127,6 +149,7 @@ export class QueueService {
     }[];
 
     return rows.map((row) => ({
+      jobId: row.run_id,
       candidateKey: row.candidate_key,
       stage: row.stage,
       sha256: row.sha256,
@@ -170,7 +193,10 @@ export class QueueService {
         detail: `The job is ${row.state}. Cancel it first, or wait for it to finish.`,
       };
     }
-    if (!RETRYABLE_STATES.includes(row.state) && row.state !== 'succeeded') {
+    // Every remaining member of `JOB_STATES` is on the list today, so this is the guard for a
+    // state added to the vocabulary later: an unknown state is refused rather than retried on the
+    // assumption that it is finished.
+    if (!RETRYABLE_STATES.includes(row.state)) {
       return { ok: false, detail: `A job in state '${row.state}' cannot be retried.` };
     }
     return { ok: true, detail: '' };

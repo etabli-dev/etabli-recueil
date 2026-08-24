@@ -14,12 +14,12 @@
  * and stop working the moment a document is large enough to matter.
  */
 import { createReadStream } from 'node:fs';
-import { stat } from 'node:fs/promises';
+import { readdir, stat } from 'node:fs/promises';
 import { createServer, request as httpRequest } from 'node:http';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import { extname, join, normalize, sep } from 'node:path';
 
-import { webDistDirectory } from './paths.js';
+import { webDistDirectory, webSourceDirectory } from './paths.js';
 
 export interface SpaServer {
   /** `http://127.0.0.1:<port>` — where the browser goes. */
@@ -71,15 +71,49 @@ export const startSpaServer = async (apiOrigin: string): Promise<SpaServer> => {
   };
 };
 
+/**
+ * There is a bundle, and it is not older than the source it was built from.
+ *
+ * The staleness half is not fussiness. This suite is the only thing in the repository that runs the
+ * client against a real server, so it is the only place certain defects can surface — and because
+ * it serves `dist/` rather than compiling on demand, an edit to `src/` that is not rebuilt is
+ * invisible to it. The failure mode is the worst kind: the suite passes, and what it exercised was
+ * the previous build. Worse still, a *fix* under test appears not to work, which sends the reader
+ * hunting for a second bug that does not exist.
+ *
+ * So the newest mtime under `src/` is compared with the bundle's, and a stale bundle stops the run
+ * with the command that fixes it rather than producing a result about the wrong code.
+ */
 const assertBundleBuilt = async (): Promise<void> => {
+  let builtAt: number;
   try {
-    await stat(join(webDistDirectory, 'index.html'));
+    builtAt = (await stat(join(webDistDirectory, 'index.html'))).mtimeMs;
   } catch {
     throw new Error(
       `No built bundle at ${webDistDirectory}. Run \`pnpm --filter @recueil/web build\` first: the ` +
         'end-to-end suite drives the production bundle, not the development server.',
     );
   }
+
+  const newestSource = await newestMtime(webSourceDirectory);
+  if (newestSource > builtAt) {
+    throw new Error(
+      `The bundle at ${webDistDirectory} is older than src/. Run \`pnpm --filter @recueil/web build\`: ` +
+        'this suite serves the built files, so it would otherwise report on the previous build.',
+    );
+  }
+};
+
+/** The most recent mtime anywhere beneath a directory. */
+const newestMtime = async (directory: string): Promise<number> => {
+  let newest = 0;
+  const entries = await readdir(directory, { withFileTypes: true });
+  for (const entry of entries) {
+    const full = join(directory, entry.name);
+    const at = entry.isDirectory() ? await newestMtime(full) : (await stat(full)).mtimeMs;
+    if (at > newest) newest = at;
+  }
+  return newest;
 };
 
 const listen = (server: Server): Promise<string> =>

@@ -289,8 +289,13 @@ export class StorageBackendService {
 
     const bytes = randomBytes(64);
     const digest = createHash('sha256').update(bytes).digest('hex');
+    // The write and the read-back are two checks and therefore two `try`s. One around both reports
+    // a store that accepted the `PUT` and then could not serve it as a *write* failure, which is
+    // the one diagnosis that sends an operator to look at the wrong end of the problem.
+    let written = false;
     try {
       const put = await backend.put(bytes);
+      written = true;
       checks.push({
         check: 'write',
         ok: put.sha256 === digest,
@@ -299,23 +304,31 @@ export class StorageBackendService {
             ? `wrote ${String(bytes.byteLength)} bytes as ${digest.slice(0, 12)}…`
             : `the store hashed the bytes as ${put.sha256.slice(0, 12)}… and they hash to ${digest.slice(0, 12)}…`,
       });
-
-      const readBack = await backend.getBuffer(digest);
-      const readDigest = createHash('sha256').update(readBack).digest('hex');
-      checks.push({
-        check: 'verify',
-        ok: readDigest === digest,
-        detail:
-          readDigest === digest
-            ? 'the bytes read back hash to the digest they were written under'
-            : `the bytes read back hash to ${readDigest.slice(0, 12)}…, not ${digest.slice(0, 12)}…`,
-      });
     } catch (error) {
       checks.push({ check: 'write', ok: false, detail: describe(error) });
+    }
+
+    try {
+      if (written) {
+        const readBack = await backend.getBuffer(digest);
+        const readDigest = createHash('sha256').update(readBack).digest('hex');
+        checks.push({
+          check: 'verify',
+          ok: readDigest === digest,
+          detail:
+            readDigest === digest
+              ? 'the bytes read back hash to the digest they were written under'
+              : `the bytes read back hash to ${readDigest.slice(0, 12)}…, not ${digest.slice(0, 12)}…`,
+        });
+      }
+    } catch (error) {
+      checks.push({ check: 'verify', ok: false, detail: describe(error) });
     } finally {
       try {
-        await backend.delete(digest);
-        checks.push({ check: 'cleanup', ok: true, detail: 'the probe blob was removed' });
+        if (written) {
+          await backend.delete(digest);
+          checks.push({ check: 'cleanup', ok: true, detail: 'the probe blob was removed' });
+        }
       } catch (error) {
         checks.push({
           check: 'cleanup',

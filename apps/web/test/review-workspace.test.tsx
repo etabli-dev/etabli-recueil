@@ -279,6 +279,127 @@ describe('the review queue workspace', () => {
     expect(body.note).toBe('the scanner folder is misspelt');
   });
 
+  /**
+   * The case the screen actually exists for.
+   *
+   * An entry is queued *because* the pipeline was not confident, and the commonest shape of that on
+   * a real run is a proposal with no fields at all — nothing was read off the page. The editor must
+   * still offer the office facet, or edit-and-accept degrades to accept-or-reject exactly when a
+   * human has something to contribute. The proposal below is transcribed from what a real folder
+   * run produced for an unreadable scan.
+   */
+  const emptyProposal = (): ReturnType<typeof reviewEntry> =>
+    reviewEntry({
+      proposedPayload: {
+        itemType: 'document',
+        fields: {},
+        creators: [],
+        tags: [],
+        collectionIds: [],
+        customFields: {},
+        notes: [],
+        confidence: 0.32,
+      },
+    });
+
+  const openEditorOn = async (entry: ReturnType<typeof reviewEntry>): Promise<FakeServer> => {
+    const user = userEvent.setup();
+    const { server } = render(
+      defaultRoutes({
+        [`GET ${QUEUE}`]: () => page([entry]),
+        [`GET ${QUEUE}/:id`]: () => entry,
+        [`POST ${QUEUE}/:id/accept`]: () => acceptResult(),
+      }),
+    );
+    await screen.findByTestId('review-detail');
+    await user.keyboard('e');
+    await screen.findByTestId('edits-editor');
+    return server;
+  };
+
+  const acceptBody = async (server: FakeServer): Promise<{ edits?: { fields?: Record<string, unknown> } }> => {
+    await waitFor(() => {
+      expect(server.requestsTo('POST', `${QUEUE}/${REVIEW_ENTRY_ID}/accept`)).toHaveLength(1);
+    });
+    return server.requestsTo('POST', `${QUEUE}/${REVIEW_ENTRY_ID}/accept`)[0]?.body as {
+      edits?: { fields?: Record<string, unknown> };
+    };
+  };
+
+  it('offers the office facet even when the proposal names no fields at all', async () => {
+    const user = userEvent.setup();
+    const server = await openEditorOn(emptyProposal());
+
+    // Every column of CONCEPT.md §5.2 is on screen, empty and editable.
+    for (const path of ['correspondent', 'documentDate', 'asn', 'referenceNumber']) {
+      expect(document.querySelector(`#edits-office\\.${path}`)).toBeInstanceOf(HTMLInputElement);
+    }
+
+    fireEvent.change(document.querySelector('#edits-office\\.correspondent') as HTMLInputElement, {
+      target: { value: 'Acme GmbH' },
+    });
+    await user.click(screen.getByRole('button', { name: 'Accept with these edits' }));
+    await passTheWindow();
+
+    const body = await acceptBody(server);
+    expect(body.edits?.fields).toEqual({ 'office.correspondent': 'Acme GmbH' });
+  });
+
+  /**
+   * `office.asn` is an integer column with a uniqueness constraint. With no prior value to infer a
+   * type from, the descriptor has to supply it — otherwise the patch carries the string "1042".
+   */
+  it('sends the ASN as a number even though the proposal held no value to infer the type from', async () => {
+    const user = userEvent.setup();
+    const server = await openEditorOn(emptyProposal());
+
+    fireEvent.change(document.querySelector('#edits-office\\.asn') as HTMLInputElement, {
+      target: { value: '1042' },
+    });
+    fireEvent.change(document.querySelector('#edits-office\\.referenceNumber') as HTMLInputElement, {
+      target: { value: '2026114' },
+    });
+    await user.click(screen.getByRole('button', { name: 'Accept with these edits' }));
+    await passTheWindow();
+
+    const body = await acceptBody(server);
+    expect(body.edits?.fields?.['office.asn']).toBe(1042);
+    // And a reference number of all digits is still a string: it is not a numeric column.
+    expect(body.edits?.fields?.['office.referenceNumber']).toBe('2026114');
+  });
+
+  it('writes the amount and its currency together, as the check constraint requires', async () => {
+    const user = userEvent.setup();
+    const server = await openEditorOn(emptyProposal());
+
+    fireEvent.change(document.querySelector('#edits-office\\.amountMinor') as HTMLInputElement, {
+      target: { value: '1299.00' },
+    });
+    fireEvent.change(document.querySelector('#edits-office\\.amountCurrency') as HTMLInputElement, {
+      target: { value: 'EUR' },
+    });
+    await user.click(screen.getByRole('button', { name: 'Accept with these edits' }));
+    await passTheWindow();
+
+    const body = await acceptBody(server);
+    expect(body.edits?.fields?.['office.amountMinor']).toBe(129_900);
+    expect(body.edits?.fields?.['office.amountCurrency']).toBe('EUR');
+  });
+
+  it('refuses an amount with no currency rather than composing a patch the server must reject', async () => {
+    const user = userEvent.setup();
+    const server = await openEditorOn(emptyProposal());
+
+    fireEvent.change(document.querySelector('#edits-office\\.amountMinor') as HTMLInputElement, {
+      target: { value: '1299.00' },
+    });
+    await user.click(screen.getByRole('button', { name: 'Accept with these edits' }));
+    await passTheWindow();
+
+    expect(await screen.findByTestId('edits-amount-error')).toHaveTextContent(/needs a currency/u);
+    expect(server.requestsTo('POST', `${QUEUE}/${REVIEW_ENTRY_ID}/accept`)).toHaveLength(0);
+  });
+
   it('refuses to let an inexecutable action be accepted, and says why', async () => {
     render(
       defaultRoutes({

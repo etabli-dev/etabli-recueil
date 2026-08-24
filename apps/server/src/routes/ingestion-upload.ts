@@ -10,11 +10,18 @@
  *
  * Three properties.
  *
- * **Streaming and bounded.** The part is written to a spool file a chunk at a time and hashed on
- * the way past, so a forty-megabyte scan is never held in memory and in flight at once, and a file
- * over `RECUEIL_MAX_UPLOAD_BYTES` is refused during that pass. `@fastify/multipart`'s `truncated`
- * flag is checked: storing a prefix under the digest of that prefix would be a corrupt library that
- * looks correct.
+ * **Streaming and bounded on receipt.** The part is written to a spool file a chunk at a time and
+ * hashed on the way past, so a forty-megabyte scan is never accumulated in memory while it is still
+ * arriving, and a file over `RECUEIL_MAX_UPLOAD_BYTES` is refused during that pass — before the
+ * whole of it exists anywhere. `@fastify/multipart`'s `truncated` flag is checked: storing a prefix
+ * under the digest of that prefix would be a corrupt library that looks correct.
+ *
+ * It is worth being exact about where the streaming stops, because the comment above would
+ * otherwise read as a promise the code does not keep. `IngestCandidate.read()` returns a `Buffer`
+ * (`@recueil/ingest`'s `types.ts`), so the pipeline materialises the file once, after the size
+ * limit has already been enforced against the spooled bytes. The spool is what bounds the request;
+ * it is not what bounds the pipeline, and a genuinely streaming pipeline would have to change that
+ * contract rather than this route.
  *
  * **The filename is never a path.** It is passed to the pipeline as `suggestedFilename`, which is
  * documented as informational — identity is the hash (P2) — and it is used in the `externalId` only
@@ -27,6 +34,7 @@
 import { createHash } from 'node:crypto';
 import { createWriteStream } from 'node:fs';
 import { mkdir, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { pipeline as streamPipeline } from 'node:stream/promises';
 
@@ -108,7 +116,12 @@ export const ingestionUploadRoutes: FastifyPluginAsync = async (app) => {
     }
     const fields = parseOrThrow(UploadFieldsSchema, rawFields, 'body');
 
-    const spoolRoot = join(config.storagePath, '.uploads');
+    // Not inside `config.storagePath`. The content store's root has a layout — ADR-0004's
+    // `<aa>/<bb>/<sha256>` — and `listStoredBlobs` reports everything in it that is not that layout
+    // as `ignored`, precisely so a stray file cannot be skipped silently. A spool directory of ours
+    // sitting there would put a permanent entry in that list, and a warning that is always present
+    // is a warning nobody reads. It goes where the pipeline's own scratch goes.
+    const spoolRoot = join(config.ingestScratchPath ?? tmpdir(), 'recueil-uploads');
     await mkdir(spoolRoot, { recursive: true });
     const spoolPath = join(spoolRoot, `${newId()}.part`);
 

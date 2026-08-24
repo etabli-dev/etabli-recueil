@@ -20,9 +20,21 @@ importers:
       '@recueil/formats':
         specifier: workspace:*
         version: link:../../packages/formats
+      '@recueil/import-paperless':
+        specifier: workspace:*
+        version: link:../../packages/import-paperless
       '@recueil/import-zotero':
         specifier: workspace:*
         version: link:../../packages/import-zotero
+      '@recueil/ingest':
+        specifier: workspace:*
+        version: link:../../packages/ingest
+      '@recueil/ingest-sources':
+        specifier: workspace:*
+        version: link:../../packages/ingest-sources
+      '@recueil/rules':
+        specifier: workspace:*
+        version: link:../../packages/rules
       '@recueil/schemas':
         specifier: workspace:*
         version: link:../../packages/schemas
@@ -38,6 +50,9 @@ importers:
       picocolors:
         specifier: ^1.1.1
         version: 1.1.1
+      yaml:
+        specifier: ^2.9.0
+        version: 2.9.0
     devDependencies:
       '@types/node':
         specifier: ^22.19.0

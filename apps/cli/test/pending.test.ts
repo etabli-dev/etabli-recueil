@@ -13,13 +13,16 @@ describe('commands that are not implemented yet', () => {
     }
   });
 
-  it('includes the commands of the current phase that are not built yet, without softening it', async () => {
-    // `token` and `job` belong to Phase 1 and Phase 1 is under way. A build that let them exit
-    // zero, or that quietly renumbered them into a later phase, would be lying about itself.
-    const inThisPhase = pending.filter((spec) => spec.phase === CURRENT_PHASE);
-    expect(inThisPhase.map((spec) => spec.name)).toEqual(['token', 'job']);
+  it('includes the commands of a phase already under way, without softening it', async () => {
+    // `token` and `job` belong to Phase 1, and Phase 1 is behind this build rather than ahead of
+    // it. A build that let them exit zero, or that quietly renumbered them into a later phase,
+    // would be lying about itself — so every unimplemented command from this phase or an earlier
+    // one has to say so, and this list is checked rather than derived so that moving one along
+    // has to be a deliberate edit.
+    const owed = pending.filter((spec) => spec.phase <= CURRENT_PHASE);
+    expect(owed.map((spec) => spec.name)).toEqual(['token', 'job']);
 
-    for (const spec of inThisPhase) {
+    for (const spec of owed) {
       const result = await runCli([spec.name]);
       expect(result.code).toBe(1);
       expect(result.stderr).toContain('is not implemented yet');
@@ -47,7 +50,7 @@ describe('commands that are not implemented yet', () => {
   );
 
   it('answers with the phase even when given arguments it cannot understand', async () => {
-    const result = await runCli(['ingest', 'watch', '--folder', '/nowhere', '--rule', 'r.json']);
+    const result = await runCli(['check', 'retractions', '--scope', 'everything', '--rule', 'r.json']);
     expect(result.code).toBe(1);
     expect(result.stderr).toContain('is not implemented yet');
     expect(result.stderr).not.toContain('unknown option');

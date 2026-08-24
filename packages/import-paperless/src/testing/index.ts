@@ -13,6 +13,8 @@ export type {
   FakeRequest,
   FakeServerOptions,
 } from './fake-server.js';
+export { paperlessFixtureCorpus } from './fixture-corpus.js';
+export type { PaperlessFixtureCorpus, PaperlessFixtureExpectations } from './fixture-corpus.js';
 export {
   FIXTURE_EXPECTATIONS,
   FIXTURE_TOKEN,

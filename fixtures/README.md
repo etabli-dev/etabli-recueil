@@ -903,10 +903,18 @@ for (const testCase of cases.filter((one) => one.expect.fired)) {
 }
 ```
 
-A test may serve `fixtures/paperless/` over an in-process HTTP server built from
-`paperless/index.json` — `{ method, path, query, status, contentType, file }` per route — and point
-the real importer at it. That is what makes "Paperless decommissioned after verified import"
-(CONCEPT §7) testable with no container anywhere in the loop.
+`fixtures/paperless/` is served over an in-process HTTP server built from `paperless/index.json` —
+`{ method, path, query, status, contentType, file }` per route — with the real importer pointed at
+it. `paperlessFixtureCorpus()` in `@recueil/import-paperless/testing` is the loader that turns the
+directory into the fake server's library, and `packages/import-paperless/test/fixture-corpus.test.ts`
+is the test: every count in §11 is compared against the target library's own tables after the import.
+That is what makes "Paperless decommissioned after verified import" (CONCEPT §7) testable with no
+container anywhere in the loop.
+
+`fixtures/mail/` is used the same way, by
+`packages/ingest-sources/test/mail-corpus.test.ts`: the eight messages are appended to an in-process
+IMAP server and polled by the real `ImapSource`, and §12's attachment names, nesting and defect
+expectations are asserted against the library that results.
 
 ---
 
@@ -917,6 +925,11 @@ Two gaps, both named rather than papered over.
 **A recorded Paperless session.** §11 is a model of the API, not a capture of it. Until one real
 session has been recorded against the instance that is being decommissioned, the corpus proves the
 importer handles these shapes and nothing about whether they are the shapes that instance emits.
+There is a second edge to this: the dump declares Paperless-ngx 2.14.7 and API version 6, while
+`@recueil/import-paperless` was transcribed from 3.0.5 and asks for API 10. The parity test therefore
+serves this corpus's *data* through the importer's modelled envelope, and a separate test stands the
+same data up behind the 2.14.7 headers and asserts that the importer refuses rather than half-reads
+it. A capture would settle which of the two the real instance is.
 
 **Recognition quality.** There is no OCR engine in this repository and none in CI, so `scans/` tests
 the decision to OCR and the plumbing around it, against a fake adapter. Whether OCRmyPDF reads

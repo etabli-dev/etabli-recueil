@@ -323,6 +323,11 @@ export const JobLogEntrySchema = z
 
 export const StageTraceEntrySchema = z
   .strictObject({
+    jobId: IdSchema.meta({
+      description:
+        'The pipeline run that wrote this row. A source job that has been retried owns more than ' +
+        'one run, and their rows are interleaved by time, so this is what separates the passes.',
+    }),
     candidateKey: z.string().max(64),
     stage: z
       .string()

@@ -7,7 +7,9 @@ subtitle: "The vocabulary everything else assumes"
 The model described here is settled — it is specified in
 [`spec/data-model.md`](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/data-model.md)
 and drawn in [`spec/erd.mmd`](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/erd.mmd) —
-but it is not yet implemented. Phase 1 builds it.
+and it is implemented: documents, items, attachments, collections, tags, notes, annotations, custom
+fields, the Office facet, the review queue and the provenance tables are all in the tree. The graph
+and systematic-review tables are specified and not yet built.
 :::
 
 Four ideas carry most of the weight: the separation of **documents from items**, **content-hash
