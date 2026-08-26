@@ -40,6 +40,8 @@ the open-decision backlog in CONCEPT.md §10.
 | [0018](0018-sandboxing-tier-in-process-until-multi-user.md) | Sandboxing tier: in-process until multi-user | Accepted | Phase 0 (governs Phase 9) |
 | [0019](0019-name-recueil.md) | Name: Recueil | Accepted | Phase 0 |
 | [0020](0020-systematic-review-automation-disclosure.md) | Systematic-review automation disclosure | Accepted | Phase 0 (governs Phase 7) |
+| [0021](0021-a-verification-check-queries-both-sides.md) | A verification check queries both sides | Accepted | Phase 0 (governs every phase) |
+| [0022](0022-resource-budgets-on-untrusted-input.md) | Resource budgets on untrusted input | Accepted | Phase 0 (governs every phase) |
 
 ## Adding a record
 
