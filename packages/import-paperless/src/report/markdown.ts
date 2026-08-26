@@ -73,8 +73,18 @@ export const renderReportMarkdown = (report: PaperlessImportReport): string => {
   line(`| Stored under the wrong item type | ${report.documents.recueilMistyped} |`);
   line(`| Missing in Recueil | ${report.documents.missingInRecueil.length} |`);
   line(`| Orphaned in Recueil | ${report.documents.orphanedInRecueil.length} |`);
+  line(`| In the Recueil trash, left alone | ${report.documents.trashedInRecueil.length} |`);
   line(`| Δ | ${report.documents.delta} |`);
   line();
+
+  if (report.documents.trashedInRecueil.length > 0) {
+    line(
+      `**In the Recueil trash:** ${report.documents.trashedInRecueil.slice(0, 50).join(', ')}` +
+        `${report.documents.trashedInRecueil.length > 50 ? ', …' : ''}. These documents were not ` +
+        'written to and are excluded from every count above; the review queue names each one.',
+    );
+    line();
+  }
 
   line('| Paperless document type | Recueil item type | `office_document_type` | Paperless | Recueil | Mistyped | Δ |');
   line('|---|---|---|---:|---:|---:|---:|');
@@ -117,6 +127,8 @@ export const renderReportMarkdown = (report: PaperlessImportReport): string => {
   line(`| Duplicate originals | ${report.originals.duplicateOriginals} |`);
   line(`| Attachment rows in Recueil | ${report.originals.recueilAttachments} |`);
   line(`| Documents with no attachment row | ${report.originals.recueilAttachmentsMissing.length} |`);
+  line(`| No file and nothing explaining it | ${report.originals.unaccountedWithoutOriginal.length} |`);
+  line(`| Recorded as lost but present after all | ${report.originals.contradictedByStore.length} |`);
   line();
 
   const problems = report.originals.entries.filter((entry) => entry.status !== 'stored');
@@ -138,6 +150,9 @@ export const renderReportMarkdown = (report: PaperlessImportReport): string => {
   line('| | |');
   line('|---|---:|');
   line(`| Paperless documents with an ASN | ${report.asn.apiWithAsn} |`);
+  line(`| Reached \`item_office.asn\` | ${report.asn.recueilCarried} |`);
+  line(`| Deferred to \`paperless_asn\` | ${report.asn.recueilDeferred} |`);
+  line(`| Lost | ${report.asn.lost.length} |`);
   line(`| Recueil items with an ASN | ${report.asn.recueilWithAsn} |`);
   line(`| Distinct live ASNs in the library | ${report.asn.recueilDistinctAsn} |`);
   line(`| Unique | ${yesNo(report.asn.unique)} |`);
@@ -150,13 +165,26 @@ export const renderReportMarkdown = (report: PaperlessImportReport): string => {
   for (const duplicate of report.asn.duplicatesInSource) {
     line(`- ASN **${duplicate.asn}** is on Paperless documents ${duplicate.documents.join(', ')}.`);
   }
-  for (const collision of report.asn.collisions) {
+  for (const deferral of report.asn.deferrals) {
     line(
-      `- ASN **${collision.asn}** (document ${collision.paperlessId}) is already held by item ` +
-        `\`${collision.heldByItemId}\`.`,
+      `- ASN **${deferral.asn}** (document ${deferral.paperlessId}) is on \`paperless_asn\` ` +
+        `because ${
+          deferral.heldByItemId === null
+            ? 'Paperless itself put it on a lower document id'
+            : `item \`${deferral.heldByItemId}\` holds it`
+        }.`,
     );
   }
-  if (report.asn.duplicatesInSource.length > 0 || report.asn.collisions.length > 0) line();
+  for (const loss of report.asn.lost) {
+    line(`- ASN **${loss.asn}** (document ${loss.paperlessId}) was **lost**: ${escapePipes(loss.reason)}`);
+  }
+  if (
+    report.asn.duplicatesInSource.length > 0 ||
+    report.asn.deferrals.length > 0 ||
+    report.asn.lost.length > 0
+  ) {
+    line();
+  }
 
   line('## Correspondents, document types, tags');
   line();
@@ -170,10 +198,21 @@ export const renderReportMarkdown = (report: PaperlessImportReport): string => {
     `| Document types | ${report.documentTypes.apiTotal} | ` +
       `${report.documentTypes.recueilWithOfficeType} items with a type |`,
   );
-  line(`| Tags | ${report.tags.apiTotal} | ${report.tags.recueilTotal} |`);
-  line(`| Tag assignments | ${report.tags.apiAssignments} | ${report.tags.recueilAssignments} |`);
-  line(`| Notes | ${report.notes.apiTotal} | ${report.notes.recueilTotal} |`);
+  line(`| Tags | ${report.tags.apiNamed} | ${report.tags.recueilTotal} |`);
+  line(
+    `| Tag assignments | ${report.tags.apiAssignmentsResolvable} of ${report.tags.apiAssignments} | ` +
+      `${report.tags.recueilAssignments} |`,
+  );
+  line(`| Notes | ${report.notes.apiDistinct} of ${report.notes.apiTotal} | ${report.notes.recueilTotal} |`);
   line();
+  if (report.tags.danglingTagIds.length > 0) {
+    line(
+      `**Tag ids the documents carry that \`/api/tags/\` never defined:** ` +
+        `${report.tags.danglingTagIds.join(', ')}. Those assignments could not be carried under ` +
+        'any name, so they are excluded from the expected side above and reported here instead.',
+    );
+    line();
+  }
   line(
     `${report.correspondents.withoutCorrespondent} document(s) had no Paperless correspondent and ` +
       `carry the placeholder \`${report.correspondents.placeholder}\`. ` +
@@ -190,12 +229,26 @@ export const renderReportMarkdown = (report: PaperlessImportReport): string => {
   line(`| Paperless fields | ${report.customFields.apiTotal} |`);
   line(`| Defined in Recueil | ${report.customFields.recueilDefined} |`);
   line(`| Unsupported types | ${report.customFields.unsupported.length} |`);
-  line(`| Values in Paperless | ${report.customFields.apiValues} |`);
-  line(`| Values in Recueil | ${report.customFields.recueilValues} |`);
+  line(`| Values in Paperless | ${report.customFields.apiValueInstances} |`);
+  line(`| Of those, expressible here | ${report.customFields.apiInstancesCarryable} |`);
+  line(`| Values in Recueil | ${report.customFields.recueilInstances} |`);
+  line(`| Rows in Recueil | ${report.customFields.recueilValues} |`);
   line(`| Recorded blank | ${report.customFields.blankValues} |`);
   line(`| Skipped | ${report.customFields.skippedValues} |`);
   line(`| Unresolved document links | ${report.customFields.unresolvedDocumentLinks} |`);
   line();
+  if (report.customFields.danglingFieldIds.length > 0) {
+    line(
+      `**Custom field ids the documents carry values for that \`/api/custom_fields/\` never ` +
+        `defined:** ${report.customFields.danglingFieldIds.join(', ')}.`,
+    );
+    line();
+  }
+  for (const value of report.customFields.unrepresentableValues.slice(0, 100)) {
+    line(`- Document ${value.paperlessId}: ${escapePipes(value.reason)}`);
+  }
+  if (report.customFields.unrepresentableValues.length > 0) line();
+
   const dataTypes = Object.entries(report.customFields.byDataType).sort(([left], [right]) =>
     left.localeCompare(right),
   );
@@ -272,7 +325,7 @@ const verdict = (report: PaperlessImportReport): string => {
         `(${report.originals.hashCoveragePercent}% coverage), `
       : 'originals not fetched, ';
     return (
-      `${report.documents.recueilMatched} of ${report.documents.apiFetched} documents imported, ` +
+      `${report.documents.recueilMatched} of ${report.documents.apiActive} documents imported, ` +
       files +
       `${report.review.length} entr${report.review.length === 1 ? 'y' : 'ies'} for review.`
     );

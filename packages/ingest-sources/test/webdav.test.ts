@@ -281,3 +281,312 @@ describe('WebDavClient', () => {
     expect(normaliseEtag(null)).toBeNull();
   });
 });
+
+describe('WebDavSource, when the object changes under the acknowledgement (H1)', () => {
+  const openReviews = (
+    target: TestLibrary,
+  ): Array<{ reason_code: string; explanation: string }> =>
+    target.connection
+      .prepare("select reason_code, explanation from review_queue where status = 'open'")
+      .all() as Array<{ reason_code: string; explanation: string }>;
+
+  /** Poll one file, run it through the pipeline, and hand back what `acknowledge` will need. */
+  const ingestOne = async (source: WebDavSource, context: ReturnType<typeof makeContext>) => {
+    const page = await source.poll({ limit: 10 }, context);
+    const candidate = page.candidates[0];
+    expect(candidate).toBeDefined();
+    const report = await makePipeline(library).run([candidate!], {
+      runLabel: 'h1-webdav',
+      sourceId: source.id,
+      total: 1,
+    });
+    return { ref: candidate!.ref, outcome: report.outcomes[0]!.outcome };
+  };
+
+  it('refuses to delete an object whose ETag is not the one it was offered under', async () => {
+    const ingested = makePdf({ lines: ['the version that was read'] });
+    const replacement = makePdf({ lines: ['a version nobody has read'], salt: 'v2' });
+    await server.put('scan.pdf', ingested);
+
+    const source = new WebDavSource({ url: server.url, auth, consume: { mode: 'delete' } });
+    const context = makeContext(library);
+    await source.start(context);
+    const { ref, outcome } = await ingestOne(source, context);
+
+    // A whole poll interval is the window here: somebody re-uploads over the same name.
+    await server.put('scan.pdf', replacement);
+
+    const acknowledgement = await source.acknowledge(ref, outcome, context);
+    await source.stop(context);
+
+    expect(acknowledgement.action).toBe('refused');
+    expect(acknowledgement.verified).toBe(false);
+    expect(await server.exists('scan.pdf')).toBe(true);
+    expect(await server.read('scan.pdf')).toEqual(replacement);
+    expect(openReviews(library).map((row) => row.reason_code)).toContain(
+      'source_changed_before_consume',
+    );
+  });
+
+  it('refuses to move an object whose ETag is not the one it was offered under', async () => {
+    const ingested = makePdf({ lines: ['as offered'] });
+    const replacement = makePdf({ lines: ['not as offered'], salt: 'v2' });
+    await server.put('bill.pdf', ingested);
+
+    const source = new WebDavSource({
+      url: server.url,
+      auth,
+      consume: { mode: 'move', to: 'filed' },
+    });
+    const context = makeContext(library);
+    await source.start(context);
+    const { ref, outcome } = await ingestOne(source, context);
+
+    await server.put('bill.pdf', replacement);
+    const acknowledgement = await source.acknowledge(ref, outcome, context);
+    await source.stop(context);
+
+    expect(acknowledgement.action).toBe('refused');
+    expect(await server.read('bill.pdf')).toEqual(replacement);
+    expect(await server.exists('filed/bill.pdf')).toBe(false);
+  });
+
+  it('carries If-Match on the delete, so the share itself can refuse a stale one', async () => {
+    await server.put('temp.pdf', makePdf({ lines: ['delete me conditionally'] }));
+
+    const source = new WebDavSource({ url: server.url, auth, consume: { mode: 'delete' } });
+    const runner = new SourceRunner({ source, pipeline: makePipeline(library), recueil: library });
+    await runner.start();
+    const report = await runner.runOnce();
+    await runner.stop();
+
+    expect(report.acknowledgements[0]?.action).toBe('deleted');
+    const del = server.requests.find((entry) => entry.method === 'DELETE');
+    expect(del).toBeDefined();
+    expect(del?.headers['if-match']).toBeDefined();
+    expect(del?.headers['if-match']).not.toBe('*');
+  });
+
+  it('carries If-Match on the move as well', async () => {
+    await server.put('bill.pdf', makePdf({ lines: ['move me conditionally'] }));
+
+    const source = new WebDavSource({
+      url: server.url,
+      auth,
+      consume: { mode: 'move', to: 'filed' },
+    });
+    const runner = new SourceRunner({ source, pipeline: makePipeline(library), recueil: library });
+    await runner.start();
+    const report = await runner.runOnce();
+    await runner.stop();
+
+    expect(report.acknowledgements[0]?.action).toBe('moved');
+    expect(server.requests.find((entry) => entry.method === 'MOVE')?.headers['if-match']).toBeDefined();
+  });
+
+  it('refuses when the share answers the conditional delete with 412', async () => {
+    // The server evaluates the precondition and loses the race the client could not see: the ETag
+    // agreed at the HEAD and had changed by the time the DELETE arrived.
+    const bytes = makePdf({ lines: ['precondition territory'] });
+    await server.put('racy.pdf', bytes);
+
+    const source = new WebDavSource({ url: server.url, auth, consume: { mode: 'delete' } });
+    const context = makeContext(library);
+    await source.start(context);
+    const { ref, outcome } = await ingestOne(source, context);
+
+    // Rewrite the object between the source's HEAD and its DELETE, which is the window If-Match
+    // exists to close. The `fetch` seam is the honest place to do it from a test.
+    const realDelete = source.client.delete.bind(source.client);
+    source.client.delete = async (path, signal, conditions) => {
+      await server.put('racy.pdf', makePdf({ lines: ['rewritten inside the window'], salt: 'x' }));
+      return realDelete(path, signal, conditions);
+    };
+
+    const acknowledgement = await source.acknowledge(ref, outcome, context);
+    await source.stop(context);
+
+    expect(acknowledgement.action).toBe('refused');
+    expect(acknowledgement.detail).toContain('412');
+    expect(await server.exists('racy.pdf')).toBe(true);
+  });
+
+  it('still refuses on a share that ignores If-Match, on the strength of its own HEAD', async () => {
+    const lax = await startFakeWebDav({ ignoreIfMatch: true });
+    try {
+      await lax.put('scan.pdf', makePdf({ lines: ['as offered'] }));
+      const replacement = makePdf({ lines: ['replaced'], salt: 'v2' });
+
+      const source = new WebDavSource({ url: lax.url, consume: { mode: 'delete' } });
+      const context = makeContext(library);
+      await source.start(context);
+      const { ref, outcome } = await ingestOne(source, context);
+
+      await lax.put('scan.pdf', replacement);
+      const acknowledgement = await source.acknowledge(ref, outcome, context);
+      await source.stop(context);
+
+      expect(acknowledgement.action).toBe('refused');
+      expect(await lax.read('scan.pdf')).toEqual(replacement);
+    } finally {
+      await lax.close();
+    }
+  });
+
+  it('consumes normally on a share that sends no ETag, on Last-Modified and size', async () => {
+    // The fallback revision must not be so strict that a share without ETags can never consume
+    // anything: a guard that refuses everything is a different way to fail.
+    const plain = await startFakeWebDav({ omitEtags: true });
+    try {
+      const bytes = makePdf({ lines: ['no etag, still filed'] });
+      await plain.put('scan.pdf', bytes);
+
+      const source = new WebDavSource({ url: plain.url, consume: { mode: 'delete' } });
+      const runner = new SourceRunner({ source, pipeline: makePipeline(library), recueil: library });
+      await runner.start();
+      const report = await runner.runOnce();
+      await runner.stop();
+
+      expect(report.acknowledgements[0]?.ref.revision).toMatch(/^mtime:/u);
+      expect(report.acknowledgements[0]?.action).toBe('deleted');
+      expect(report.acknowledgements[0]?.detail).toContain('no precondition');
+      expect(await plain.list()).toEqual([]);
+      expect(await library.storage.has(sha256(bytes))).toBe(true);
+    } finally {
+      await plain.close();
+    }
+  });
+
+  it('refuses on a no-ETag share when Last-Modified and size have moved', async () => {
+    const plain = await startFakeWebDav({ omitEtags: true });
+    try {
+      await plain.put('scan.pdf', makePdf({ lines: ['as offered'] }));
+      const source = new WebDavSource({ url: plain.url, consume: { mode: 'delete' } });
+      const context = makeContext(library);
+      await source.start(context);
+      const { ref, outcome } = await ingestOne(source, context);
+
+      // A second of separation, because the fallback revision is only as fine as Last-Modified,
+      // which is an HTTP-date and therefore whole seconds.
+      await new Promise((settle) => setTimeout(settle, 1_100));
+      const replacement = makePdf({ lines: ['a longer replacement nobody has read'], salt: 'v2' });
+      await plain.put('scan.pdf', replacement);
+
+      const acknowledgement = await source.acknowledge(ref, outcome, context);
+      await source.stop(context);
+
+      expect(acknowledgement.action).toBe('refused');
+      expect(await plain.read('scan.pdf')).toEqual(replacement);
+    } finally {
+      await plain.close();
+    }
+  });
+
+  it('refuses a ref that carries no revision at all', async () => {
+    const bytes = makePdf({ lines: ['no revision, no licence'] });
+    await server.put('orphan.pdf', bytes);
+
+    const source = new WebDavSource({ url: server.url, auth, consume: { mode: 'delete' } });
+    const context = makeContext(library);
+    await source.start(context);
+    const { ref, outcome } = await ingestOne(source, context);
+
+    const stripped = { sourceId: ref.sourceId, externalId: ref.externalId };
+    const acknowledgement = await source.acknowledge(stripped, outcome, context);
+    await source.stop(context);
+
+    expect(acknowledgement.action).toBe('refused');
+    expect(acknowledgement.detail).toContain('no revision at all');
+    expect(await server.exists('orphan.pdf')).toBe(true);
+  });
+
+  it('refuses rather than guessing when the share will not answer HEAD', async () => {
+    const blind = await startFakeWebDav({ disableHead: true });
+    try {
+      await blind.put('scan.pdf', makePdf({ lines: ['unverifiable'] }));
+      const source = new WebDavSource({ url: blind.url, consume: { mode: 'delete' } });
+      const context = makeContext(library);
+      await source.start(context);
+      const { ref, outcome } = await ingestOne(source, context);
+
+      const acknowledgement = await source.acknowledge(ref, outcome, context);
+      await source.stop(context);
+
+      expect(acknowledgement.action).toBe('refused');
+      expect(await blind.exists('scan.pdf')).toBe(true);
+    } finally {
+      await blind.close();
+    }
+  });
+});
+
+describe('WebDavClient credentials in the URL (H4)', () => {
+  it('strips userinfo from the collection URL and never puts it in an error', async () => {
+    const withCredentials = server.url.replace('http://', 'http://carol:hunter2@');
+    const client = new WebDavClient({ url: withCredentials });
+
+    expect(client.base.toString()).not.toContain('hunter2');
+    expect(client.base.toString()).not.toContain('carol');
+    expect(client.base.username).toBe('');
+    expect(client.base.password).toBe('');
+    expect(client.urlFor('a.pdf').toString()).not.toContain('hunter2');
+
+    // The share is the one that wants `rh`/`secret`, so `carol`/`hunter2` gets a 401 — and the
+    // message that reports it must not carry the password the way `url.toString()` used to.
+    const failure = await client.list('').then(
+      () => null,
+      (error: unknown) => error as Error,
+    );
+    expect(failure).not.toBeNull();
+    expect(failure?.message).toContain('401');
+    expect(failure?.message).not.toContain('hunter2');
+    expect(JSON.stringify((failure as { detail?: unknown }).detail ?? {})).not.toContain('hunter2');
+  });
+
+  it('uses the userinfo as basic credentials when no auth is configured, and still hides it', async () => {
+    // Undici refuses outright to fetch a URL carrying credentials, so leaving them in the URL made
+    // the source unusable *and* leaked the password. They are taken as credentials instead.
+    const withCredentials = server.url.replace('http://', 'http://rh:secret@');
+    await server.put('a.pdf', makePdf({ salt: 'a' }));
+
+    const client = new WebDavClient({ url: withCredentials });
+    const entries = await client.list('');
+    expect(entries.map((entry) => entry.path)).toEqual(['a.pdf']);
+    expect(client.base.toString()).not.toContain('secret');
+  });
+
+  it('leaves explicit auth in charge when both are given', async () => {
+    const withCredentials = server.url.replace('http://', 'http://carol:hunter2@');
+    const client = new WebDavClient({ url: withCredentials, auth });
+    await server.put('a.pdf', makePdf({ salt: 'a' }));
+    expect((await client.list('')).map((entry) => entry.path)).toEqual(['a.pdf']);
+  });
+
+  it('keeps the secret out of the source id, which is what gets stored', async () => {
+    const source = new WebDavSource({ url: server.url.replace('http://', 'http://carol:hunter2@') });
+    expect(source.id).not.toContain('hunter2');
+    expect(source.id).not.toContain('carol');
+  });
+
+  it('serialises to nothing that carries a credential', () => {
+    // A structured log line, a crash reporter or a stray `JSON.stringify` must not be able to
+    // reach the password by walking the client.
+    const client = new WebDavClient({
+      url: 'http://carol:hunter2@host/dav',
+      auth: { kind: 'basic', username: 'rh', password: 'secret' },
+    });
+    const serialised = JSON.stringify(client);
+    expect(serialised).not.toContain('hunter2');
+    expect(serialised).not.toContain('secret');
+    expect(Object.keys(client)).toEqual(['base']);
+  });
+
+  it('percent-decodes userinfo, which is how a password with an @ or a : is written', () => {
+    const client = new WebDavClient({ url: 'http://carol%40example.org:p%3Ass%40word@host/dav' });
+    expect(client.base.toString()).toBe('http://host/dav/');
+    expect(client.credentialsFromUrl).toEqual({
+      username: 'carol@example.org',
+      password: 'p:ss@word',
+    });
+  });
+});

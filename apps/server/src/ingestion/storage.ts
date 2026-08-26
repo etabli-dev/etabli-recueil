@@ -9,6 +9,14 @@
  * can write, verify and then point the environment at — and `StorageBackend.active` says which one,
  * if any, the running process is using.
  *
+ * **A backend address is a caller's address.** `config.url` and the S3 `config.endpoint` arrive in
+ * a request body with `storage:write`, so an unrestricted one makes the health probe a way to reach
+ * loopback and the operator's own network — the same defect the Phase 2 review demonstrated against
+ * ingestion sources, in the other place it lived. `EgressGuard` refuses the reserved ranges unless
+ * `RECUEIL_INGEST_ALLOW_PRIVATE_TARGETS` is set, and the check runs in `buildBackend`, immediately
+ * before the store is constructed, rather than at `create`. See the field's own comment for why
+ * only the check and not the guard's transport is used here.
+ *
  * **The health check has two modes and neither of them is a guess.** `read` asks the store for a
  * digest that is not there: a complete round trip through authentication, addressing and the
  * network that writes nothing. `roundtrip` writes a small probe blob, reads it back, verifies the
@@ -24,6 +32,8 @@ import type { WebDavAuth } from '@recueil/storage-backends';
 import { asc, eq } from 'drizzle-orm';
 import * as z from 'zod';
 
+import { EgressGuard } from './egress.js';
+import type { HostResolver } from './egress.js';
 import { SecretBox, SecretsUnavailableError } from './secrets.js';
 import { storageBackends } from './tables.js';
 import type { StorageBackendRow } from './tables.js';
@@ -46,6 +56,10 @@ export interface StorageServiceOptions {
   readonly fetch?: typeof fetch;
   /** Where a remote backend spools bytes while hashing them. Defaults to the OS temporary directory. */
   readonly scratchDirectory?: string;
+  /** `RECUEIL_INGEST_ALLOW_PRIVATE_TARGETS`. See `egress.ts`. */
+  readonly allowPrivateTargets?: boolean;
+  /** Swapped by the tests that stage a resolution. */
+  readonly resolve?: HostResolver;
 }
 
 export interface HealthResult {
@@ -61,12 +75,38 @@ export class StorageBackendService {
 
   private readonly fetchImpl: typeof fetch | undefined;
 
+  /**
+   * Where this service is allowed to connect. See `egress.ts`.
+   *
+   * A backend `url` and an S3 `endpoint` come out of a request body exactly as a source URL does,
+   * and the Phase 2 review's SSRF finding named all three, not only the ingestion source.
+   *
+   * Only the *check* is taken from the guard here, not its transport, and that is a deliberate
+   * difference from `IngestionSourceService`. A storage backend streams whole documents in both
+   * directions — `WebDavBackend` sends a `ReadableStream` body and reads `response.body` as a
+   * stream — and the guard's client, which exists to install a `lookup` and therefore buffers,
+   * would turn a 400 MB scan into 400 MB of resident memory. Trading a real memory ceiling for a
+   * narrower rebinding window is the wrong trade on the path that carries the library's bytes. So
+   * the address is checked immediately before the backend is constructed, and the residual — a name
+   * that rebinds inside that window — is recorded rather than papered over.
+   */
+  private readonly egress: EgressGuard;
+
   private readonly scratchDirectory: string | undefined;
 
   constructor(options: StorageServiceOptions) {
     this.recueil = options.recueil;
     this.secrets = options.secrets;
     this.fetchImpl = options.fetch;
+    this.egress = new EgressGuard({
+      allowPrivateTargets:
+        options.allowPrivateTargets ??
+        ['1', 'true', 'yes', 'on'].includes(
+          (process.env['RECUEIL_INGEST_ALLOW_PRIVATE_TARGETS'] ?? '').trim().toLowerCase(),
+        ),
+      ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
+      ...(options.resolve === undefined ? {} : { resolve: options.resolve }),
+    });
     this.scratchDirectory = options.scratchDirectory;
   }
 
@@ -211,6 +251,10 @@ export class StorageBackendService {
     const { S3Backend, WebDavBackend } = await import('@recueil/storage-backends');
 
     if (config.kind === 'webdav') {
+      // Checked here rather than at `create`, and that placement is the point: `create` is
+      // synchronous, and a form-time check is not what stops a name from rebinding anyway. This
+      // runs immediately before the backend is constructed and immediately before every probe.
+      await this.egress.assertAllowedTarget(config.url, 'config.url');
       return new WebDavBackend({
         url: config.url,
         auth: webDavAuth(config.authKind, config.username, secrets),
@@ -223,6 +267,12 @@ export class StorageBackendService {
       });
     }
 
+    // The endpoint gets the same rule, and the same caveat: `@aws-sdk/client-s3` owns its own
+    // transport and exposes no `lookup`, so this is a check before the hand-off rather than a check
+    // at the socket.
+    if (config.endpoint !== undefined) {
+      await this.egress.assertAllowedTarget(config.endpoint, 'config.endpoint');
+    }
     return new S3Backend({
       bucket: config.bucket,
       ...(config.region === undefined ? {} : { region: config.region }),

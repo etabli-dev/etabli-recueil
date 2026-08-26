@@ -21,7 +21,23 @@
  */
 import { schema } from '@recueil/core';
 import type { Recueil } from '@recueil/core';
-import { and, eq, like } from 'drizzle-orm';
+import { and, eq, isNull, like } from 'drizzle-orm';
+
+/**
+ * The custom field the Paperless document-type name is carried across in, verbatim.
+ *
+ * These three keys live here rather than in `import.ts` because the verification report has to look
+ * the values up in the target by key, and `import.ts` already imports this module. A literal
+ * repeated in the report would be a second source of truth for the same string, which is exactly
+ * how a check comes to look at a field nothing writes.
+ */
+export const DOCUMENT_TYPE_FIELD_KEY = 'paperless_document_type';
+
+/** The custom field the Paperless storage-path name is carried across in. */
+export const STORAGE_PATH_FIELD_KEY = 'paperless_storage_path';
+
+/** The custom field an ASN goes to when another item already holds it in `item_office`. */
+export const ASN_FIELD_KEY = 'paperless_asn';
 
 /** `items.source_system` for everything this importer writes. */
 export const SOURCE_SYSTEM = 'paperless';
@@ -31,12 +47,20 @@ export const documentSourceRef = (paperlessId: number): string => `paperless:doc
 
 const SOURCE_REF_PREFIX = 'paperless:document:';
 
-/** Paperless document id → Recueil item id, for every item the target says came from Paperless. */
+/**
+ * Paperless document id → Recueil item id, for every **live** item the target says came from
+ * Paperless.
+ *
+ * Trashed items are left out on purpose. An item a person has binned since the last run is not a
+ * place to write to — the services refuse it — and it is not evidence that the document was
+ * carried either. Both callers want the live set: a resumed run, which must not write into the
+ * trash, and the verification report, which counts the trashed ones separately and names them.
+ */
 export const importedItemIds = (recueil: Recueil): Map<number, string> => {
   const rows = recueil.db
     .select({ id: schema.items.id, sourceId: schema.items.sourceId })
     .from(schema.items)
-    .where(eq(schema.items.sourceSystem, SOURCE_SYSTEM))
+    .where(and(eq(schema.items.sourceSystem, SOURCE_SYSTEM), isNull(schema.items.trashedAt)))
     .all();
 
   const byPaperlessId = new Map<number, string>();

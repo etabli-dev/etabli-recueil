@@ -1704,6 +1704,14 @@ paths:
         representation may be cached indefinitely.
 
 
+        Every response carries `X-Content-Type-Options: nosniff` and a restrictive
+        `Content-Security-Policy`. `Content-Disposition: inline` is sent only for the types a
+        browser paints rather than runs — PDF, the raster images, plain text; anything else,
+        including HTML and SVG, is `attachment` and `application/octet-stream`, because the media
+        type can be derived from a filename the uploader chose. `?download=true` forces the
+        attachment form for the inline types too.
+
+
         **Scope:** `documents:read`.
       tags:
         - Library

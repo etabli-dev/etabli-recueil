@@ -160,6 +160,16 @@ one §7 asks for.
 says flag rather than guess: the attachment record survives, pointing at where the file should be, a
 review entry carries the reason, and `attachment_hash_coverage` is an informational check.
 
+**Every blocking check asserts equality, and every one has a test that watched it fail** (ADR-0021
+§3, §4). Four of them — `trash_parity`, `collection_parity`, `tag_parity` and `creator_parity` —
+were written as `>=` in the Phase 1 round: an inequality open in the direction that permits
+duplication, so a run that trashed everything, or wrote every collection twice, satisfied them, and
+none of the four had a test that ever watched one fail. Each now scopes its target side to what this
+import created — Zotero-deleted rows matched by key, collections and tags matched by name one for
+one, creator appearances counted on the imported items — and compares for equality.
+`test/report-checks.test.ts` breaks each of the eleven blocking checks in turn, including in the
+over-writing direction the old inequalities could not see.
+
 ## Known limitations
 
 - **Zotero item keys are not carried into `public_id`.** `spec/data-model.md` §1.3 says the

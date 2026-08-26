@@ -99,6 +99,14 @@ export interface DocumentCounts {
   apiReportedTotal: number;
   /** Documents this run actually received in the pages it walked. */
   apiFetched: number;
+  /**
+   * Of those, the ones whose Recueil item is not in the trash.
+   *
+   * The expected side of `document_count_parity`. A document whose item a person has binned is
+   * excluded from both sides of every per-document count, and `trashedInRecueil` below names them,
+   * because an exclusion nobody can see is the shape ADR-0021 §2 forbids.
+   */
+  apiActive: number;
   /** Documents an earlier attempt of this job had already finished, and this one skipped. */
   carriedFromEarlierAttempt: number;
   /** Rows in the target's `items` whose `source_system` is `paperless`, by query. */
@@ -109,8 +117,10 @@ export interface DocumentCounts {
   recueilMistyped: number;
   /** Paperless documents with no row in the target at all. */
   missingInRecueil: number[];
-  /** Items in the target claiming a Paperless origin the server does not have. */
+  /** Live items in the target claiming a Paperless origin the server does not have. */
   orphanedInRecueil: string[];
+  /** Paperless documents whose Recueil item is in the trash. Excluded from the counts, listed here. */
+  trashedInRecueil: number[];
   delta: number;
   byDocumentType: DocumentTypeParity[];
   /** Documents whose Paperless `deleted_at` is set. Not imported; see `README.md`. */
@@ -183,6 +193,15 @@ export interface OriginalCoverage {
   recueilAttachmentsMissing: number[];
   /** Paperless ids with an item but no stored original. Expected to equal missing + unreadable. */
   recueilWithoutOriginal: number[];
+  /**
+   * Paperless ids with an item, no stored original, and nothing in the run's record explaining it.
+   *
+   * The blocking half of `originals_accounted_for`, matched by id rather than by count: counting
+   * alone let a recorded failure for one document excuse a quietly absent file under another.
+   */
+  unaccountedWithoutOriginal: number[];
+  /** Paperless ids the run recorded as missing or unreadable whose blob is in the store after all. */
+  contradictedByStore: number[];
   entries: OriginalReportEntry[];
 }
 
@@ -212,6 +231,8 @@ export interface DocumentTypeReconciliation {
 
 export interface TagReconciliation {
   apiTotal: number;
+  /** Of those, the ones with a name Recueil can hold. An empty name is refused (§3.11). */
+  apiNamed: number;
   /** Tags in the target whose name is one the API listed, by query. */
   recueilTotal: number;
   /** Paperless tag names with no Recueil tag. */
@@ -220,6 +241,18 @@ export interface TagReconciliation {
   apiAssignments: number;
   /** Rows in `item_tags` for the imported items, by query. */
   recueilAssignments: number;
+  /**
+   * Assignments naming a tag `/api/tags/` defined, counted from the API payload.
+   *
+   * The expected side of `tag_assignments_carried`. The subtraction is decided by comparing the
+   * documents against `snapshot.tags` — both sides of the source — and never by counting what the
+   * importer logged that it skipped.
+   */
+  apiAssignmentsResolvable: number;
+  /** Assignments naming a tag id `/api/tags/` did not define. */
+  apiAssignmentsDangling: number;
+  /** The distinct tag ids behind those, in ascending order. Blocking: `tag_references_resolvable`. */
+  danglingTagIds: number[];
   /** Assignments naming a tag that was not in `/api/tags/`. Each one is also in `skipped`. */
   skippedAssignments: number;
   /** Paperless tags that have a parent. Recueil tags are flat, so the tree is not carried. */
@@ -230,15 +263,44 @@ export interface TagReconciliation {
 
 export interface CustomFieldReconciliation {
   apiTotal: number;
+  /** Of those, the ones whose Paperless data type this importer maps. Source-derived. */
+  apiSupported: number;
   /** Definitions in the target whose `field_key` is one this run planned, by query. */
   recueilDefined: number;
   byDataType: Record<string, number>;
   /** Paperless types this importer has no mapping for. Their values are not written. */
   unsupported: Array<{ paperlessId: number; name: string; dataType: string; reason: string }>;
-  /** Values the API carried on the documents it returned. */
+  /** Values the API carried on the documents it returned. Same number as `apiValueInstances`. */
   apiValues: number;
+  /** Custom-field value instances on the API payload, unfiltered. */
+  apiValueInstances: number;
+  /** Of those, the ones naming a field id `/api/custom_fields/` did not define. */
+  apiInstancesDangling: number;
+  /** Of those, the ones on a field whose Paperless data type this importer has no mapping for. */
+  apiInstancesUnsupportedType: number;
+  /**
+   * Instances the source can express: the total less the three exclusions above and below.
+   *
+   * The expected side of `custom_field_values_carried`. Every exclusion is a fact about the source
+   * — a field id the source never defined, a data type this version has no column for, an option
+   * id the source's own field definition does not list — and every one is listed rather than
+   * subtracted from both sides.
+   */
+  apiInstancesCarryable: number;
+  /** The distinct undefined field ids. Blocking: `custom_field_references_resolvable`. */
+  danglingFieldIds: number[];
+  /** Values the source's own field definition gives no meaning to, one entry each. */
+  unrepresentableValues: UnrepresentableValue[];
   /** Rows in `field_values` for the imported items, by query. */
   recueilValues: number;
+  /**
+   * Distinct `(item, field, group)` slots among those rows, by query.
+   *
+   * One Paperless value is one slot however many rows it becomes: a `documentlink` writes one row
+   * per link, so comparing rows with instances would compare two different units and the check
+   * would drift by however many links the library happens to hold.
+   */
+  recueilInstances: number;
   /** Values recorded as explicitly empty (`is_blank`). */
   blankValues: number;
   /** Values that could not be represented. Each one is also in `skipped`. */
@@ -261,12 +323,24 @@ export interface AsnReconciliation {
   apiWithAsn: number;
   /** Imported items whose `item_office.asn` is not null, by query. */
   recueilWithAsn: number;
+  /** Documents whose ASN is on their own item's `item_office.asn`, by query. */
+  recueilCarried: number;
+  /** Documents whose ASN is on `paperless_asn` because something provably holds the number. */
+  recueilDeferred: number;
+  /** One entry per deferral, with the live item that holds the number where there is one. */
+  deferrals: AsnDeferral[];
+  /** ASNs that reached neither column. Non-empty fails `asn_preserved`. */
+  lost: AsnLoss[];
+  /** Non-null ASNs among live items in the whole target, by query. Counted, not deduplicated. */
+  recueilLiveAsn: number;
   /** Distinct non-null ASNs among live items in the whole target, by query. */
   recueilDistinctAsn: number;
   /** True when those two agree: `ux_item_office_asn` holds and nothing shares a number. */
   unique: boolean;
   /** ASNs Paperless itself had on more than one document. */
   duplicatesInSource: Array<{ asn: number; documents: number[] }>;
+  /** How many ASNs those duplicates cost: one document keeps each number, the rest cannot. */
+  duplicateLossesInSource: number;
   /** ASNs that could not be written because another item already held them. */
   collisions: Array<{ asn: number; paperlessId: number; heldByItemId: string }>;
   /** The lowest and highest ASN carried across, for a person checking against Paperless. */
@@ -276,6 +350,14 @@ export interface AsnReconciliation {
 export interface NoteReconciliation {
   /** Notes the API carried on the documents it returned. */
   apiTotal: number;
+  /**
+   * Of those, distinct by trimmed text within one document.
+   *
+   * The expected side of `notes_carried`. A note is keyed by its item and its text, so two
+   * byte-identical notes on one document are one note in Recueil; comparing against `apiTotal`
+   * would make that collapse look like a loss.
+   */
+  apiDistinct: number;
   /** Rows in `notes` for the imported items, by query. */
   recueilTotal: number;
   delta: number;
@@ -306,15 +388,56 @@ export interface ReviewEntry {
   detail?: Record<string, unknown>;
 }
 
-/** One named assertion, so that `pass` can be traced to the checks that decided it. */
+/**
+ * How a check's two numbers are compared.
+ *
+ * `at-least` exists for the one informational check where a larger target side is genuinely
+ * correct. Every blocking check is `equals`: ADR-0021 §3 allows an inequality only with a comment
+ * saying which direction is the failure and why the other is impossible, and none of these has one.
+ */
+export type CheckComparison = 'equals' | 'at-least';
+
+/**
+ * One named assertion, so that `pass` can be traced to the checks that decided it.
+ *
+ * `pass` is **derived** from `expected`, `actual` and `compare` by `build.ts`. It is not a separate
+ * expression that happens to be printed beside them, because that is exactly how the Phase 2 review
+ * came to find a blocking check reading `PASS ... expected=6 actual=0`.
+ */
 export interface ReportCheck {
   name: string;
   description: string;
   pass: boolean;
   expected: number | string;
   actual: number | string;
+  compare: CheckComparison;
   /** False when the check is informational and does not affect `pass`. */
   blocking: boolean;
+}
+
+/** One custom-field value the source's own field definition gives no meaning to. */
+export interface UnrepresentableValue {
+  paperlessId: number;
+  fieldId: number;
+  fieldName: string;
+  reason: string;
+}
+
+/** One ASN the facet could not take, with the target's own evidence for why. */
+export interface AsnDeferral {
+  asn: number;
+  paperlessId: number;
+  /** The live item in the target that holds the number, queried, or null. */
+  heldByItemId: string | null;
+  /** True when Paperless itself put the number on a lower document id. */
+  duplicateInSource: boolean;
+}
+
+/** One ASN that reached neither `item_office.asn` nor `paperless_asn`. */
+export interface AsnLoss {
+  asn: number;
+  paperlessId: number;
+  reason: string;
 }
 
 export interface PaperlessImportReport {

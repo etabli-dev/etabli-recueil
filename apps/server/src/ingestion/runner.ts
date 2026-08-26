@@ -376,6 +376,13 @@ export class IngestionRunner {
     options: { actor: Actor; limit?: number },
   ): Promise<void> {
     const row = this.deps.sources.get(sourceId);
+    // A job log and a job's `error_message` are both readable through the API, and both are built
+    // from exception text raised below this package — a WebDAV client, an IMAP client, a TLS
+    // handshake. Rather than audit each of those for whether it interpolates a credential, every
+    // string this method produces goes through the source's own redaction on the way out.
+    const scrub = (text: unknown): string =>
+      this.deps.sources.redactFor(row, typeof text === 'string' ? text : describe(text));
+
     const { pipeline, ruleCount, flushDocumentEvents } = this.createPipeline({
       actor: options.actor,
       runId: () => jobId,
@@ -386,8 +393,8 @@ export class IngestionRunner {
     try {
       source = this.deps.sources.buildSource(row);
     } catch (error) {
-      this.failJob(jobId, 'source_unavailable', describe(error), options.actor);
-      this.deps.sources.recordRun(sourceId, { jobId, at: nowTimestamp(), error: describe(error) });
+      this.failJob(jobId, 'source_unavailable', scrub(error), options.actor);
+      this.deps.sources.recordRun(sourceId, { jobId, at: nowTimestamp(), error: scrub(error) });
       return;
     }
 
@@ -397,7 +404,7 @@ export class IngestionRunner {
       recueil: this.deps.recueil,
       ...(options.limit === undefined ? {} : { limit: options.limit }),
       onLog: (entry) => {
-        this.writeJobLog(jobId, entry.level, entry.message, entry.data, entry.externalId);
+        this.writeJobLog(jobId, entry.level, scrub(entry.message), entry.data, entry.externalId);
       },
     });
 
@@ -416,8 +423,8 @@ export class IngestionRunner {
         this.deps.sources.recordRun(sourceId, { jobId, at: nowTimestamp(), error: 'cancelled' });
         return;
       }
-      this.failJob(jobId, 'source_run_failed', describe(error), options.actor);
-      this.deps.sources.recordRun(sourceId, { jobId, at: nowTimestamp(), error: describe(error) });
+      this.failJob(jobId, 'source_run_failed', scrub(error), options.actor);
+      this.deps.sources.recordRun(sourceId, { jobId, at: nowTimestamp(), error: scrub(error) });
       return;
     } finally {
       await runner.stop().catch(() => undefined);
@@ -426,7 +433,7 @@ export class IngestionRunner {
     this.deps.sources.recordRun(sourceId, {
       jobId,
       at: nowTimestamp(),
-      ...(report.error === undefined ? {} : { error: report.error.message }),
+      ...(report.error === undefined ? {} : { error: scrub(report.error.message) }),
     });
 
     // The pipeline's own run row becomes this job's child, so the queue shows the tree §6.3

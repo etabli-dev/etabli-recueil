@@ -190,8 +190,14 @@ export type { DocumentFacts } from './document-facts.js';
 /* Archives (stage 3) -------------------------------------------------------------------------------- */
 export { archiveKind, emailMetadata, extractArchive } from './archive/extract.js';
 export type { ArchiveKind, ExtractedMember, ExtractionResult } from './archive/extract.js';
-export { crc32, looksLikeZip, readZipDirectory, readZipEntry } from './archive/zip.js';
-export type { ZipEntry } from './archive/zip.js';
+export {
+  DEFAULT_MEMBER_OUTPUT_BYTES,
+  crc32,
+  looksLikeZip,
+  readZipDirectory,
+  readZipEntry,
+} from './archive/zip.js';
+export type { ZipEntry, ZipEntryLimits } from './archive/zip.js';
 export { decodeWords, looksLikeEmail, parseEmail } from './archive/eml.js';
 export type { EmailPart, ParsedEmail } from './archive/eml.js';
 export { isInside, resolveMemberPath } from './archive/safe-path.js';
@@ -203,6 +209,10 @@ export { ScratchManager, ScratchSpace } from './scratch.js';
 /* Type detection (stage 4) --------------------------------------------------------------------------- */
 export { detectType } from './detect/type.js';
 export type { DetectionInput, DetectionResult } from './detect/type.js';
+
+/* Resource budgets on untrusted input (ADR-0022) -------------------------------------------------- */
+export { BudgetLedger, DEFAULT_PDF_BUDGET, ResourceBudgetError } from './budgets.js';
+export type { PdfBudget } from './budgets.js';
 
 /* Text ---------------------------------------------------------------------------------------------- */
 export { extractPdfText } from './text/pdf-text.js';

@@ -14,10 +14,17 @@
  *
  * Nothing here touches the filesystem, and nothing here trusts a member name: names come out as
  * recorded and are resolved by `safe-path.ts` before anything is written.
+ *
+ * Nothing here trusts a *size*, either, which is ADR-0022 and the correction of a real defect.
+ * `uncompressedSize` is a 32-bit field the person who built the archive wrote; it is read, it is
+ * used for a fast rejection, and it bounds nothing. The bound is `maxOutputLength` on the inflate
+ * call itself, because a length compared after the buffer exists is a length compared after the
+ * memory is already committed — which is exactly how an 815 KB archive bought 1.6 GB of resident
+ * memory before the old guard fired.
  */
 import { inflateRawSync } from 'node:zlib';
 
-import { ArchiveFormatError } from '../errors.js';
+import { ArchiveFormatError, ArchiveLimitError } from '../errors.js';
 
 const END_OF_CENTRAL_DIRECTORY = 0x06054b50;
 const CENTRAL_FILE_HEADER = 0x02014b50;
@@ -80,8 +87,39 @@ export const readZipDirectory = (archive: Buffer): ZipEntry[] => {
   return entries;
 };
 
-/** The bytes of one member, decompressed and CRC-checked. */
-export const readZipEntry = (archive: Buffer, entry: ZipEntry): Buffer => {
+/**
+ * The allowance a member gets when the caller does not say.
+ *
+ * `extractArchive` always says — it hands down `min(maxArchiveEntryBytes, what the container has
+ * left)`. This default is for a direct caller, and it is a real ceiling rather than `Infinity`,
+ * because a caller that forgets is the failure this parameter exists to prevent.
+ */
+export const DEFAULT_MEMBER_OUTPUT_BYTES = 256 * 1024 * 1024;
+
+export interface ZipEntryLimits {
+  /**
+   * The most this member may produce, in bytes. Enforced by the decompressor, not checked after.
+   * The caller passes the smaller of its per-member limit and what the container has left, so this
+   * one number carries both budgets (ADR-0022 §3).
+   */
+  maxOutputBytes: number;
+  /** Named in the refusal so the message says which limit was hit. */
+  limitName?: string;
+}
+
+/**
+ * The bytes of one member, decompressed and CRC-checked, inside a budget.
+ *
+ * `limits` defaults to the conservative per-member budget rather than to "no limit", because a
+ * caller that forgets is the failure this function exists to prevent.
+ */
+export const readZipEntry = (
+  archive: Buffer,
+  entry: ZipEntry,
+  limits: ZipEntryLimits = { maxOutputBytes: DEFAULT_MEMBER_OUTPUT_BYTES },
+): Buffer => {
+  const maxOutputBytes = Math.max(0, Math.floor(limits.maxOutputBytes));
+  const limitName = limits.limitName ?? 'maxOutputBytes';
   const header = entry.localHeaderOffset;
   if (header + 30 > archive.length || archive.readUInt32LE(header) !== LOCAL_FILE_HEADER) {
     throw new ArchiveFormatError(`The local header for '${entry.name}' is malformed.`);
@@ -94,12 +132,52 @@ export const readZipEntry = (archive: Buffer, entry: ZipEntry): Buffer => {
     throw new ArchiveFormatError(`The data for '${entry.name}' runs past the end of the archive.`);
   }
 
+  // The declared size informs a fast rejection and nothing else. A member that declares more than
+  // the budget is refused before a byte is inflated; a member that declares less and produces more
+  // is stopped by `maxOutputLength` below, which is the case the directory can lie about.
+  if (entry.uncompressedSize > maxOutputBytes) {
+    throw new ArchiveLimitError(
+      `Member '${entry.name}' declares ${entry.uncompressedSize} bytes; the ${limitName} budget ` +
+        `for this member is ${maxOutputBytes} bytes.`,
+      { entryName: entry.name, declared: entry.uncompressedSize, limitName, limit: maxOutputBytes },
+    );
+  }
+
   const compressed = archive.subarray(start, end);
   let bytes: Buffer;
   if (entry.compressionMethod === STORED) {
+    // Stored members cannot expand, so the compressed length is the output length and checking it
+    // before the copy is a real bound rather than a description of one.
+    if (compressed.length > maxOutputBytes) {
+      throw new ArchiveLimitError(
+        `Member '${entry.name}' holds ${compressed.length} stored bytes, over the ${limitName} ` +
+          `budget of ${maxOutputBytes} bytes.`,
+        { entryName: entry.name, byteSize: compressed.length, limitName, limit: maxOutputBytes },
+      );
+    }
     bytes = Buffer.from(compressed);
   } else if (entry.compressionMethod === DEFLATED) {
-    bytes = inflateRawSync(compressed);
+    try {
+      bytes = inflateRawSync(compressed, { maxOutputLength: maxOutputBytes });
+    } catch (error) {
+      if (isOutputTooLarge(error)) {
+        throw new ArchiveLimitError(
+          `Member '${entry.name}' inflates past the ${limitName} budget of ${maxOutputBytes} ` +
+            `bytes; the directory declares ${entry.uncompressedSize}. The declared size was a lie ` +
+            'and the inflate was stopped at the budget rather than after it.',
+          {
+            entryName: entry.name,
+            declared: entry.uncompressedSize,
+            limitName,
+            limit: maxOutputBytes,
+          },
+        );
+      }
+      throw new ArchiveFormatError(
+        `'${entry.name}' could not be inflated: ${error instanceof Error ? error.message : String(error)}`,
+        { entryName: entry.name },
+      );
+    }
   } else {
     throw new ArchiveFormatError(
       `'${entry.name}' uses compression method ${entry.compressionMethod}; this reader supports ` +
@@ -122,6 +200,18 @@ export const readZipEntry = (archive: Buffer, entry: ZipEntry): Buffer => {
   }
   return bytes;
 };
+
+/**
+ * Did `node:zlib` stop because the output ran past `maxOutputLength`?
+ *
+ * It reports that as `ERR_BUFFER_TOO_LARGE`, which is also what an inflate with no limit throws on
+ * a payload past `buffer.kMaxLength`. Both mean the same thing here — the member produced more
+ * than it was allowed to — so both become the budget refusal rather than "unreadable archive".
+ */
+const isOutputTooLarge = (error: unknown): boolean =>
+  typeof error === 'object' &&
+  error !== null &&
+  (error as { code?: unknown }).code === 'ERR_BUFFER_TOO_LARGE';
 
 const findEndOfCentralDirectory = (archive: Buffer): number => {
   if (archive.length < 22) throw new ArchiveFormatError('The buffer is too short to be an archive.');

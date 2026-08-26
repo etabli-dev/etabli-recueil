@@ -29,10 +29,26 @@ import { dirname, join, relative, resolve, sep } from 'node:path';
 export interface FakeWebDavOptions {
   /** Path the collection is served under. Default `/dav`. */
   mount?: string;
+  /** Answer HEAD with 405, like a server that only implements PROPFIND and GET. */
+  disableHead?: boolean;
   auth?: { username: string; password: string };
   /** Answer MOVE with 501, like a server that only does PUT and DELETE. */
   disableMove?: boolean;
-  /** Leave `getetag` out of every PROPFIND answer, so the source falls back to size and mtime. */
+  /**
+   * Ignore `If-Match` on DELETE and MOVE, like a share that does not implement preconditions.
+   *
+   * The point of having it is that the source must not be *relying* on the precondition: its own
+   * HEAD-and-compare has to stand up on a server that answers 204 to a conditional delete it never
+   * evaluated.
+   */
+  ignoreIfMatch?: boolean;
+  /**
+   * Send no entity tag anywhere — not in a PROPFIND, not on a GET or a HEAD.
+   *
+   * A plain `mod_dav` over a filesystem that cannot cheaply produce one behaves like this, and it
+   * is the case where the source has neither the ETag comparison nor `If-Match` and must fall back
+   * to `(Last-Modified, size)`, with a refusal that says so.
+   */
   omitEtags?: boolean;
   /** Insert this literal `<d:response>` into every listing. For the hostile-href test. */
   injectResponse?: string;
@@ -41,7 +57,14 @@ export interface FakeWebDavOptions {
 export interface FakeWebDavServer {
   url: string;
   root: string;
-  readonly requests: Array<{ method: string; path: string }>;
+  /**
+   * Every request, with its headers.
+   *
+   * The headers are recorded because one of the Phase 2 findings was evidenced by their absence:
+   * `[{"method":"DELETE","name":"scan.pdf","headers":{}}]` — a delete with no precondition at all.
+   * A test that asserts a conditional request was made has to be able to see the condition.
+   */
+  readonly requests: Array<{ method: string; path: string; headers: Record<string, string> }>;
   /** Write a file into the served tree, as a person or a sync client would. */
   put(relativePath: string, bytes: Buffer | string): Promise<void>;
   /** What is in the tree now, relative paths, sorted. */
@@ -78,7 +101,25 @@ export const startFakeWebDav = async (
 ): Promise<FakeWebDavServer> => {
   const mount = options.mount ?? '/dav';
   const root = mkdtempSync(join(tmpdir(), 'recueil-webdav-feed-'));
-  const requests: Array<{ method: string; path: string }> = [];
+  const requests: Array<{ method: string; path: string; headers: Record<string, string> }> = [];
+
+  /** RFC 7232 §3.1, as much of it as a share needs: `*` matches anything present. */
+  const preconditionFailed = async (
+    request: IncomingMessage,
+    target: string,
+    found: { isDirectory(): boolean; mtimeMs: number },
+  ): Promise<boolean> => {
+    const header = request.headers['if-match'];
+    if (typeof header !== 'string' || header.trim() === '') return false;
+    if (options.ignoreIfMatch === true) return false;
+    if (header.trim() === '*') return false;
+    if (found.isDirectory()) return true;
+    const current = etagOf(await readFile(target), found.mtimeMs);
+    return !header
+      .split(',')
+      .map((candidate) => candidate.trim().replace(/^W\//iu, ''))
+      .includes(current);
+  };
 
   const authorised = (request: IncomingMessage): boolean => {
     if (options.auth === undefined) return true;
@@ -90,7 +131,16 @@ export const startFakeWebDav = async (
   const handler = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
     const method = (request.method ?? 'GET').toUpperCase();
     const url = new URL(request.url ?? '/', 'http://127.0.0.1');
-    requests.push({ method, path: url.pathname });
+    requests.push({
+      method,
+      path: url.pathname,
+      headers: Object.fromEntries(
+        Object.entries(request.headers).map(([name, value]) => [
+          name,
+          Array.isArray(value) ? value.join(', ') : (value ?? ''),
+        ]),
+      ),
+    });
 
     if (!url.pathname.startsWith(mount)) {
       send(response, 404, {}, 'not this collection');
@@ -127,7 +177,7 @@ export const startFakeWebDav = async (
           200,
           {
             'content-type': 'application/octet-stream',
-            etag: etagOf(bytes, found.mtimeMs),
+            ...(options.omitEtags === true ? {} : { etag: etagOf(bytes, found.mtimeMs) }),
             'last-modified': new Date(found.mtimeMs).toUTCString(),
           },
           bytes,
@@ -154,9 +204,37 @@ export const startFakeWebDav = async (
         return;
       }
 
+      case 'HEAD': {
+        if (options.disableHead === true) {
+          send(response, 405, {}, 'HEAD is not supported here');
+          return;
+        }
+        if (found === null) {
+          send(response, 404);
+          return;
+        }
+        if (found.isDirectory()) {
+          send(response, 200, { 'content-type': 'httpd/unix-directory' });
+          return;
+        }
+        const bytes = await readFile(target);
+        response.writeHead(200, {
+          'content-type': 'application/octet-stream',
+          'content-length': String(bytes.byteLength),
+          ...(options.omitEtags === true ? {} : { etag: etagOf(bytes, found.mtimeMs) }),
+          'last-modified': new Date(found.mtimeMs).toUTCString(),
+        });
+        response.end();
+        return;
+      }
+
       case 'DELETE': {
         if (found === null) {
           send(response, 404, {}, 'nothing to delete');
+          return;
+        }
+        if (await preconditionFailed(request, target, found)) {
+          send(response, 412, {}, 'If-Match does not match the current entity tag');
           return;
         }
         await rm(target, { recursive: true, force: true });
@@ -171,6 +249,10 @@ export const startFakeWebDav = async (
         }
         if (found === null) {
           send(response, 404, {}, 'nothing to move');
+          return;
+        }
+        if (await preconditionFailed(request, target, found)) {
+          send(response, 412, {}, 'If-Match does not match the current entity tag');
           return;
         }
         const destinationHeader = request.headers.destination;

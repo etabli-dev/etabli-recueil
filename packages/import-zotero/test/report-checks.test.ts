@@ -20,12 +20,14 @@
  * Every one of these must make `report.pass` false. A test that only asserted the numbers were
  * present would be the same mistake one level up.
  */
-import { copyFileSync, existsSync } from 'node:fs';
+import { appendFileSync, copyFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+
+import { Buffer } from 'node:buffer';
 
 import BetterSqlite3 from 'better-sqlite3';
 import { schema } from '@recueil/core';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { importZoteroLibrary } from '../src/import.js';
@@ -205,44 +207,52 @@ describe('a library the run did not read is reported, never hidden (M4c)', () =>
   }, 180_000);
 });
 
-describe('attachment records are counted in the target (M4a)', () => {
-  /**
-   * Rebuild the report over the target as it is now.
-   *
-   * The import is not re-run, because a re-run is idempotent and would put back whatever was
-   * removed — which would test the importer's repair rather than the report's honesty. `plans` is
-   * empty on purpose: the item and attachment checks must not need it, and passing `[]` proves it.
-   */
-  const rebuild = (recueil: ReturnType<typeof library>, jobId: string): ZoteroImportReport => {
-    const zotero = new ZoteroLibrary(ZOTERO_FIXTURE.database);
-    try {
-      return buildReport({
-        library: zotero,
-        recueil,
-        plans: [],
-        log: readImportLog(recueil, jobId),
-        betterBibtex: [],
-        betterBibtexPath: null,
-        sources: {
-          storageDirectory: ZOTERO_FIXTURE.storage,
-          linkedAttachmentBase: ZOTERO_FIXTURE.linkedAttachments,
-        },
-        run: {
-          jobId,
-          idempotencyKey: 'test',
-          runLabel: 'test',
-          startedAt: '2026-08-22T00:00:00.000Z',
-          finishedAt: '2026-08-22T00:00:01.000Z',
-          durationMs: 1000,
-          attempt: 1,
-          resumedFromStage: null,
-        },
-      });
-    } finally {
-      zotero.close();
-    }
-  };
+/**
+ * Rebuild the report over the target as it is now.
+ *
+ * The import is not re-run, because a re-run is idempotent and would put back whatever was
+ * removed — which would test the importer's repair rather than the report's honesty. `plans` is
+ * empty on purpose: the item and attachment checks must not need it, and passing `[]` proves it.
+ *
+ * `before` runs after the source database has been opened and before the report is built, which is
+ * the only window in which `source_unchanged` can be made to fail.
+ */
+const rebuild = (
+  recueil: ReturnType<typeof library>,
+  jobId: string,
+  options: { databasePath?: string; before?: () => void } = {},
+): ZoteroImportReport => {
+  const zotero = new ZoteroLibrary(options.databasePath ?? ZOTERO_FIXTURE.database);
+  try {
+    options.before?.();
+    return buildReport({
+      library: zotero,
+      recueil,
+      plans: [],
+      log: readImportLog(recueil, jobId),
+      betterBibtex: [],
+      betterBibtexPath: null,
+      sources: {
+        storageDirectory: ZOTERO_FIXTURE.storage,
+        linkedAttachmentBase: ZOTERO_FIXTURE.linkedAttachments,
+      },
+      run: {
+        jobId,
+        idempotencyKey: 'test',
+        runLabel: 'test',
+        startedAt: '2026-08-22T00:00:00.000Z',
+        finishedAt: '2026-08-22T00:00:01.000Z',
+        durationMs: 1000,
+        attempt: 1,
+        resumedFromStage: null,
+      },
+    });
+  } finally {
+    zotero.close();
+  }
+};
 
+describe('attachment records are counted in the target (M4a)', () => {
   it('fails when an attachment row is deleted from the Recueil database', async () => {
     const recueil = library();
     const { report: first, jobId } = await importZoteroLibrary(recueil, fixtureImportOptions());
@@ -281,5 +291,200 @@ describe('attachment records are counted in the target (M4a)', () => {
     );
     expect(after.attachments.recueilAttachments).toBe(0);
     expect(failed(after)).toContain('attachment_records_carried');
+  }, 180_000);
+});
+
+/**
+ * The five blocking checks the previous round left one-sided, and the one it left untested.
+ *
+ * `trash_parity`, `collection_parity`, `tag_parity` and `creator_parity` were written as `>=`, with
+ * no comment saying which direction was the failure and no test that ever watched one fail. ADR-0021
+ * §3 names that shape exactly — "every inequality open in the direction that permits duplication" —
+ * and §4 requires a falsification test per blocking check. Each of the four now scopes its target
+ * side to what this import created and asserts equality; each of the tests below breaks it in the
+ * direction the old inequality could not see, as well as the direction it could.
+ *
+ * `note_parity` and `source_unchanged` were already equalities and simply had no test.
+ */
+describe('every remaining blocking check can be made to fail', () => {
+  it('item_count_parity — an imported row stops claiming its Zotero origin', async () => {
+    const recueil = library();
+    const { report: first, jobId } = await importZoteroLibrary(recueil, fixtureImportOptions());
+    expect(first.pass).toBe(true);
+
+    const victim = recueil.db
+      .select({ id: schema.items.id })
+      .from(schema.items)
+      .where(eq(schema.items.sourceSystem, 'zotero'))
+      .all()[0];
+    recueil.db
+      .update(schema.items)
+      .set({ sourceSystem: 'manual' })
+      .where(eq(schema.items.id, victim!.id))
+      .run();
+
+    const after = rebuild(recueil, jobId);
+    expect(after.items.recueilRegularTotal).toBe(first.items.recueilRegularTotal - 1);
+    expect(failed(after)).toContain('item_count_parity');
+    expect(after.pass).toBe(false);
+  }, 180_000);
+
+  it('note_parity — a note is deleted from the target', async () => {
+    const recueil = library();
+    const { report: first, jobId } = await importZoteroLibrary(recueil, fixtureImportOptions());
+    expect(first.notes.zoteroTotal).toBeGreaterThan(0);
+
+    const note = recueil.db.select({ id: schema.notes.id }).from(schema.notes).all()[0];
+    recueil.db.delete(schema.notes).where(eq(schema.notes.id, note!.id)).run();
+
+    const after = rebuild(recueil, jobId);
+    expect(after.notes.delta).toBe(-1);
+    expect(failed(after)).toContain('note_parity');
+    expect(after.pass).toBe(false);
+  }, 180_000);
+
+  it('collection_parity — a collection is renamed out from under the check', async () => {
+    const recueil = library();
+    const { report: first, jobId } = await importZoteroLibrary(recueil, fixtureImportOptions());
+    expect(first.collections.zoteroTotal).toBeGreaterThan(0);
+    expect(first.collections.matchedByName).toBe(first.collections.zoteroTotal);
+
+    const collection = recueil.db.select({ id: schema.collections.id }).from(schema.collections).all()[0];
+    recueil.db
+      .update(schema.collections)
+      .set({ name: 'not the name Zotero has' })
+      .where(eq(schema.collections.id, collection!.id))
+      .run();
+
+    const after = rebuild(recueil, jobId);
+    expect(after.collections.matchedByName).toBe(first.collections.zoteroTotal - 1);
+    expect(failed(after)).toContain('collection_parity');
+    expect(after.pass).toBe(false);
+  }, 180_000);
+
+  it('tag_parity — a tag is trashed', async () => {
+    const recueil = library();
+    const { report: first, jobId } = await importZoteroLibrary(recueil, fixtureImportOptions());
+    expect(first.tags.zoteroTotal).toBeGreaterThan(0);
+    expect(first.tags.matchedByName).toBe(first.tags.zoteroTotal);
+
+    const tag = recueil.db.select({ id: schema.tags.id }).from(schema.tags).all()[0];
+    recueil.db
+      .update(schema.tags)
+      .set({ trashedAt: '2026-01-01T00:00:00.000Z' })
+      .where(eq(schema.tags.id, tag!.id))
+      .run();
+
+    const after = rebuild(recueil, jobId);
+    expect(after.tags.matchedByName).toBe(first.tags.zoteroTotal - 1);
+    expect(failed(after)).toContain('tag_parity');
+    expect(after.pass).toBe(false);
+  }, 180_000);
+
+  it('creator_parity — an appearance is deleted, and again when one is written twice', async () => {
+    const recueil = library();
+    const { report: first, jobId } = await importZoteroLibrary(recueil, fixtureImportOptions());
+    expect(first.creators.zoteroAppearancesOnImported).toBeGreaterThan(0);
+
+    const rows = recueil.db.select().from(schema.itemCreators).all();
+    recueil.db
+      .delete(schema.itemCreators)
+      .where(
+        and(
+          eq(schema.itemCreators.itemId, rows[0]!.itemId),
+          eq(schema.itemCreators.ordinal, rows[0]!.ordinal),
+        ),
+      )
+      .run();
+
+    const short = rebuild(recueil, jobId);
+    expect(short.creators.recueilAppearancesOnImported).toBe(
+      first.creators.zoteroAppearancesOnImported - 1,
+    );
+    expect(failed(short)).toContain('creator_parity');
+    expect(short.pass).toBe(false);
+
+    // And the direction the old `>=` could never fail on: the same appearance written twice.
+    recueil.db.insert(schema.itemCreators).values({ ...rows[0]!, ordinal: 900 }).run();
+    recueil.db.insert(schema.itemCreators).values({ ...rows[1]!, ordinal: 901 }).run();
+
+    const doubled = rebuild(recueil, jobId);
+    expect(doubled.creators.recueilAppearancesOnImported).toBeGreaterThan(
+      doubled.creators.zoteroAppearancesOnImported,
+    );
+    expect(failed(doubled)).toContain('creator_parity');
+    expect(doubled.pass).toBe(false);
+  }, 180_000);
+
+  it('trash_parity — an item Zotero did not delete is put in the trash', async () => {
+    const recueil = library();
+    const { report: first, jobId } = await importZoteroLibrary(recueil, fixtureImportOptions());
+    expect(first.pass).toBe(true);
+    expect(first.trash.trashedNotDeletedInZotero).toBe(0);
+
+    const live = recueil.db
+      .select({ id: schema.items.id, trashedAt: schema.items.trashedAt })
+      .from(schema.items)
+      .where(eq(schema.items.sourceSystem, 'zotero'))
+      .all()
+      .find((row) => row.trashedAt === null);
+    expect(live).toBeDefined();
+    recueil.library.trashItem(live!.id, recueil.actor);
+
+    // This is the direction `recueilTrashedItems >= zoteroDeletedItems` could not fail on: more in
+    // the Recueil trash than Zotero ever deleted satisfied it.
+    const after = rebuild(recueil, jobId);
+    expect(after.trash.trashedNotDeletedInZotero).toBe(1);
+    expect(failed(after)).toContain('trash_parity');
+    expect(after.pass).toBe(false);
+  }, 180_000);
+
+  it('trash_parity — and again when an item Zotero deleted is restored', async () => {
+    const recueil = library();
+    const { report: first, jobId } = await importZoteroLibrary(recueil, fixtureImportOptions());
+    expect(first.trash.zoteroDeletedWithItem).toBeGreaterThan(0);
+
+    const trashed = recueil.db
+      .select({ id: schema.items.id, trashedAt: schema.items.trashedAt })
+      .from(schema.items)
+      .where(eq(schema.items.sourceSystem, 'zotero'))
+      .all()
+      .find((row) => row.trashedAt !== null);
+    expect(trashed).toBeDefined();
+    // Cleared directly rather than through `restoreItem`, which can refuse on an unrelated ASN or
+    // DOI collision. The check reads `items.trashed_at`, and this is the state it must notice.
+    recueil.db
+      .update(schema.items)
+      .set({ trashedAt: null })
+      .where(eq(schema.items.id, trashed!.id))
+      .run();
+
+    const after = rebuild(recueil, jobId);
+    expect(after.trash.recueilTrashedFromZotero).toBe(first.trash.zoteroDeletedWithItem - 1);
+    expect(failed(after)).toContain('trash_parity');
+    expect(after.pass).toBe(false);
+  }, 180_000);
+
+  it('source_unchanged — the Zotero database changes while the run is reading it', async () => {
+    const recueil = library();
+    const source = mutableSource(() => {});
+    const { jobId } = await importZoteroLibrary(
+      recueil,
+      fixtureImportOptions({ databasePath: source }),
+    );
+
+    // The control: rebuilt against the same untouched copy, the digests agree.
+    expect(rebuild(recueil, jobId, { databasePath: source }).source.sourceUnchanged).toBe(true);
+
+    const after = rebuild(recueil, jobId, {
+      databasePath: source,
+      // Between the fingerprint the reader took when it opened the file and the one the report
+      // takes at the end. That window is the whole point of the check: CONCEPT §6 promises the
+      // source is left byte-for-byte as it was found.
+      before: () => appendFileSync(source, Buffer.from([0])),
+    });
+    expect(after.source.sourceUnchanged).toBe(false);
+    expect(failed(after)).toContain('source_unchanged');
+    expect(after.pass).toBe(false);
   }, 180_000);
 });

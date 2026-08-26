@@ -1,15 +1,30 @@
 /**
  * The watched folder, end to end.
  *
- * The two tests that carry the most weight are the slow copy and the sabotaged store. The first is
- * the failure that content-addressed identity makes permanent: ingest a file mid-copy and the half
- * file is filed for ever as a different document from the whole one, because its hash is different.
- * The second is the one that loses data: a `delete` consume policy that fires on the pipeline's own
- * say-so rather than on what the store actually holds.
+ * The tests that carry the most weight are the slow copy, the sabotaged store, the replaced
+ * original and the truncated read. The first is the failure that content-addressed identity makes
+ * permanent: ingest a file mid-copy and the half file is filed for ever as a different document
+ * from the whole one, because its hash is different. The second is the one that loses data: a
+ * `delete` consume policy that fires on the pipeline's own say-so rather than on what the store
+ * actually holds. The last two are the H1 findings of `spec/hardening-2026-08.md`, both of which
+ * destroyed a document that had never been read, and both of which are asserted here against the
+ * folder, the library *and* the review queue rather than against the run report.
  */
 import { createHash } from 'node:crypto';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
-import { writeFile } from 'node:fs/promises';
+import {
+  appendFileSync,
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  statSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+  writeSync,
+} from 'node:fs';
+import { truncate, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -29,6 +44,16 @@ import {
   sleep,
 } from './helpers.js';
 import type { TestLibrary } from './helpers.js';
+
+/** Open review-queue rows, queried out of the table rather than taken from a run report. */
+const openReviews = (
+  target: TestLibrary,
+): Array<{ reason_code: string; severity: string; explanation: string; subject_id: string }> =>
+  target.connection
+    .prepare(
+      "select reason_code, severity, explanation, subject_id from review_queue where status = 'open'",
+    )
+    .all() as Array<{ reason_code: string; severity: string; explanation: string; subject_id: string }>;
 
 let library: TestLibrary;
 let watched: { path: string; dispose(): void };
@@ -410,5 +435,355 @@ describe('FolderSource', () => {
       'two.pdf',
     ]);
     expect(existsSync(join(watched.path, 'one.pdf'))).toBe(false);
+  });
+});
+
+describe('FolderSource, when the original changes under the acknowledgement (H1)', () => {
+  it('refuses to delete a file that was replaced between the ingestion and the acknowledgement', async () => {
+    const ingested = makePdf({ lines: ['the file that was actually read'] });
+    const replacement = makePdf({ lines: ['a different file nobody has ever read'], salt: 'second' });
+    writeFileSync(join(watched.path, 'scan.pdf'), ingested);
+    await sleep(40);
+
+    const source = new FolderSource({
+      root: watched.path,
+      consume: { mode: 'delete' },
+      stability: { quietMillis: 0, pollMillis: 20 },
+      watch: { enabled: false },
+    });
+    const context = makeContext(library);
+    await source.start(context);
+
+    const page = await source.poll({ limit: 10 }, context);
+    const candidate = page.candidates[0];
+    expect(candidate).toBeDefined();
+
+    const report = await makePipeline(library).run([candidate!], {
+      runLabel: 'h1',
+      sourceId: source.id,
+      total: 1,
+    });
+    const outcome = report.outcomes[0]?.outcome;
+    expect(outcome?.status).toBe('ingested');
+
+    // A sync client, a scanner or a person writes over the same name while the pipeline is at work.
+    writeFileSync(join(watched.path, 'scan.pdf'), replacement);
+
+    const acknowledgement = await source.acknowledge(candidate!.ref, outcome!, context);
+
+    // The far side is the side that matters: the replacement is still there, whole.
+    expect(existsSync(join(watched.path, 'scan.pdf'))).toBe(true);
+    expect(readFileSync(join(watched.path, 'scan.pdf'))).toEqual(replacement);
+    expect(acknowledgement.action).toBe('refused');
+    expect(acknowledgement.verified).toBe(false);
+    expect(acknowledgement.detail).toContain('is not the file that was ingested');
+
+    // P3: the refusal is somewhere a person looks, not only in the run report.
+    const reviews = openReviews(library);
+    expect(reviews.map((row) => row.reason_code)).toContain('source_changed_before_consume');
+    expect(reviews[0]?.explanation).toContain('scan.pdf');
+
+    // And nothing was lost: the next poll offers the replacement under its own revision.
+    const second = await source.poll({ limit: 10 }, context);
+    expect(second.candidates.map((entry) => entry.ref.externalId)).toEqual(['scan.pdf']);
+    expect(await second.candidates[0]!.read()).toEqual(replacement);
+    await source.stop(context);
+  });
+
+  it('refuses to move a file that was replaced, and the replacement stays where it was dropped', async () => {
+    const ingested = makePdf({ lines: ['the one that was read'] });
+    const replacement = makePdf({ lines: ['the one that was not'], salt: 'later' });
+    writeFileSync(join(watched.path, 'bill.pdf'), ingested);
+    await sleep(40);
+
+    const source = new FolderSource({
+      root: watched.path,
+      consume: { mode: 'move', to: 'processed' },
+      stability: { quietMillis: 0, pollMillis: 20 },
+      watch: { enabled: false },
+    });
+    const context = makeContext(library);
+    await source.start(context);
+    const page = await source.poll({ limit: 10 }, context);
+    const candidate = page.candidates[0]!;
+    const report = await makePipeline(library).run([candidate], {
+      runLabel: 'h1-move',
+      sourceId: source.id,
+      total: 1,
+    });
+
+    writeFileSync(join(watched.path, 'bill.pdf'), replacement);
+    const acknowledgement = await source.acknowledge(
+      candidate.ref,
+      report.outcomes[0]!.outcome,
+      context,
+    );
+    await source.stop(context);
+
+    expect(acknowledgement.action).toBe('refused');
+    expect(readFileSync(join(watched.path, 'bill.pdf'))).toEqual(replacement);
+    expect(existsSync(join(watched.path, 'processed', 'bill.pdf'))).toBe(false);
+  });
+
+  it('refuses the replayed acknowledgement when the file changed while the process was down', async () => {
+    const ingested = makePdf({ lines: ['written before the crash'] });
+    const replacement = makePdf({ lines: ['dropped in while nothing was running'], salt: 'overnight' });
+    writeFileSync(join(watched.path, 'inbox.pdf'), ingested);
+    await sleep(40);
+
+    const source = new FolderSource({
+      root: watched.path,
+      consume: { mode: 'delete' },
+      stability: { quietMillis: 0, pollMillis: 20 },
+      watch: { enabled: false },
+    });
+    const runner = new SourceRunner({ source, pipeline: makePipeline(library), recueil: library });
+    await runner.start();
+
+    // The process dies between the commit and the acknowledgement: the state row is `pending` and
+    // the far side has not been touched.
+    const realAcknowledge = source.acknowledge.bind(source);
+    source.acknowledge = async () => {
+      throw new Error('SIGKILL between the commit and the acknowledgement');
+    };
+    await runner.runOnce();
+    expect(sourceState(library).pending(source.id)).toHaveLength(1);
+
+    // The whole downtime is the window. Somebody drops a new file in under the same name.
+    writeFileSync(join(watched.path, 'inbox.pdf'), replacement);
+    await sleep(40);
+
+    // A new process over the same library and folder, and a conservative quiet period, so that this
+    // run does nothing but replay the interrupted acknowledgement: the replacement was written a
+    // moment ago and is not offered yet.
+    const restartedSource = new FolderSource({
+      root: watched.path,
+      consume: { mode: 'delete' },
+      stability: { quietMillis: 30_000, pollMillis: 20 },
+      watch: { enabled: false },
+    });
+    const second = new SourceRunner({
+      source: restartedSource,
+      pipeline: makePipeline(library),
+      recueil: library,
+    });
+    await second.start();
+    const restarted = await second.runOnce();
+    await second.stop();
+    await runner.stop();
+
+    expect(restarted.offered).toBe(0);
+    expect(restarted.recovered.map((record) => record.action)).toEqual(['refused']);
+    // Not asserted here, and worth saying why: `SourceRunner.runOnce` returns `ok: true` from its
+    // early exit when the poll offered nothing, without consulting `recovered`, so a refused replay
+    // in an otherwise empty run is reported clean. That is a defect in `runner.ts`, which is not
+    // this workstream's file; the refusal itself is what is asserted.
+    // The file dropped in overnight is still there, whole, and was never ingested by that run.
+    expect(existsSync(join(watched.path, 'inbox.pdf'))).toBe(true);
+    expect(readFileSync(join(watched.path, 'inbox.pdf'))).toEqual(replacement);
+    expect(documentDigests(library)).toEqual([sha256(ingested)]);
+
+    // And it is picked up on the poll after that, so nothing is lost, only deferred.
+    const third = new FolderSource({
+      root: watched.path,
+      consume: { mode: 'delete' },
+      stability: { quietMillis: 0, pollMillis: 20 },
+      watch: { enabled: false },
+    });
+    const later = new SourceRunner({ source: third, pipeline: makePipeline(library), recueil: library });
+    await later.start();
+    await later.runOnce();
+    await later.stop();
+    expect(documentDigests(library)).toEqual([sha256(ingested), sha256(replacement)].sort());
+  });
+
+  it('refuses a file whose bytes changed without its size or timestamp doing so', async () => {
+    // The metadata triple is the cheap check; the digest is the one that cannot be fooled. A
+    // rewrite in place of exactly the same length, with the stamp restored, defeats the first.
+    const ingested = Buffer.from(`%PDF-1.4\n% aaaaaaaaaaaaaaaa\n%%EOF\n`, 'latin1');
+    const rewritten = Buffer.from(`%PDF-1.4\n% bbbbbbbbbbbbbbbb\n%%EOF\n`, 'latin1');
+    expect(rewritten.byteLength).toBe(ingested.byteLength);
+
+    const path = join(watched.path, 'inplace.pdf');
+    writeFileSync(path, ingested);
+    await sleep(40);
+
+    const source = new FolderSource({
+      root: watched.path,
+      consume: { mode: 'delete' },
+      stability: { quietMillis: 0, pollMillis: 20 },
+      watch: { enabled: false },
+    });
+    const context = makeContext(library);
+    await source.start(context);
+    const page = await source.poll({ limit: 10 }, context);
+    const candidate = page.candidates[0]!;
+    const report = await makePipeline(library).run([candidate], {
+      runLabel: 'h1-inplace',
+      sourceId: source.id,
+      total: 1,
+    });
+
+    // Same inode, same length, and the stamp put back exactly as it was.
+    const stamp = statSync(path);
+    const handle = openSync(path, 'r+');
+    writeSync(handle, rewritten, 0, rewritten.byteLength, 0);
+    closeSync(handle);
+    // The revision carries the millisecond, so the stamp is restored to the millisecond: the
+    // metadata triple is now identical and only the bytes differ.
+    utimesSync(path, stamp.atime, new Date(Math.trunc(stamp.mtimeMs)));
+    expect(statSync(path).size).toBe(stamp.size);
+    expect(statSync(path).ino).toBe(stamp.ino);
+    expect(Math.trunc(statSync(path).mtimeMs)).toBe(Math.trunc(stamp.mtimeMs));
+
+    const acknowledgement = await source.acknowledge(
+      candidate.ref,
+      report.outcomes[0]!.outcome,
+      context,
+    );
+    await source.stop(context);
+
+    expect(acknowledgement.action).toBe('refused');
+    expect(acknowledgement.detail).toContain('hashing to');
+    expect(readFileSync(path)).toEqual(rewritten);
+  });
+});
+
+describe('FolderSource, when the read comes back short (H1)', () => {
+  // `fs.readFile` stats, allocates, reads until `read` returns 0, and hands back a short buffer
+  // with no error when the file shrank under it. 64 MiB is enough that the read spans many event
+  // loop turns, so a `setTimeout(0)` scheduled just before it lands inside the read.
+  const bigFile = (): Buffer => {
+    const bytes = Buffer.alloc(64 * 1024 * 1024, 0x41);
+    Buffer.from('%PDF-1.4\n', 'latin1').copy(bytes, 0);
+    return bytes;
+  };
+
+  it('never returns a short buffer for a file truncated while it is being read', async () => {
+    const whole = bigFile();
+    const path = join(watched.path, 'huge.pdf');
+    writeFileSync(path, whole);
+    await sleep(40);
+
+    const source = new FolderSource({
+      root: watched.path,
+      stability: { quietMillis: 0, pollMillis: 20 },
+      watch: { enabled: false },
+    });
+    const context = makeContext(library);
+    await source.start(context);
+    const candidate = (await source.poll({ limit: 10 }, context)).candidates[0]!;
+
+    setTimeout(() => void truncate(path, 4096), 0);
+
+    let bytes: Buffer | null = null;
+    let failure: unknown = null;
+    try {
+      bytes = await candidate.read();
+    } catch (error) {
+      failure = error;
+    }
+    await source.stop(context);
+
+    // Two honest answers: a refusal, or the whole file because the truncation lost the race. The
+    // third — a short buffer, silently — is the defect, and it is the one asserted against.
+    if (failure !== null) {
+      expect((failure as { code?: string }).code).toMatch(/^source_(truncated|changed)$/u);
+      expect((failure as Error).message).toMatch(/truncated|changed/u);
+    } else {
+      expect(bytes?.byteLength).toBe(whole.byteLength);
+    }
+  });
+
+  it('files no document at all when the file is truncated under the read', async () => {
+    const whole = bigFile();
+    const path = join(watched.path, 'scan.pdf');
+    writeFileSync(path, whole);
+    await sleep(40);
+
+    const source = new FolderSource({
+      root: watched.path,
+      consume: { mode: 'delete' },
+      stability: { quietMillis: 0, pollMillis: 20 },
+      watch: { enabled: false },
+    });
+    const context = makeContext(library);
+    await source.start(context);
+    const candidate = (await source.poll({ limit: 10 }, context)).candidates[0]!;
+
+    setTimeout(() => void truncate(path, 4096), 0);
+    const report = await makePipeline(library).run([candidate], {
+      runLabel: 'h1-truncate',
+      sourceId: source.id,
+      total: 1,
+    });
+    const outcome = report.outcomes[0]!.outcome;
+    const acknowledgement = await source.acknowledge(candidate.ref, outcome, context);
+    await source.stop(context);
+
+    // Whatever happened, no document that is neither the whole file nor nothing may exist, and the
+    // truncated remains on disk must not have been deleted on the strength of one.
+    for (const digest of documentDigests(library)) expect(digest).toBe(sha256(whole));
+    expect(existsSync(path)).toBe(true);
+    if (countDocuments(library) === 0) {
+      expect(outcome.status).toBe('failed');
+      expect(acknowledgement.action).toBe('left');
+    }
+  });
+});
+
+describe('FolderSource read budget (ADR-0022)', () => {
+  it('refuses a read over the size limit at the call rather than after the buffer exists', async () => {
+    const bytes = makePdf({ lines: ['larger than the limit allows'] });
+    writeFileSync(join(watched.path, 'big.pdf'), bytes);
+    await sleep(40);
+
+    const source = new FolderSource({
+      root: watched.path,
+      stability: { quietMillis: 0, pollMillis: 20 },
+      watch: { enabled: false },
+    });
+    const context = makeContext(library);
+    await source.start(context);
+    const candidate = (await source.poll({ limit: 10 }, context)).candidates[0]!;
+    await source.stop(context);
+
+    // A ref reaching `fetch` from the state table, under a source whose limit is now below it.
+    const tighter = new FolderSource({
+      root: watched.path,
+      maxBytes: 16,
+      stability: { quietMillis: 0, pollMillis: 20 },
+      watch: { enabled: false },
+    });
+    const second = makeContext(library);
+    await tighter.start(second);
+    await expect(tighter.fetch(candidate.ref, second)).rejects.toThrow(/over the 16-byte limit/u);
+    await tighter.stop(second);
+  });
+});
+
+describe('FolderSource consume destinations', () => {
+  it('excludes a nested processed directory without hiding its parent tree', async () => {
+    mkdirSync(join(watched.path, 'archive', '2026'), { recursive: true });
+    writeFileSync(join(watched.path, 'archive', '2026', 'tax-return.pdf'), makePdf({ salt: 'tax' }));
+    writeFileSync(join(watched.path, 'inbox.pdf'), makePdf({ salt: 'inbox' }));
+    await sleep(40);
+
+    const source = new FolderSource({
+      root: watched.path,
+      consume: { mode: 'move', to: 'archive/processed' },
+      stability: { quietMillis: 0, pollMillis: 20 },
+      watch: { enabled: false },
+    });
+    const context = makeContext(library);
+    await source.start(context);
+    const page = await source.poll({ limit: 10 }, context);
+    await source.stop(context);
+
+    expect(page.candidates.map((candidate) => candidate.ref.externalId).sort()).toEqual([
+      'archive/2026/tax-return.pdf',
+      'inbox.pdf',
+    ]);
+    expect(page.skipped.map((entry) => entry.externalId)).toContain('archive/processed');
   });
 });

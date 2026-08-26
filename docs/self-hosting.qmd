@@ -87,6 +87,7 @@ offender, rather than falling back to a default.
 | `RECUEIL_MAX_UPLOAD_BYTES` | `536870912` | Ceiling on one uploaded file, enforced during the streaming hash |
 | `RECUEIL_SECRET_KEY` | — | 32 bytes, base64 or hex, encrypting stored source and backend credentials. **Unset means the server will not store a credential at all** — there is deliberately no derived fallback |
 | `RECUEIL_INGEST_ALLOWED_ROOTS` | — | Comma-separated absolute directories a watched folder may be pointed at. Set it wherever the token holder and the machine owner differ |
+| `RECUEIL_INGEST_ALLOW_PRIVATE_TARGETS` | `false` | Let a WebDAV source or storage backend reach a loopback, link-local or private address. See below |
 | `RECUEIL_INGEST_SCRATCH_PATH` | OS temp | Where archives are expanded. Needs room for the largest one |
 | `RECUEIL_INGEST_CONFIDENCE_THRESHOLD` | `0.75` | The stage-9 gate. Below it a document is stored and queued for review |
 | `RECUEIL_OCR_ENGINE` | `none` | `none` or `ocrmypdf`. See the caveat below |
@@ -97,6 +98,25 @@ offender, rather than falling back to a default.
 The enrichment keys — `RECUEIL_CROSSREF_MAILTO`, `RECUEIL_OPENALEX_KEY`, `RECUEIL_UNPAYWALL_EMAIL`
 and the rest — arrive with the resolvers in Phase 3 and are not read yet. `_FILE`-suffixed variants
 for Docker and Kubernetes secrets are planned and not implemented.
+
+### Where a source may point
+
+A source URL and a storage-backend URL are addresses the server dials on somebody else's say-so, so
+by default it refuses to dial anything internal: loopback, link-local (including `169.254.169.254`,
+the cloud metadata address), the RFC 1918 ranges, unique-local and multicast. The check runs on the
+address the connection actually carries, not on the one the form was given, because a name may
+resolve publicly while the source is being created and to `127.0.0.1` by the time anything connects
+to it.
+
+`RECUEIL_INGEST_ALLOW_PRIVATE_TARGETS=true` turns the rule off wholesale, which is what a NAS in the
+cupboard needs. It is off by default because it is the operator saying "the inside of my network is
+a place this server may reach", and that is a sentence somebody should have to write down.
+
+Two consequences worth knowing: a WebDAV URL carrying a password in its userinfo
+(`https://user:pass@host/dav/`) has the credential taken out on ingress and moved into the
+`RECUEIL_SECRET_KEY` store, so it is never written to `ingestion_sources.config` and never comes
+back from the API; and a failed connection check reports the status and the reason but not the
+target's response body.
 
 ### OCR
 

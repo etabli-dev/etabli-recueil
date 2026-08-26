@@ -89,13 +89,15 @@ export const selectStable = async (
         });
         continue;
       }
-      if (info.size !== entry.byteSize || info.mtimeMs !== entry.mtimeMs) {
+      const inode = `${String(info.dev)}/${String(info.ino)}`;
+      if (info.size !== entry.byteSize || info.mtimeMs !== entry.mtimeMs || inode !== entry.inode) {
         unsettled.push({
           externalId: entry.relativePath,
           reason:
             `it changed while being watched — ${String(entry.byteSize)} bytes at ` +
-            `${new Date(entry.mtimeMs).toISOString()}, then ${String(info.size)} bytes at ` +
-            `${new Date(info.mtimeMs).toISOString()} — so it is still being written`,
+            `${new Date(entry.mtimeMs).toISOString()} (inode ${entry.inode}), then ` +
+            `${String(info.size)} bytes at ${new Date(info.mtimeMs).toISOString()} ` +
+            `(inode ${inode}) — so it is still being written`,
           });
         continue;
       }

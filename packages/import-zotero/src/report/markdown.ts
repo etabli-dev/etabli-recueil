@@ -146,14 +146,20 @@ export const renderReportMarkdown = (report: ZoteroImportReport): string => {
   line();
   line('| | Zotero | Recueil |');
   line('|---|---:|---:|');
-  line(`| Collections | ${report.collections.zoteroTotal} | ${report.collections.recueilTotal} |`);
+  line(
+    `| Collections | ${report.collections.zoteroTotal} | ${report.collections.recueilTotal} ` +
+      `(${report.collections.matchedByName} matched by name) |`,
+  );
   line(
     `| — of those, trashed | ${report.collections.zoteroTrashed} | ${report.collections.recueilTrashed} |`,
   );
   line(
     `| Collection memberships | ${report.collections.zoteroMemberships} | ${report.collections.recueilMemberships} |`,
   );
-  line(`| Tags | ${report.tags.zoteroTotal} | ${report.tags.recueilTotal} |`);
+  line(
+    `| Tags | ${report.tags.zoteroTotal} | ${report.tags.recueilTotal} ` +
+      `(${report.tags.matchedByName} matched by name) |`,
+  );
   line(
     `| Tag assignments | ${report.tags.zoteroAssignments} | ${
       report.tags.itemAssignments + report.tags.annotationAssignments
@@ -163,6 +169,10 @@ export const renderReportMarkdown = (report: ZoteroImportReport): string => {
   line(`| Annotations | ${report.annotations.zoteroTotal} | ${report.annotations.recueilTotal} |`);
   line(`| Creators | ${report.creators.zoteroTotal} | ${report.creators.recueilTotal} |`);
   line(`| Creator appearances | ${report.creators.zoteroAppearances} | ${report.creators.recueilAppearances} |`);
+  line(
+    `| — on the imported items | ${report.creators.zoteroAppearancesOnImported} | ` +
+      `${report.creators.recueilAppearancesOnImported} |`,
+  );
   line();
   line(
     `Collection memberships not carried: ${report.collections.membershipsSkipped} ` +
@@ -194,6 +204,11 @@ export const renderReportMarkdown = (report: ZoteroImportReport): string => {
       `${report.trash.recueilTrashedCollections} |`,
   );
   line(`| — of those, trashed by cascade from a parent | ${report.trash.cascaded} |`);
+  line(
+    `| Zotero-deleted rows with an item, of which trashed here | ` +
+      `${report.trash.zoteroDeletedWithItem} / ${report.trash.recueilTrashedFromZotero} |`,
+  );
+  line(`| Trashed here that Zotero had not deleted | ${report.trash.trashedNotDeletedInZotero} |`);
   line();
 
   line('## Citation keys');

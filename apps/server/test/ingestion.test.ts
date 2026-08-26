@@ -7,14 +7,20 @@
  * is no container anywhere and no mock of the pipeline: a test that stubbed the pipeline would
  * prove that the route calls a stub.
  */
+import { createServer } from 'node:http';
+import type { Server } from 'node:http';
 import { mkdirSync, writeFileSync } from 'node:fs';
+import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 
 import { listStoredBlobs } from '@recueil/core';
 
 import { startFakeWebDavServer } from '@recueil/storage-backends/testing';
 import type { FakeWebDavServer } from '@recueil/storage-backends/testing';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { SecretBox } from '../src/ingestion/secrets.js';
+import { IngestionSourceService, redact } from '../src/ingestion/sources.js';
 
 import { startFakeImap } from './fakes/imap-server.js';
 import type { FakeImapServer } from './fakes/imap-server.js';
@@ -316,12 +322,18 @@ describe('a WebDAV source', () => {
 
   beforeEach(async () => {
     server = await startFakeWebDavServer({ auth: { kind: 'basic', username: 'rh', password: 's3cret' } });
+    // The fake listens on loopback, which is precisely what `EgressGuard` refuses by default. That
+    // is the operator opt-in of workstream H4, exercised the way an operator would use it: a
+    // deliberately internal target, declared once for the process. Every SSRF test below runs
+    // *without* it, which is what makes this line a declaration rather than a weakening.
+    vi.stubEnv('RECUEIL_INGEST_ALLOW_PRIVATE_TARGETS', 'true');
     h = await harness({ env: { RECUEIL_SECRET_KEY: TEST_SECRET_KEY } });
   });
 
   afterEach(async () => {
     await h.close();
     await server.close();
+    vi.unstubAllEnvs();
   });
 
   const create = async (secret: Record<string, string>) =>
@@ -363,6 +375,392 @@ describe('a WebDAV source', () => {
 
     expect(result.ok).toBe(false);
     expect(result.detail).toMatch(/401|unauthor/iu);
+  });
+});
+
+/* ============================================================================================== */
+/* Where the server may connect, and what it may say about it (hardening H4)                        */
+/* ============================================================================================== */
+
+/** A stand-in for whatever is listening inside the machine: an EC2 metadata service, say. */
+interface InternalService {
+  readonly origin: string;
+  readonly requests: { method: string; url: string }[];
+  close(): Promise<void>;
+}
+
+const startInternalService = async (): Promise<InternalService> => {
+  const requests: { method: string; url: string }[] = [];
+  const server: Server = createServer((request, response) => {
+    requests.push({ method: request.method ?? '?', url: request.url ?? '?' });
+    response.writeHead(500, { 'content-type': 'text/plain' });
+    response.end('SECRET-FROM-INTERNAL-SERVICE: aws_secret_access_key=wJalrXUtnFEMI/K7MDENG');
+  });
+  await new Promise<void>((resolve) => {
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  const { port } = server.address() as AddressInfo;
+  return {
+    origin: `http://127.0.0.1:${String(port)}`,
+    requests,
+    close: async () =>
+      await new Promise<void>((resolve) => {
+        server.close(() => {
+          resolve();
+        });
+      }),
+  };
+};
+
+/**
+ * The Phase 2 review's SSRF proof, as a test.
+ *
+ * The review created a WebDAV source with `url: http://127.0.0.1:<port>/latest/meta-data/`, got a
+ * 201, and then got a 200 out of `test-connection` whose `detail` read
+ * `options: OPTIONS http://127.0.0.1:35781/latest/meta-data/ answered 500:
+ * SECRET-FROM-INTERNAL-SERVICE: aws_secret_access_key=…`. `z.url().max(2048)` and a scheme test were
+ * the whole of the validation, and anything holding `ingestion:write` — by default, anything at all
+ * — could aim the server at any address it could reach.
+ */
+describe('a source URL is not a way into this machine', () => {
+  let h: Harness;
+  let internal: InternalService;
+
+  beforeEach(async () => {
+    internal = await startInternalService();
+    h = await harness({ env: { RECUEIL_SECRET_KEY: TEST_SECRET_KEY } });
+  });
+
+  afterEach(async () => {
+    await h.close();
+    await internal.close();
+  });
+
+  const createWebDav = async (url: string) =>
+    h.app.inject({
+      method: 'POST',
+      url: '/api/v1/ingestion/sources',
+      payload: { name: `Probe ${url}`, config: { kind: 'webdav', url } },
+    });
+
+  it('refuses a source pointing at loopback, and never connects to it', async () => {
+    const response = await createWebDav(`${internal.origin}/latest/meta-data/`);
+
+    expect(response.statusCode).toBe(422);
+    expect(body<{ detail: string }>(response).detail).toMatch(/loopback/iu);
+    // The proof that matters: nothing was sent. A refusal that still made the request would have
+    // leaked the timing and, with it, whether the port is open.
+    expect(internal.requests).toEqual([]);
+    // And nothing was stored, so no later run can pick it up.
+    expect(
+      h.recueil.connection.prepare('select count(*) as n from ingestion_sources').get(),
+    ).toEqual({ n: 0 });
+  });
+
+  it('refuses link-local, IPv6 loopback, private and multicast addresses too', async () => {
+    for (const url of [
+      'http://169.254.169.254/latest/meta-data/', // the cloud metadata address
+      'http://[::1]:8080/dav/',
+      'http://[::ffff:127.0.0.1]:8080/dav/', // the same address, wearing IPv6
+      'http://10.0.0.5/dav/',
+      'http://192.168.1.4/remote.php/dav/',
+      'http://172.16.9.9/dav/',
+      'http://127.1/dav/', // 127.0.0.1 written the short way
+      'http://224.0.0.1/dav/',
+      'http://[fd00::1]/dav/',
+      'http://[fe80::1]/dav/',
+    ]) {
+      const response = await createWebDav(url);
+      expect(`${url} → ${String(response.statusCode)}`).toBe(`${url} → 422`);
+    }
+  });
+
+  it('accepts a loopback target when the operator has opted in', async () => {
+    vi.stubEnv('RECUEIL_INGEST_ALLOW_PRIVATE_TARGETS', 'true');
+    const opted = await harness({ env: { RECUEIL_SECRET_KEY: TEST_SECRET_KEY } });
+    try {
+      const response = await opted.app.inject({
+        method: 'POST',
+        url: '/api/v1/ingestion/sources',
+        payload: {
+          name: 'The NAS in the cupboard',
+          config: { kind: 'webdav', url: `${internal.origin}/dav/` },
+        },
+      });
+      expect(response.statusCode).toBe(201);
+    } finally {
+      await opted.close();
+      vi.unstubAllEnvs();
+    }
+  });
+});
+
+/**
+ * DNS rebinding: the reason the address rule cannot live at the configuration form.
+ *
+ * The name below resolves to a public address while the source is being created and to `127.0.0.1`
+ * by the time anything connects to it — one A record and a zero TTL, which is entirely within the
+ * gift of whoever owns the domain in the URL. A parse-time check sees only the first answer and
+ * admits the source; the second answer is the one the socket uses.
+ *
+ * The service is built directly rather than through `buildApp` because the whole test is about what
+ * the *resolver* returns, and a resolver has to be injected somewhere. Everything else is real: the
+ * real `IngestionSourceService`, the real `WebDavClient`, and a real HTTP server on loopback
+ * standing in for whatever the rebind lands on.
+ */
+describe('a name that rebinds between the form and the socket', () => {
+  let h: Harness;
+  let internal: InternalService;
+
+  beforeEach(async () => {
+    internal = await startInternalService();
+    h = await harness({ env: { RECUEIL_SECRET_KEY: TEST_SECRET_KEY } });
+  });
+
+  afterEach(async () => {
+    await h.close();
+    await internal.close();
+  });
+
+  it('is admitted by the form and refused by the connection', async () => {
+    const resolved: string[] = [];
+    let call = 0;
+    const service = new IngestionSourceService({
+      recueil: h.recueil,
+      secrets: SecretBox.fromConfig(h.config.secretKey),
+      allowedRoots: [],
+      resolve: async (hostname) => {
+        // First answer public, every answer after that loopback. The zone is the attacker's.
+        const address = call === 0 ? '93.184.216.34' : '127.0.0.1';
+        call += 1;
+        resolved.push(`${hostname} -> ${address}`);
+        return [{ address, family: 4 }];
+      },
+    });
+    const port = new URL(internal.origin).port;
+    const row = await service.create(
+      {
+        name: 'Rebinding share',
+        config: { kind: 'webdav', url: `http://share.rebind.example:${port}/dav/` },
+      },
+      h.recueil.actor,
+    );
+    // The form passed: at that moment the name was a public address, exactly as the attacker
+    // arranged. A parse-time-only check has now finished its work.
+    expect(row.id).toBeTruthy();
+    expect(resolved[0]).toBe('share.rebind.example -> 93.184.216.34');
+
+    const checks = await service.testConnection(row);
+    expect(checks[0]?.ok).toBe(false);
+    expect(checks[0]?.detail).toMatch(/loopback/iu);
+    // The socket was never opened, so the rebind bought nothing.
+    expect(internal.requests).toEqual([]);
+    expect(resolved.length).toBeGreaterThan(1);
+  });
+});
+
+/**
+ * The Phase 2 review's credential-leak proof, as a test.
+ *
+ * The review created a source with `url: http://carol:hunter2@127.0.0.1:46289/…`, then read the
+ * password back out of `GET /ingestion/sources/{id}` and, twice more, out of the `detail` of
+ * `test-connection`. `IngestionSourceConfig` is documented as "everything about a source that is
+ * safe to send back. Credentials are not in here", and `url` was outside that promise.
+ *
+ * Every response body this suite can reach is swept for the secret, which is the acceptance
+ * criterion H4 sets: not "the field we thought of is clean" but "the string does not appear".
+ */
+describe('a password pasted into a source URL', () => {
+  let h: Harness;
+  let server: FakeWebDavServer;
+
+  beforeEach(async () => {
+    server = await startFakeWebDavServer({ auth: { kind: 'basic', username: 'carol', password: 'hunter2' } });
+    vi.stubEnv('RECUEIL_INGEST_ALLOW_PRIVATE_TARGETS', 'true');
+    h = await harness({ env: { RECUEIL_SECRET_KEY: TEST_SECRET_KEY } });
+  });
+
+  afterEach(async () => {
+    await h.close();
+    await server.close();
+    vi.unstubAllEnvs();
+  });
+
+  const withUserinfo = (): string => {
+    const url = new URL(server.url);
+    url.username = 'carol';
+    url.password = 'hunter2';
+    return url.toString();
+  };
+
+  it('moves into the secret box, never comes back, and still authenticates', async () => {
+    const created = await h.app.inject({
+      method: 'POST',
+      url: '/api/v1/ingestion/sources',
+      payload: { name: 'Nextcloud inbox', config: { kind: 'webdav', url: withUserinfo() } },
+    });
+    expect(created.statusCode).toBe(201);
+    const source = body<{ id: string; config: { url: string; username?: string }; secretNames: string[] }>(
+      created,
+    );
+
+    // Split at ingress: the address is stored, the credential is sealed, and the username — which
+    // is not a secret and is needed to build the Authorization header — is kept in the config.
+    expect(source.config.url).not.toContain('carol');
+    expect(source.config.url).not.toContain('hunter2');
+    expect(source.config.username).toBe('carol');
+    expect(source.secretNames).toEqual(['password']);
+
+    // The stored row, read straight out of SQLite: the ciphertext column is the only place the
+    // password may be, and `config` is what a leaked recueil.db hands over first.
+    const stored = h.recueil.connection
+      .prepare('select config, secret_ciphertext from ingestion_sources')
+      .all() as { config: string; secret_ciphertext: string | null }[];
+    expect(stored[0]?.config).not.toContain('hunter2');
+    expect(stored[0]?.secret_ciphertext).not.toBeNull();
+    expect(stored[0]?.secret_ciphertext).not.toContain('hunter2');
+
+    // It really did become the credential, rather than being quietly dropped: the fake share wants
+    // basic auth as carol/hunter2 and the connection test passes.
+    const test = await h.app.inject({
+      method: 'POST',
+      url: `/api/v1/ingestion/sources/${source.id}/test-connection`,
+    });
+    expect(body<{ ok: boolean }>(test).ok).toBe(true);
+
+    const list = await h.app.inject({ method: 'GET', url: '/api/v1/ingestion/sources' });
+    const one = await h.app.inject({ method: 'GET', url: `/api/v1/ingestion/sources/${source.id}` });
+    for (const [label, response] of [
+      ['create', created],
+      ['list', list],
+      ['get', one],
+      ['test-connection', test],
+    ] as const) {
+      expect(`${label}: ${response.payload}`).not.toContain('hunter2');
+    }
+  });
+
+  it('keeps the password out of the check details when the connection fails', async () => {
+    // The review got the password back twice in one `test-connection` body, out of an error
+    // message that interpolated `url.toString()`. Point the source somewhere that will not answer
+    // and read every word of what comes back.
+    const url = new URL(server.url);
+    url.username = 'carol';
+    url.password = 'hunter2';
+    url.pathname = '/definitely-not-a-collection/';
+    const created = await h.app.inject({
+      method: 'POST',
+      url: '/api/v1/ingestion/sources',
+      payload: { name: 'Broken share', config: { kind: 'webdav', url: url.toString() } },
+    });
+    const id = body<{ id: string }>(created).id;
+
+    const test = await h.app.inject({
+      method: 'POST',
+      url: `/api/v1/ingestion/sources/${id}/test-connection`,
+    });
+    expect(test.payload).not.toContain('hunter2');
+    expect(test.payload).not.toContain(Buffer.from('carol:hunter2', 'utf8').toString('base64'));
+  });
+
+  it('scrubs a secret out of a string in the forms it travels in', () => {
+    expect(redact('OPTIONS failed: bad password hunter2', ['hunter2'])).toBe(
+      'OPTIONS failed: bad password [redacted]',
+    );
+    // Percent-encoded, which is how it looks once something has put it back into a URL.
+    expect(redact('http://host/dav/?p=p%40ss%3Aword', ['p@ss:word'])).toContain('[redacted]');
+    // An Authorization header quoted back inside an exception. The password is inside the base64
+    // of `user:pass`, so searching for the password would not find it; the header is scrubbed by
+    // shape instead.
+    const header = `Basic ${Buffer.from('carol:hunter2', 'utf8').toString('base64')}`;
+    expect(redact(`request failed with ${header}`, [])).toBe('request failed with Basic [redacted]');
+    expect(redact('sent Bearer abc.def.ghi', [])).toBe('sent Bearer [redacted]');
+    // Too short to be told apart from prose: redacting every 'a' would destroy the message and
+    // protect nothing.
+    expect(redact('a cat sat on the mat', ['a'])).toBe('a cat sat on the mat');
+  });
+
+  it('keeps the password out of the job log and out of last_error', async () => {
+    // The review noted that the credential "also appears in the job log via `describe(error)`".
+    // A run against a share that will not answer is the shortest way to make this application
+    // write an exception message from the WebDAV client into both places a caller can read it.
+    const url = new URL(server.url);
+    url.username = 'carol';
+    url.password = 'hunter2';
+    const created = await h.app.inject({
+      method: 'POST',
+      url: '/api/v1/ingestion/sources',
+      payload: { name: 'Doomed share', config: { kind: 'webdav', url: url.toString() } },
+    });
+    const id = body<{ id: string }>(created).id;
+    // The collection is not there, which is what an operator's typo looks like and what a moved
+    // share looks like. The run fails somewhere inside the WebDAV client.
+    await h.app.inject({
+      method: 'PATCH',
+      url: `/api/v1/ingestion/sources/${id}`,
+      payload: {
+        config: {
+          kind: 'webdav',
+          url: `${url.toString().replace(/\/$/u, '')}/definitely-not-a-collection/`,
+        },
+      },
+    });
+
+    const accepted = await h.app.inject({
+      method: 'POST',
+      url: `/api/v1/ingestion/sources/${id}/run`,
+      payload: { runLabel: 'doomed' },
+    });
+    expect(accepted.statusCode).toBe(202);
+    const jobId = body<{ jobId: string }>(accepted).jobId;
+
+    const deadline = Date.now() + 15_000;
+    let job = await h.app.inject({ method: 'GET', url: `/api/v1/ingestion/queue/${jobId}` });
+    while (['queued', 'running'].includes(body<{ job: { state: string } }>(job).job.state)) {
+      if (Date.now() > deadline) throw new Error('the run never settled');
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      job = await h.app.inject({ method: 'GET', url: `/api/v1/ingestion/queue/${jobId}` });
+    }
+
+    // The whole job document — state, error message and every log line — and then the source row
+    // the list view renders from.
+    expect(job.payload).not.toContain('hunter2');
+    const source = await h.app.inject({ method: 'GET', url: `/api/v1/ingestion/sources/${id}` });
+    expect(source.payload).not.toContain('hunter2');
+    // Stored, not merely omitted on the way out: a secret in a column is a secret in the backup.
+    const rows = h.recueil.connection
+      .prepare('select last_error from ingestion_sources where id = ?')
+      .all(id) as { last_error: string | null }[];
+    expect(JSON.stringify(rows)).not.toContain('hunter2');
+    const logs = h.recueil.connection
+      .prepare('select message from job_logs')
+      .all() as { message: string }[];
+    expect(JSON.stringify(logs)).not.toContain('hunter2');
+  });
+
+  it('takes the userinfo back off a row an older build wrote', async () => {
+    // `sourceToWire` is the last thing between the row and the response body, and rows written
+    // before the ingress split still carry whatever was pasted. Written here the way that build
+    // would have written it: straight into `config`.
+    const created = await h.app.inject({
+      method: 'POST',
+      url: '/api/v1/ingestion/sources',
+      payload: { name: 'Legacy share', config: { kind: 'webdav', url: server.url } },
+    });
+    const id = body<{ id: string }>(created).id;
+    h.recueil.connection
+      .prepare('update ingestion_sources set config = ? where id = ?')
+      .run(JSON.stringify({ kind: 'webdav', url: withUserinfo() }), id);
+
+    // The row really does hold the password now, which is the state an older build left behind.
+    const stored = h.recueil.connection
+      .prepare('select config from ingestion_sources where id = ?')
+      .get(id) as { config: string };
+    expect(stored.config).toContain('hunter2');
+
+    const response = await h.app.inject({ method: 'GET', url: `/api/v1/ingestion/sources/${id}` });
+    expect(response.payload).not.toContain('hunter2');
+    expect(response.payload).not.toContain('carol:');
   });
 });
 

@@ -251,6 +251,21 @@ turns a recognised scanner convention into filing with no manual step. Measured 
 source, a rule set and the daemon running: six scans dropped into a watched directory became six
 searchable items in under two seconds with nothing else typed.
 
+**A `move` or `delete` consume policy is conditional on the file not having changed.** A source
+records the revision — size, mtime and inode for a folder, the ETag for a WebDAV collection — that a
+candidate was offered under, and re-checks it immediately before the destructive call; a WebDAV
+delete or move carries that ETag as `If-Match`, so the share itself gets the last word. If the file
+at that path is no longer the one that was read, nothing is deleted: the acknowledgement is refused,
+the original stays where it is, an entry appears in the review queue under
+`source_changed_before_consume`, and `recueil ingest watch` exits 4. The replacement is offered again
+under its own revision on the next poll and ingested normally. This matters most after a crash,
+because the pending acknowledgement is replayed at the start of the next process and the window is
+the whole of the downtime.
+
+For the same reason a read that comes back short — which `readFile` does, without an error, when a
+file is truncated underneath it — is retried and then refused rather than filed. Half a scan hashes
+to something that is not the scan, and content-addressed identity makes that permanent.
+
 **OCR is off unless you turn it on.** `recueil ingest --ocr ocrmypdf` (or `RECUEIL_OCR_ENGINE` on
 the server) runs the OCRmyPDF adapter against a binary on `PATH`. Without it a scan with no text
 layer is stored, indexed on nothing, and queued for review — which is honest, and useless for

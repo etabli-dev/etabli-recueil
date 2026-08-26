@@ -49,8 +49,8 @@ import type {
 import { ImapClient } from './client.js';
 import type { ImapClientOptions, ImapMailboxStatus } from './client.js';
 import { addressList, addressOf, headerValue, parseHeaderBlock } from './headers.js';
-import { matchingMailRules, skippedBy, toIngestRules } from './rules.js';
-import type { MailEnvelope, MailRule } from './rules.js';
+import { evaluateMailRules, toIngestRules } from './rules.js';
+import type { MailEnvelope, MailRule, MailRuleOutcome } from './rules.js';
 
 export interface ImapSourceOptions extends CommonSourceOptions, ImapClientOptions {
   /** Default `INBOX`. */
@@ -144,7 +144,18 @@ export class ImapSource implements IngestSource {
         recipients: [...addressList(headerValue(headers, 'to')), ...addressList(headerValue(headers, 'cc'))],
       };
 
-      const skip = skippedBy(this.mailRules, envelope);
+      // One evaluation, under the bounded matcher (ADR-0022 §4). `refusals` is the clause that
+      // could not be decided inside its budget: it is carried onto the candidate rather than
+      // dropped, so a subject built to stall the poll ends up in front of a person (P3) instead of
+      // being quietly treated as "no rule matched".
+      const evaluation = evaluateMailRules(this.mailRules, envelope);
+      const skip = evaluation.skip;
+      if (evaluation.refusals.length > 0) {
+        skipped.push({
+          externalId,
+          reason: refusalSummary(evaluation.refusals),
+        });
+      }
       if (skip !== null) {
         // Recorded rather than flagged: refusing to ingest a newsletter is not a licence to touch
         // the user's mailbox. The row is what stops it being considered again.
@@ -164,7 +175,7 @@ export class ImapSource implements IngestSource {
         continue;
       }
 
-      candidates.push(this.candidate(head.uid, head, envelope, headers, ctx));
+      candidates.push(this.candidate(head.uid, head, envelope, headers, ctx, evaluation));
     }
 
     if (uids.length > batch.length) {
@@ -300,6 +311,8 @@ export class ImapSource implements IngestSource {
     envelope: MailEnvelope,
     headers: Record<string, string[]>,
     ctx: SourceContext,
+    /** The single rule evaluation this message got. Never re-run: it is bounded work, not free. */
+    evaluation: MailRuleOutcome,
   ): IngestCandidate {
     const externalId = this.externalId(uid);
     const ref: IngestRef = {
@@ -320,7 +333,12 @@ export class ImapSource implements IngestSource {
       to: envelope.recipients,
       date: headerValue(headers, 'date'),
       messageId: headerValue(headers, 'message-id'),
-      matchedMailRules: matchingMailRules(this.mailRules, envelope).map((rule) => rule.id),
+      matchedMailRules: evaluation.matched.map((rule) => rule.id),
+      // A clause the bounded matcher would not decide travels with the candidate, so the rule
+      // that could not be evaluated is visible on the document rather than only in the poll log.
+      mailRuleRefusals: evaluation.refusals.map(
+        (refusal) => `${refusal.ruleId}.${refusal.clause}: ${refusal.reason}`,
+      ),
     };
 
     return {
@@ -401,6 +419,18 @@ export class ImapSource implements IngestSource {
 }
 
 /** Informational only — `@recueil/ingest` never uses a suggested filename as a path. */
+/**
+ * One line for the poll log naming every clause that ran out of budget, and the limit it hit.
+ *
+ * ADR-0022 §6: exceeding a budget is a reported outcome, never a silent skip. This is the reporting
+ * half; the candidate carries the same list into the pipeline.
+ */
+const refusalSummary = (refusals: MailRuleOutcome['refusals']): string =>
+  `${refusals.length} mail-rule clause(s) could not be decided within their budget and were ` +
+  `treated as not matching: ${refusals
+    .map((refusal) => `'${refusal.ruleId}'.${refusal.clause} (${refusal.reason})`)
+    .join('; ')}`;
+
 const filenameFor = (subject: string | null, uid: number): string => {
   const stem = (subject ?? '')
     .replace(/[ -/\\:*?"<>|]/gu, ' ')

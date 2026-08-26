@@ -8,14 +8,21 @@
  * duplicate-checked, type-detected, OCR'd and filed exactly as if it had arrived on its own, and it
  * gets its own `documents` row with `parent_document_id` pointing at the archive it came out of.
  *
- * The limits in `IngestConfig` are the zip-bomb guard, and they are checked against the *declared*
- * sizes in the central directory before a single member is inflated, because checking afterwards is
- * checking after the damage. A member that fails a limit fails the archive: an archive designed to
- * exhaust the disk is not an archive with one awkward file in it.
+ * The limits in `IngestConfig` are the zip-bomb guard, and they are applied twice, because the
+ * Phase 2 review proved that once is not enough (ADR-0022). The declared sizes in the central
+ * directory are checked first, since refusing a lying archive early is cheaper than refusing it
+ * late — but they are the archive author's numbers, so they bound nothing. The bound is the same
+ * two limits carried by a `BudgetLedger` and handed to each inflate call as its `maxOutputLength`:
+ * the allowance for a member is the smaller of `maxArchiveEntryBytes` and what is left of
+ * `maxArchiveTotalBytes`, so no member can materialise more than the archive still has to spend,
+ * and a nested archive inherits the remainder rather than a fresh ceiling. A member that fails a
+ * limit fails the archive: an archive designed to exhaust the disk is not an archive with one
+ * awkward file in it.
  */
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
+import { BudgetLedger } from '../budgets.js';
 import type { IngestConfig } from '../config.js';
 import { ArchiveLimitError } from '../errors.js';
 import type { ScratchSpace } from '../scratch.js';
@@ -71,7 +78,19 @@ export interface ExtractOptions {
   kind: ArchiveKind;
   scratch: ScratchSpace;
   config: IngestConfig;
+  /**
+   * The output budget this container spends from (ADR-0022 §3).
+   *
+   * A caller that is expanding an archive found *inside* another archive passes the outer
+   * container's ledger through `child()`, so the nested container inherits the remaining allowance
+   * rather than a fresh one. Omitted, a fresh ledger is made at the configured ceiling, which is
+   * the right answer for a top-level file.
+   */
+  budget?: BudgetLedger;
 }
+
+const containerLedger = (options: ExtractOptions): BudgetLedger =>
+  options.budget ?? new BudgetLedger(options.config.maxArchiveTotalBytes, 'maxArchiveTotalBytes');
 
 /** Expand an archive into scratch. Throws rather than returning a partial expansion. */
 export const extractArchive = async (options: ExtractOptions): Promise<ExtractionResult> =>
@@ -115,24 +134,58 @@ const extractZip = async (options: ExtractOptions): Promise<ExtractionResult> =>
     );
   }
 
-  // Every name is resolved before anything is written. One bad name refuses the whole archive.
-  const resolved = files.map((entry) => ({
-    entry,
-    path: resolveMemberPath(scratch.path, entry.name),
-  }));
+  /*
+   * Every name is resolved before anything is written. One bad name refuses the whole archive.
+   *
+   * Two distinct entries may resolve to the same relative path: `resolveMemberPath` drops `.` and
+   * empty segments, so `./invoice.pdf` and `invoice.pdf` normalise to one name, and a zip may
+   * simply carry the same name twice. The Phase 2 review turned that into a silent loss — both
+   * members were written to the same scratch file with no `wx` flag, `pipeline.ts` read every
+   * member's bytes back *after* the extraction loop, and so both members read the last writer's
+   * bytes, were filed as one document, and were reported as two ingested members with nothing in
+   * `skipped`. The first member's bytes were discarded and the run's own verification was happy.
+   *
+   * So a member whose relative path is already taken is given a positional directory of its own,
+   * which is exactly what the `.eml` path opposite has always done (`attachments/<index>/`). The
+   * prefix is applied only on a collision, so the ordinary archive's member — and the
+   * `<container>!/<member>` external id the pipeline builds from it — is unchanged.
+   */
+  const takenPaths = new Set<string>();
+  const resolved = files.map((entry, index) => {
+    const first = resolveMemberPath(scratch.path, entry.name);
+    const path = takenPaths.has(first.relativePath)
+      ? resolveMemberPath(scratch.path, `${String(index + 1)}/${entry.name}`)
+      : first;
+    takenPaths.add(path.relativePath);
+    return { entry, path };
+  });
 
   const members: ExtractedMember[] = [];
   const skipped: Array<{ entryName: string; reason: string }> = [];
-  let actualTotal = 0;
+  const ledger = containerLedger(options);
 
   for (const { entry, path } of resolved) {
-    const memberBytes = readZipEntry(bytes, entry);
-    actualTotal += memberBytes.length;
-    if (actualTotal > config.maxArchiveTotalBytes) {
+    // The allowance is the composition rule: a member may produce at most its own ceiling, and at
+    // most what this container — which may itself be a nested one, spending an inherited
+    // remainder — still has left. It goes into the inflate call as `maxOutputLength`, so a member
+    // that lies about its size is stopped at the budget, not measured after it.
+    const allowance = ledger.allowance(config.maxArchiveEntryBytes);
+    const memberBytes = readZipEntry(bytes, entry, {
+      maxOutputBytes: allowance,
+      limitName:
+        allowance < config.maxArchiveEntryBytes
+          ? `${ledger.label} (remaining)`
+          : 'maxArchiveEntryBytes',
+    });
+    // Belt and braces. A member cannot exceed the allowance it was given, and a member that
+    // understates its size is refused by the size-equality check in `readZipEntry`, so for a zip
+    // the running total cannot pass the ceiling by this route. It is still counted and still
+    // checked, because that argument depends on two other checks staying where they are.
+    if (!ledger.spend(memberBytes.length)) {
       throw new ArchiveLimitError(
-        `The archive has already produced ${actualTotal} bytes, over the limit of ` +
-          `${config.maxArchiveTotalBytes}. The central directory understated the sizes.`,
-        { actualTotal, limit: config.maxArchiveTotalBytes },
+        `The archive has already produced ${ledger.spent} bytes, over the ${ledger.label} budget ` +
+          `of ${ledger.ceiling}. The central directory understated the sizes.`,
+        { actualTotal: ledger.spent, limitName: ledger.label, limit: ledger.ceiling },
       );
     }
     if (memberBytes.length === 0) {
@@ -167,26 +220,28 @@ const extractEmail = async (options: ExtractOptions): Promise<ExtractionResult> 
 
   const members: ExtractedMember[] = [];
   const skipped: Array<{ entryName: string; reason: string }> = [];
-  let total = 0;
+  // The same ledger as the zip path, so a message carried inside an archive spends what that
+  // archive has left rather than opening a second budget of its own.
+  const ledger = containerLedger(options);
 
   for (const [index, part] of email.attachments.entries()) {
     if (part.bytes.length === 0) {
       skipped.push({ entryName: part.filename ?? `part-${index + 1}`, reason: 'the part is empty' });
       continue;
     }
-    if (part.bytes.length > config.maxArchiveEntryBytes) {
+    if (part.bytes.length > ledger.allowance(config.maxArchiveEntryBytes)) {
       throw new ArchiveLimitError(
-        `Attachment '${part.filename ?? index + 1}' is ${part.bytes.length} bytes; the per-member ` +
-          `limit is ${config.maxArchiveEntryBytes}.`,
-        { byteSize: part.bytes.length },
+        `Attachment '${part.filename ?? index + 1}' is ${part.bytes.length} bytes; the allowance ` +
+          `left for one part is ${ledger.allowance(config.maxArchiveEntryBytes)} (maxArchiveEntryBytes ` +
+          `${config.maxArchiveEntryBytes}, ${ledger.label} ${ledger.ceiling}).`,
+        { byteSize: part.bytes.length, limitName: 'maxArchiveEntryBytes', limit: config.maxArchiveEntryBytes },
       );
     }
-    total += part.bytes.length;
-    if (total > config.maxArchiveTotalBytes) {
+    if (!ledger.spend(part.bytes.length)) {
       throw new ArchiveLimitError(
-        `The message's attachments total ${total} bytes, over the limit of ` +
-          `${config.maxArchiveTotalBytes}.`,
-        { total },
+        `The message's attachments total ${ledger.spent} bytes, over the ${ledger.label} budget ` +
+          `of ${ledger.ceiling}.`,
+        { total: ledger.spent, limitName: ledger.label, limit: ledger.ceiling },
       );
     }
 

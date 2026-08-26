@@ -340,6 +340,9 @@ importers:
       '@recueil/ingest':
         specifier: workspace:*
         version: link:../ingest
+      '@recueil/rules':
+        specifier: workspace:*
+        version: link:../rules
       drizzle-orm:
         specifier: ^0.44.6
         version: 0.44.7(@types/better-sqlite3@7.6.13)(better-sqlite3@12.11.1)

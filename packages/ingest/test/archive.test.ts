@@ -6,7 +6,7 @@
  * with a wider audience, so the traversal cases are tested one by one and by their effect: not
  * "does the validator return false" but "is there a file outside the extraction root afterwards".
  */
-import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -121,6 +121,51 @@ describe('extracting a zip', () => {
       'two.txt',
     ]);
     expect(result.members.find((member) => member.entryName === 'two.txt')?.byteSize).toBe(two.length);
+  });
+
+  /**
+   * The Phase 2 review's `zip-collide.mjs`, rebuilt.
+   *
+   * `./invoice.pdf` and `invoice.pdf` are two distinct entries whose names normalise to one
+   * relative path, and the shipped code wrote both to the same scratch file with no `wx` flag.
+   * `pipeline.ts` reads every member's bytes back *after* the extraction loop, so both members read
+   * the last writer's bytes: the archive reported two ingested members carrying one digest, one
+   * document, an empty `skipped`, and a satisfied verification, while the first member's bytes were
+   * gone. The bytes are read back here the same way — after the loop — because reading them inside
+   * it would not reproduce anything.
+   */
+  it('keeps two members whose names normalise to the same path, rather than overwriting one', async () => {
+    const first = makePdf({ salt: 'member-A' });
+    const second = makePdf({ salt: 'member-B' });
+    const archive = makeZip([
+      { name: './invoice.pdf', bytes: first },
+      { name: 'invoice.pdf', bytes: second },
+    ]);
+
+    const read = await scratch.with('t-', async (space) => {
+      const extraction = await extractArchive({
+        bytes: archive,
+        kind: 'zip',
+        scratch: space,
+        config: DEFAULT_INGEST_CONFIG,
+      });
+      expect(extraction.skipped).toEqual([]);
+      expect(extraction.members).toHaveLength(2);
+      return extraction.members.map((member) => ({
+        entryName: member.entryName,
+        relativePath: member.relativePath,
+        bytes: readFileSync(member.absolutePath),
+      }));
+    });
+
+    // Two members, two files on disk, and each one holds the bytes its own entry carried.
+    expect(new Set(read.map((member) => member.relativePath)).size).toBe(2);
+    expect(read.find((member) => member.entryName === './invoice.pdf')?.bytes.equals(first)).toBe(true);
+    expect(read.find((member) => member.entryName === 'invoice.pdf')?.bytes.equals(second)).toBe(true);
+
+    // And the member that did not collide keeps the plain name, so the `<container>!/<member>`
+    // external id of an ordinary archive is not disturbed by this.
+    expect(read.map((member) => member.relativePath)).toContain('invoice.pdf');
   });
 
   it('rejects a member whose bytes do not match the CRC the directory claims', () => {

@@ -15,15 +15,45 @@
  *     it is a gap a slow writer can fill.
  *   - **A consume policy.** Leave it, move it to a processed directory, or delete it — and the
  *     delete happens only after the bytes have been re-read out of the content store, re-hashed and
- *     matched to their `documents` row (`consume.ts`, `verify.ts`).
+ *     matched to their `documents` row (`consume.ts`, `verify.ts`), *and* the file about to be
+ *     destroyed has been shown to still be the file that was read.
  *   - **Recovery.** Everything that appeared while the process was down is found by the first poll,
  *     because a poll reads the tree rather than a queue of events, and anything whose
  *     acknowledgement was interrupted is replayed from the state table.
+ *
+ * **Consume is conditional on the revision the candidate was offered under** (H1,
+ * `spec/hardening-2026-08.md`). The store verification in `consume.ts` queries the library and the
+ * content store; neither of them is the far side about to be destroyed, so on its own it licenses
+ * deleting whatever happens to be at the path now. Before the `rm` or the `rename`, therefore, this
+ * source asks two further questions of the file itself:
+ *
+ *   1. Is its `(mtime, size, inode)` still the triple the candidate was offered under (`revision.ts`)?
+ *   2. Do its bytes still hash to the digest the pipeline committed?
+ *
+ * The second is the one that matters and it is why the check is worth its cost: **what is
+ * acknowledged is the digest the pipeline committed, not the path.** A file that has been replaced
+ * hashes to something else, whatever its metadata says, and the acknowledgement refuses, routes the
+ * reason to the review queue (P3) and leaves the original alone. The state row is closed as
+ * `refused`, which `isHandled` treats as unhandled, so the next poll offers the replacement under
+ * its own revision and it is ingested rather than lost.
+ *
+ * **What remains open, stated rather than implied.** `stat`-then-`unlink` and `stat`-then-`rename`
+ * are two syscalls, and POSIX has no "unlink only if the inode is still this one": there is no
+ * `funlink`, and `unlinkat` has no such flag. A writer that replaces the file in the microseconds
+ * between the last check and the destructive call still loses that file. What the checks above
+ * close is the window that was actually costing documents — the one spanning a pipeline run, an OCR
+ * pass, a poll interval or, after a crash, the whole downtime until the next process replays the
+ * acknowledgement. They narrow the residual window to two adjacent syscalls with no `await` between
+ * them. They do not close it, and a `move` policy is the safer configuration for a folder a writer
+ * is actively racing, because a wrongly moved file still exists.
  */
+import { createHash } from 'node:crypto';
+import type { Stats } from 'node:fs';
+import { createReadStream } from 'node:fs';
 import { mkdir, readFile, realpath, rename, rm, stat } from 'node:fs/promises';
-import { basename, dirname, extname, isAbsolute, join, resolve, sep } from 'node:path';
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
-import { isInside } from '@recueil/ingest';
+import { ReviewQueueService, ensureIngestSchema, isInside } from '@recueil/ingest';
 import type { DocumentSourceKind, HealthReport, IngestCandidate, IngestOutcome, IngestRef, IngestRule, JsonObject } from '@recueil/ingest';
 
 import { decideConsume } from '../consume.js';
@@ -38,6 +68,7 @@ import type {
   SourceContext,
   SourcePage,
 } from '../types.js';
+import { fileRevision, formatRevision, revisionDrift } from './revision.js';
 import { scanFolder } from './scan.js';
 import type { FolderEntry } from './scan.js';
 import { selectStable } from './stability.js';
@@ -56,9 +87,20 @@ export interface FolderSourceOptions extends CommonSourceOptions {
   exclude?: readonly string[];
 }
 
-/** `revision` for a file: the pair that changes when the bytes do. */
-const revisionOf = (entry: { byteSize: number; mtimeMs: number }): string =>
-  `${String(Math.trunc(entry.mtimeMs))}:${String(entry.byteSize)}`;
+/** `revision` for a file: the triple that changes when the bytes do. See `revision.ts`. */
+const revisionOf = (entry: { byteSize: number; mtimeMs: number; inode: string }): string =>
+  formatRevision({ mtimeMs: entry.mtimeMs, byteSize: entry.byteSize, inode: entry.inode });
+
+/**
+ * The reason code a refused acknowledgement raises (P3, `spec/data-model.md` §6.1).
+ *
+ * The vocabulary is open, so this is Recueil's own name for "the pipeline committed a document and
+ * the file it came from is not the file at that path any more".
+ */
+export const SOURCE_CHANGED_BEFORE_CONSUME = 'source_changed_before_consume';
+
+/** How many times a short read is retried before the candidate is refused (ADR-0022: bounded). */
+const READ_ATTEMPTS = 2;
 
 export class FolderSource implements IngestSource {
   readonly kind = 'watch' as const;
@@ -135,9 +177,14 @@ export class FolderSource implements IngestSource {
     const state = this.stateFor(ctx);
 
     const exclude = [...(this.options.exclude ?? [])];
-    // A processed directory inside the watched root would otherwise be re-offered for ever.
+    // A processed directory inside the watched root would otherwise be re-offered for ever. It is
+    // excluded by its *whole* relative path, not by its first segment: `{ to: 'archive/processed' }`
+    // must hide `archive/processed` and nothing else, and taking the first segment hid the entire
+    // `archive` tree, so anything a person filed under `<root>/archive/…` was never offered for
+    // ingestion at all (a Phase 2 finding, and a quiet one — it surfaced only as a debug line
+    // naming the directory).
     if (this.destination !== null && isInside(root, this.destination)) {
-      exclude.push(this.destination.slice(root.length + 1).split(sep)[0] ?? '');
+      exclude.push(relative(root, this.destination).split(sep).join('/'));
     }
 
     const scan = await scanFolder(root, {
@@ -179,26 +226,82 @@ export class FolderSource implements IngestSource {
     };
   }
 
+  /**
+   * Read the bytes, and prove they are the whole of the file the stat authorised.
+   *
+   * Three checks, in the order they can fail:
+   *
+   *   1. The file is still at the revision the candidate was offered under. The stability check
+   *      happened at poll time; between then and now a writer may have started again, and reading
+   *      the file anyway would file the hash of a half-written document for ever.
+   *   2. The read returned exactly as many bytes as that stat said the file held. `fs.readFile`
+   *      does not error when the file shrinks under it: it stats, allocates, reads until `read`
+   *      returns 0, and hands back a **short buffer with no indication that it is short** (H1). A
+   *      209 MB scan truncated mid-read came back as 2.8 MB and was filed as a document in its own
+   *      right, with a digest of its own, permanently — content-addressed identity is what makes
+   *      that mistake unrecoverable rather than self-correcting.
+   *   3. The file is still at the same revision *after* the read, so that a change which began and
+   *      ended inside the read window is caught even when the byte count happens to survive it.
+   *
+   * A mismatch is retried a bounded number of times, because the common cause is a writer that
+   * finished during the read and whose next attempt will succeed; after that it is refused, and the
+   * next poll offers the file again under its new revision.
+   */
   async fetch(ref: IngestRef, _ctx: SourceContext): Promise<{ bytes: Buffer; mediaType?: string }> {
     const path = await this.resolveInside(ref.externalId);
-    const info = await stat(path).catch(() => null);
-    if (info === null) {
-      throw new SourceError('source_vanished', `'${ref.externalId}' is no longer in the watched folder.`);
+    let last = '';
+
+    for (let attempt = 1; attempt <= READ_ATTEMPTS; attempt += 1) {
+      const before = await stat(path).catch(() => null);
+      if (before === null) {
+        throw new SourceError('source_vanished', `'${ref.externalId}' is no longer in the watched folder.`);
+      }
+
+      // ADR-0022: the read is bounded by the call, not checked after the buffer exists. The scan
+      // applies the same limit, but a ref also arrives from the state table and from a caller, so
+      // the bound is enforced where the allocation happens rather than only where it was decided.
+      if (this.options.maxBytes !== undefined && before.size > this.options.maxBytes) {
+        throw new SourceError(
+          'source_too_large',
+          `'${ref.externalId}' is ${String(before.size)} bytes, over the ` +
+            `${String(this.options.maxBytes)}-byte limit this source reads under.`,
+          { externalId: ref.externalId, byteSize: before.size, limit: this.options.maxBytes },
+        );
+      }
+
+      const offeredDrift = revisionDrift(ref.revision, fileRevision(before));
+      if (offeredDrift !== null) {
+        throw new SourceError(
+          'source_changed',
+          `'${ref.externalId}' changed between the poll and the read (${offeredDrift}); ` +
+            'it will be offered again once it settles.',
+          { was: ref.revision, is: formatRevision(fileRevision(before)), drift: offeredDrift },
+        );
+      }
+
+      const bytes = await readFile(path);
+      const after = await stat(path).catch(() => null);
+
+      if (bytes.byteLength !== before.size) {
+        last =
+          `the read returned ${String(bytes.byteLength)} of the ${String(before.size)} bytes ` +
+          'the file held when it was stat-ed, so it was truncated while it was being read';
+      } else if (after === null) {
+        last = 'it was removed while it was being read';
+      } else {
+        const readDrift = revisionDrift(formatRevision(fileRevision(before)), fileRevision(after));
+        if (readDrift === null) return { bytes };
+        last = `it changed while it was being read (${readDrift})`;
+      }
     }
 
-    // The stability check happened at poll time. Between then and now a writer may have started
-    // again, and reading the file anyway would file the hash of a half-written document for ever.
-    const now = revisionOf({ byteSize: info.size, mtimeMs: info.mtimeMs });
-    if (ref.revision !== undefined && ref.revision !== now) {
-      throw new SourceError(
-        'source_changed',
-        `'${ref.externalId}' changed between the poll and the read (${ref.revision} → ${now}); ` +
-          'it will be offered again once it settles.',
-        { was: ref.revision, is: now },
-      );
-    }
-
-    return { bytes: await readFile(path) };
+    // ADR-0022: the retry is bounded and the refusal names what it saw. Nothing is filed, so no
+    // short document exists, and the state row is never written — the next poll offers it again.
+    throw new SourceError(
+      'source_truncated',
+      `'${ref.externalId}' could not be read whole in ${String(READ_ATTEMPTS)} attempts: ${last}.`,
+      { externalId: ref.externalId, attempts: READ_ATTEMPTS, detail: last },
+    );
   }
 
   async acknowledge(
@@ -229,6 +332,42 @@ export class FolderSource implements IngestSource {
       };
     }
 
+    const objection = await this.stillTheFileThatWasRead(ref, outcome, path, present);
+    if (objection !== null) {
+      this.flagForReview(ctx, ref, outcome, objection);
+      return {
+        action: 'refused',
+        detail:
+          `the original was kept: ${objection}. The store verification passed ` +
+          `(${decision.detail}), but it is about the bytes already in the library, not about the ` +
+          'file at this path; it will be offered again under its own revision on the next poll',
+        verified: false,
+      };
+    }
+
+    // The destination is chosen and its parent created *before* the last look, so that nothing
+    // awaits between that look and the `rename` — `moveTarget` alone is several `stat`s wide, and
+    // every one of them is window.
+    const destination = this.policy.mode === 'move' ? await this.moveTarget(ref.externalId) : null;
+    if (destination !== null) await mkdir(dirname(destination), { recursive: true });
+
+    // The last look before the destructive call, with no `await` between it and the call itself.
+    // The header says what this narrows and what it leaves open.
+    const final = await stat(path).catch(() => null);
+    if (final === null) {
+      return {
+        action: 'vanished',
+        detail: `'${ref.externalId}' was removed while its acknowledgement was being decided`,
+        verified: true,
+      };
+    }
+    const lateDrift = revisionDrift(formatRevision(fileRevision(present)), fileRevision(final));
+    if (lateDrift !== null) {
+      const reason = `it was replaced while its acknowledgement was being decided (${lateDrift})`;
+      this.flagForReview(ctx, ref, outcome, reason);
+      return { action: 'refused', detail: `the original was kept: ${reason}`, verified: false };
+    }
+
     if (this.policy.mode === 'delete') {
       await rm(path, { force: true });
       return {
@@ -238,8 +377,9 @@ export class FolderSource implements IngestSource {
       };
     }
 
-    const destination = await this.moveTarget(ref.externalId);
-    await mkdir(dirname(destination), { recursive: true });
+    if (destination === null) {
+      throw new SourceError('source_misconfigured', 'The consume policy is `move` with no destination.');
+    }
     await rename(path, destination);
     return {
       action: 'moved',
@@ -310,6 +450,102 @@ export class FolderSource implements IngestSource {
     };
   }
 
+  /**
+   * Is the file about to be destroyed still the file the pipeline read?
+   *
+   * Null when it is, and the sentence that says why not when it is not. Two questions, cheapest
+   * first:
+   *
+   *   - The `(mtime, size, inode)` triple, which costs one `stat` and catches every ordinary
+   *     replacement — a new upload, a `mv` over the name, a rewrite in place.
+   *   - The digest, which costs a re-read of the file and catches the rest: a replacement that
+   *     happens to have the same length and stamp, and — the composition the Phase 2 review
+   *     found — a truncated read whose short bytes were committed while the whole file is still
+   *     on disk. This is the check that makes the sentence "what is acknowledged is the digest
+   *     the pipeline committed, not the path" true rather than aspirational, so it is not
+   *     optional and there is no configuration to turn it off.
+   *
+   * The file is streamed rather than read into memory: the acknowledgement path must not need a
+   * buffer the size of the largest scan the operator owns.
+   */
+  private async stillTheFileThatWasRead(
+    ref: IngestRef,
+    outcome: IngestOutcome,
+    path: string,
+    present: Stats,
+  ): Promise<string | null> {
+    const drift = revisionDrift(ref.revision, fileRevision(present));
+    if (drift !== null) {
+      return `'${ref.externalId}' is not the file that was ingested (${drift})`;
+    }
+
+    const committed = 'sha256' in outcome ? outcome.sha256 : undefined;
+    if (committed === undefined) {
+      return (
+        `the '${outcome.status}' outcome names no digest, so '${ref.externalId}' cannot be shown ` +
+        'to be the file the pipeline committed'
+      );
+    }
+
+    let digest: { sha256: string; byteSize: number };
+    try {
+      digest = await hashFile(path);
+    } catch (error) {
+      return (
+        `'${ref.externalId}' could not be re-read to confirm its identity: ` +
+        `${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+    if (digest.sha256 === committed) return null;
+
+    return (
+      `'${ref.externalId}' now holds ${String(digest.byteSize)} bytes hashing to ` +
+      `${digest.sha256}, and the pipeline committed ${committed}`
+    );
+  }
+
+  /**
+   * Route a refusal to the review queue (P3).
+   *
+   * A refused acknowledgement already makes the run not-ok and leaves a `refused` state row, but
+   * neither of those is somewhere a person looks. The entry names the document that *was* filed,
+   * because that is the library record the operator can act from; the explanation names the path,
+   * the reason and the fact that nothing was destroyed. Raising it must never turn a data-safe
+   * refusal into a throw, so a failure to raise is swallowed after being logged.
+   */
+  private flagForReview(
+    ctx: SourceContext,
+    ref: IngestRef,
+    outcome: IngestOutcome,
+    reason: string,
+  ): void {
+    const documentId = 'documentId' in outcome ? outcome.documentId : undefined;
+    if (documentId === undefined) return;
+    try {
+      ensureIngestSchema(ctx.recueil.connection);
+      new ReviewQueueService(ctx.recueil.db, ctx.recueil.audit).raise({
+        subjectType: 'document',
+        subjectId: documentId,
+        reasonCode: SOURCE_CHANGED_BEFORE_CONSUME,
+        explanation:
+          `The '${this.policy.mode}' consume policy was refused for '${ref.externalId}' in ` +
+          `'${this.root ?? '?'}' because ${reason}. Nothing was deleted or moved. The file at ` +
+          'that path will be offered again under its own revision on the next poll; this entry ' +
+          'is here because a source that had to refuse is worth a person knowing about.',
+        proposedAction: 'none',
+        severity: 'warning',
+        sourceStage: 'source.acknowledge',
+        actor: ctx.recueil.actor,
+      });
+    } catch (error) {
+      ctx.log({
+        level: 'warn',
+        message: `the refusal could not be queued for review: ${error instanceof Error ? error.message : String(error)}`,
+        externalId: ref.externalId,
+      });
+    }
+  }
+
   private requireRoot(): string {
     if (this.root === null) throw new SourceError('source_not_started', 'Call `start` before polling.');
     return this.root;
@@ -372,3 +608,20 @@ export class FolderSource implements IngestSource {
     return this.state;
   }
 }
+
+/**
+ * Hash a file as it is now, streaming, counting the bytes on the way through.
+ *
+ * Streamed rather than `readFile`d because this runs on the acknowledgement path for every
+ * consumed file, and a 900 MB scan must not need 900 MB of heap to be deleted safely.
+ */
+const hashFile = async (path: string): Promise<{ sha256: string; byteSize: number }> => {
+  const hash = createHash('sha256');
+  let byteSize = 0;
+  for await (const chunk of createReadStream(path)) {
+    const buffer = chunk as Buffer;
+    byteSize += buffer.byteLength;
+    hash.update(buffer);
+  }
+  return { sha256: hash.digest('hex'), byteSize };
+};

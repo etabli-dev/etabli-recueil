@@ -43,7 +43,8 @@ import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 
 import { archiveKind, emailMetadata, extractArchive } from './archive/extract.js';
 import type { ExtractedMember } from './archive/extract.js';
-import { commitProposal } from './commit.js';
+import { DocumentAlreadyFiledError, commitProposal } from './commit.js';
+import type { CommitResult } from './commit.js';
 import { CONFIDENCE_WEIGHTS, ConfidenceLedger } from './confidence.js';
 import { resolveConfig } from './config.js';
 import type { IngestConfig } from './config.js';
@@ -137,6 +138,18 @@ export interface IngestPipelineOptions {
    * of a file because the reader did not understand it would be the worst possible trade.
    */
   storeArchiveContainers?: { zip?: boolean; eml?: boolean };
+  /**
+   * How long a candidate may wait for another candidate with the same digest to finish.
+   *
+   * The gate that makes stage 2 and stage 10 one critical section is held for the whole of a
+   * candidate's pipeline, so a second copy of a two-hundred-page scan legitimately waits out the
+   * first one's OCR. The default is therefore generous — thirty minutes — and exists only so that
+   * the one shape that could deadlock cannot hang the run: two archives that each contain the
+   * other's bytes, where each holds the lease the other is waiting for. Under ADR-0022 exceeding
+   * the budget is a review outcome, not a crash: the wait throws, the candidate retries, and after
+   * `maxAttemptsPerCandidate` it reaches the review queue naming this limit.
+   */
+  digestLockTimeoutMs?: number;
 }
 
 /** The shape stage 8 needs from a rule engine, and nothing more. */
@@ -185,16 +198,55 @@ export interface IngestVerification {
   queried: {
     /** `documents` rows whose first arrival was recorded by this run. */
     documentsCreated: number;
-    /** `document_provenance` rows carrying this run's job id — every arrival, first or not. */
+    /**
+     * Distinct `(document_id, source_ref)` arrivals carrying this run's job id.
+     *
+     * Distinct, not raw rows: a candidate that threw after stage 2 and was retried writes a second
+     * `document_provenance` row for the same document and the same source reference, and counting
+     * those as separate arrivals would make the comparison below untrue for a reason that is not a
+     * defect.
+     */
     arrivalsRecorded: number;
     /** Live items holding an attachment to a document this run touched. */
     itemsWithAttachment: number;
-    /** Live attachments to documents this run touched. */
+    /**
+     * Live attachments to documents this run touched, whoever made them.
+     *
+     * Context, deliberately not a check. The Phase 2 review noted this number was "computed and
+     * then never compared with anything", which is true and stays true: the only equality one
+     * could assert over it — one attachment per touched document — is exactly the state ADR-0004
+     * exists to permit, because a document a *previous* run filed may since have been attached to
+     * a second item by a person. The comparison that does catch this run over-filing is
+     * `documents_filed_once`, which is scoped to the items this run created and can therefore
+     * distinguish the two. A number a person reads is not the same thing as a check, and calling
+     * this one a check would be the decoration ADR-0021 §5 tells us to delete.
+     */
     attachments: number;
-    /** Open `review_queue` rows raised by this run. */
+    /** Documents this run touched that `document_provenance` records an arrival for, this job. */
+    documentsWithArrivals: number;
+    /** Open `review_queue` rows raised by this run, whatever raised them. */
     openReviewEntries: number;
-    /** Documents this run touched that have no live attachment: filed nowhere, by design or not. */
+    /** Of those, the ones a person must clear before the run can be called finished. */
+    blockerReviewEntries: number;
+    /**
+     * Documents this run touched that carry no live attachment.
+     *
+     * **Counted, never derived.** The Phase 2 review found this number computed as
+     * `documents.length - itemsWithAttachment`, which goes *negative* the moment one document
+     * acquires two items — and a negative count sailed through the `<=` below. ADR-0021: a count
+     * that can go negative is a bug, not a diagnostic.
+     */
     documentsWithoutAttachment: number;
+    /** `documents` rows still present for the ids this run touched. */
+    documentsPresent: number;
+    /** Live items the run says it created that the library actually holds. */
+    itemsCreatedPresent: number;
+    /** Live attachments belonging to the items this run created. */
+    attachmentsCreated: number;
+    /** Distinct documents underneath those attachments. Equal to `attachmentsCreated` or we duped. */
+    documentsFiledByRun: number;
+    /** Open `review_queue` rows the run can name, out of the entries it says it raised. */
+    namedReviewEntriesOpen: number;
   };
   checks: Array<{ id: string; ok: boolean; detail: string }>;
   /** True when every check passed. */
@@ -215,6 +267,97 @@ export interface IngestRunReport {
 }
 
 /* ------------------------------------------------------------------------------------------ */
+/* The digest gate                                                                              */
+/* ------------------------------------------------------------------------------------------ */
+
+/**
+ * Thirty minutes. Long enough that a second copy of a two-hundred-page scan waits out the first
+ * one's OCR rather than being refused; short enough that a run cannot hang for ever.
+ */
+const DEFAULT_DIGEST_LOCK_TIMEOUT_MS = 30 * 60_000;
+
+export interface DigestLease {
+  release(): void;
+}
+
+/** The wait exceeded `digestLockTimeoutMs` (ADR-0022: a budget, and a review outcome when spent). */
+export class DigestLockTimeoutError extends IngestError {
+  constructor(sha256: string, timeoutMs: number) {
+    super(
+      `Another candidate carrying the same bytes (${sha256.slice(0, 12)}…) held the ingestion ` +
+        `lease for longer than ${String(timeoutMs)} ms, so this one refused to proceed rather ` +
+        'than risk filing the same document twice.',
+      'digest_lock_timeout',
+      { sha256, timeoutMs },
+    );
+  }
+}
+
+/**
+ * A mutual-exclusion gate keyed by digest.
+ *
+ * The pipeline's idempotence claim — "a second ingest of the same bytes finds the document at
+ * stage 2 and stops" — is only true if the finding and the filing cannot interleave. Nothing in
+ * SQL enforces it: `attachments` deliberately has no unique index on `document_id`, because
+ * ADR-0004's whole point is that one stored file may hang off several items, and a constraint that
+ * forbade it would forbid the feature. So the exclusion lives here instead, and the commit carries
+ * a second, transactional check for the case this one cannot see (another process).
+ *
+ * Waiters are served in arrival order: each registers a promise of its own on the key's tail and
+ * waits for the tail it displaced. The key is dropped once no holder or waiter is left, so the map
+ * does not grow with the corpus.
+ */
+class DigestGate {
+  private readonly tail = new Map<string, Promise<void>>();
+  private readonly holders = new Map<string, number>();
+
+  async acquire(key: string, timeoutMs: number): Promise<DigestLease> {
+    const previous = this.tail.get(key);
+    let finish!: () => void;
+    const mine = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    this.tail.set(key, previous === undefined ? mine : previous.then(() => mine));
+    this.holders.set(key, (this.holders.get(key) ?? 0) + 1);
+
+    let released = false;
+    const lease: DigestLease = {
+      release: () => {
+        if (released) return;
+        released = true;
+        // Resolving first, so a waiter behind this one is unblocked even if the bookkeeping below
+        // is the last thing this key ever needs.
+        finish();
+        const left = (this.holders.get(key) ?? 1) - 1;
+        if (left <= 0) {
+          this.holders.delete(key);
+          this.tail.delete(key);
+        } else {
+          this.holders.set(key, left);
+        }
+      },
+    };
+
+    if (previous !== undefined) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const expiry = new Promise<'timeout'>((resolve) => {
+        timer = setTimeout(() => resolve('timeout'), timeoutMs);
+      });
+      const outcome = await Promise.race([previous.then((): 'acquired' => 'acquired'), expiry]);
+      if (timer !== undefined) clearTimeout(timer);
+      if (outcome === 'timeout') {
+        // Release rather than abandon: an unreleased lease would stall every candidate queued
+        // behind this one for the life of the process.
+        lease.release();
+        throw new DigestLockTimeoutError(key, timeoutMs);
+      }
+    }
+
+    return lease;
+  }
+}
+
+/* ------------------------------------------------------------------------------------------ */
 /* The pipeline                                                                                 */
 /* ------------------------------------------------------------------------------------------ */
 
@@ -228,6 +371,21 @@ interface CandidateContext {
   /** The archive this candidate came out of, when it came out of one. */
   parent: { documentId: string | null; sha256: Sha256; entryName: string } | null;
   touchedDocumentIds: Set<string>;
+  /**
+   * Digests this candidate's own ancestry is holding the gate on, shared by reference down the
+   * archive chain. A member whose bytes are its container's would otherwise wait on a lease its own
+   * caller holds and never get it; this makes the gate re-entrant along one line of descent and
+   * nowhere else.
+   */
+  heldDigests: Set<string>;
+}
+
+/** What stage 1 knows before the gate closes. */
+interface HashedCandidate {
+  sha256: Sha256;
+  byteSize: number;
+  mediaType: string;
+  archive: 'zip' | 'eml' | null;
 }
 
 interface Stage2Checkpoint {
@@ -253,6 +411,15 @@ export class IngestPipeline {
   private readonly resolvers: readonly IdentifierResolver[];
   private readonly actor: Actor;
   private readonly storeContainers: { zip: boolean; eml: boolean };
+  private readonly digestLockTimeoutMs: number;
+  /**
+   * The in-flight set of CONCEPT §5.3's idempotence promise, keyed by sha256.
+   *
+   * One per pipeline instance rather than per run, so two runs sharing an instance serialise too.
+   * It is in-process only; `commitProposal`'s `refuseIfDocumentFiled` is the half that holds across
+   * processes.
+   */
+  private readonly digestGate = new DigestGate();
 
   constructor(options: IngestPipelineOptions) {
     this.recueil = options.recueil;
@@ -268,6 +435,7 @@ export class IngestPipeline {
       zip: options.storeArchiveContainers?.zip ?? false,
       eml: options.storeArchiveContainers?.eml ?? true,
     };
+    this.digestLockTimeoutMs = options.digestLockTimeoutMs ?? DEFAULT_DIGEST_LOCK_TIMEOUT_MS;
 
     // The queue's table is not in core's migration series yet; see `db/install.ts`.
     ensureIngestSchema(this.recueil.connection);
@@ -339,6 +507,9 @@ export class IngestPipeline {
           depth: 0,
           parent: null,
           touchedDocumentIds,
+          // Fresh per top-level candidate: the set records this line of descent's own leases, and
+          // two candidates must never see each other's.
+          heldDigests: new Set<string>(),
         });
 
         outcomes.push({ ref: candidate.ref, outcome });
@@ -351,12 +522,27 @@ export class IngestPipeline {
 
     const counts = tally(outcomes.map((entry) => entry.outcome));
     const scratchClean = await scratch.isEmpty();
-    const verification = this.verify(handle.id, counts, touchedDocumentIds);
+    const verification = this.verifyRun(
+      handle.id,
+      counts,
+      touchedDocumentIds,
+      outcomes.map((entry) => entry.outcome),
+    );
     const finishedAt = nowTimestamp();
 
     // `waiting_review` rather than `succeeded` when something was queued: IK6 says a job in that
     // state "has produced review_queue entries and will not proceed until they are resolved", and
     // reporting a run that filed nothing as a success is how a review queue gets ignored.
+    //
+    // Derived from `review_queue` and not from `counts.review`, which is the number of *candidates*
+    // whose outcome was `review`. Those are not the only entries a run raises: `commitProposal`
+    // raises one inside the commit transaction when a rule asked for something the library could
+    // not do, `ingestWithRetries` raises a blocker after the last attempt, stage 5 raises one when
+    // OCR throws, and stage 3 raises one for an archive it could not open. None of those changes a
+    // candidate's outcome, so a run counting outcomes reported itself `succeeded` while holding
+    // open rows against its own job id — the exact failure the paragraph above says it prevents.
+    const openEntries = verification.queried.openReviewEntries;
+    const blockers = verification.queried.blockerReviewEntries;
     finishRun(
       this.recueil,
       handle.id,
@@ -364,11 +550,16 @@ export class IngestPipeline {
         ? {
             state: 'failed',
             errorCode: 'ingest_candidate_failed',
-            errorMessage: `${String(counts.failed)} candidate(s) failed after ${String(
-              this.config.maxAttemptsPerCandidate,
-            )} attempts each`,
+            errorMessage:
+              `${String(counts.failed)} candidate(s) failed after ${String(
+                this.config.maxAttemptsPerCandidate,
+              )} attempts each` +
+              (openEntries === 0
+                ? ''
+                : `; ${String(openEntries)} review_queue entry(ies) are open against this run, ` +
+                  `${String(blockers)} of them blocker(s)`),
           }
-        : counts.review > 0
+        : openEntries > 0
           ? { state: 'waiting_review', result: { counts, verification } }
           : { state: 'succeeded', result: { counts, verification } },
     );
@@ -499,12 +690,6 @@ export class IngestPipeline {
     const alreadyCommitted = journal.read<IngestOutcome>('commit');
     if (alreadyCommitted !== null) return alreadyCommitted;
 
-    const previousStages: string[] = [];
-    const notes: string[] = [];
-    const ledger = new ConfidenceLedger(this.config.baseConfidence);
-    const proposal = emptyProposal();
-    const sourceMetadata: JsonObject = { ...(candidate.sourceMetadata ?? {}) };
-
     let bytes: Buffer | null = null;
     const readBytes = async (): Promise<Buffer> => {
       bytes ??= await candidate.read();
@@ -513,34 +698,93 @@ export class IngestPipeline {
 
     /* ---- Stage 1: hash, size, MIME ------------------------------------------------------- */
 
-    const stage1 = journal.read<{
-      sha256: Sha256;
-      byteSize: number;
-      mediaType: string;
-      archive: 'zip' | 'eml' | null;
-    }>('hash');
-    let sha256: Sha256;
-    let byteSize: number;
-    let mediaType: string;
-    let kind: 'zip' | 'eml' | null;
+    const hashed = await this.hashCandidate(candidate, context, readBytes);
 
-    if (stage1 !== null) {
-      ({ sha256, byteSize, mediaType } = stage1);
-      kind = stage1.archive;
-    } else {
-      const buffer = await readBytes();
-      // Hash only. Storing happens at stage 2, through `DocumentService.ingestBuffer`, because a
-      // blob written here for an archive whose container the deployment does not keep would be an
-      // orphan that nothing ever references and nothing ever collects.
-      sha256 = createHash('sha256').update(buffer).digest('hex');
-      byteSize = buffer.length;
-      mediaType = sniffMimeType(buffer, {
-        declared: candidate.mediaType ?? null,
-        filename: candidate.suggestedFilename ?? null,
-      }).mimeType;
-      kind = archiveKind(mediaType, buffer);
-      journal.write('hash', { sha256, byteSize, mediaType, archive: kind }, sha256);
+    /* ---- The digest gate ------------------------------------------------------------------ */
+
+    // Stage 2 asks whether these bytes are already filed and stage 10 files them, and between the
+    // two lies every awaited stage in the pipeline — OCR, GROBID, a resolver, a plugin. Without
+    // this lease, N concurrent arrivals of the same bytes each read "not filed" and each commit,
+    // and one document acquires N items and N live attachments. The lease is taken here, the
+    // moment the digest is known, and released when the candidate reaches a terminal outcome, so
+    // the check and the commit are inside one critical section.
+    //
+    // Serialising costs nothing that is not already wasted: candidates that contend carry
+    // *identical bytes*, so the one that waits is going to be told it is a duplicate and stop.
+    const lease = context.heldDigests.has(hashed.sha256)
+      ? null
+      : await this.leaseDigest(hashed.sha256, context);
+    try {
+      return await this.ingestHashedCandidate(candidate, context, hashed, readBytes);
+    } finally {
+      lease?.release();
     }
+  }
+
+  /** Stage 1, and the checkpoint that lets a resumed run skip it. */
+  private async hashCandidate(
+    candidate: IngestCandidate,
+    context: CandidateContext,
+    readBytes: () => Promise<Buffer>,
+  ): Promise<HashedCandidate> {
+    const checkpoint = context.journal.read<HashedCandidate>('hash');
+    if (checkpoint !== null) return checkpoint;
+
+    const buffer = await readBytes();
+    // Hash only. Storing happens at stage 2, through `DocumentService.ingestBuffer`, because a
+    // blob written here for an archive whose container the deployment does not keep would be an
+    // orphan that nothing ever references and nothing ever collects.
+    const sha256 = createHash('sha256').update(buffer).digest('hex');
+    const byteSize = buffer.length;
+    const mediaType = sniffMimeType(buffer, {
+      declared: candidate.mediaType ?? null,
+      filename: candidate.suggestedFilename ?? null,
+    }).mimeType;
+    const hashed: HashedCandidate = {
+      sha256,
+      byteSize,
+      mediaType,
+      archive: archiveKind(mediaType, buffer),
+    };
+    context.journal.write('hash', hashed, sha256);
+    return hashed;
+  }
+
+  /** Take the gate on a digest, recording it on this line of descent so nesting cannot self-block. */
+  private async leaseDigest(sha256: Sha256, context: CandidateContext): Promise<DigestLease> {
+    const lease = await this.digestGate.acquire(sha256, this.digestLockTimeoutMs);
+    context.heldDigests.add(sha256);
+    let released = false;
+    return {
+      release: () => {
+        if (released) return;
+        released = true;
+        context.heldDigests.delete(sha256);
+        lease.release();
+      },
+    };
+  }
+
+  /** Stages 2 to 10, with the digest gate held for the whole of them. */
+  private async ingestHashedCandidate(
+    candidate: IngestCandidate,
+    context: CandidateContext,
+    hashed: HashedCandidate,
+    readBytes: () => Promise<Buffer>,
+  ): Promise<IngestOutcome> {
+    const { journal } = context;
+
+    const previousStages: string[] = [];
+    const notes: string[] = [];
+    const ledger = new ConfidenceLedger(this.config.baseConfidence);
+    const proposal = emptyProposal();
+    const sourceMetadata: JsonObject = { ...(candidate.sourceMetadata ?? {}) };
+
+    let sha256: Sha256 = hashed.sha256;
+    let byteSize: number = hashed.byteSize;
+    let mediaType: string = hashed.mediaType;
+    const kind: 'zip' | 'eml' | null = hashed.archive;
+
     previousStages.push('hash');
 
     await this.runHooks('hash', 'after', {
@@ -1222,18 +1466,54 @@ export class IngestPipeline {
     if (beforeCommit !== null) return this.finishEarly(beforeCommit, documentId, sha256, context, ledger);
     proposal.confidence = ledger.score;
 
-    const committed = commitProposal({
-      recueil: this.recueil,
-      reviewQueue: this.reviewQueue,
-      actor: this.actor,
-      documentId,
-      sha256,
-      proposal,
-      attachmentRole: detected === 'scan' ? 'scan' : 'primary',
-      provenanceSource: 'ingest',
-      runId: context.runId,
-      sourceStage: stageLabel('commit'),
-    });
+    let committed: CommitResult;
+    try {
+      committed = commitProposal({
+        recueil: this.recueil,
+        reviewQueue: this.reviewQueue,
+        actor: this.actor,
+        documentId,
+        sha256,
+        proposal,
+        attachmentRole: detected === 'scan' ? 'scan' : 'primary',
+        provenanceSource: 'ingest',
+        runId: context.runId,
+        sourceStage: stageLabel('commit'),
+        // The digest gate above cannot see another process. This can: the check is inside the
+        // commit's own transaction, so the answer and the write are atomic.
+        refuseIfDocumentFiled: true,
+      });
+    } catch (error) {
+      if (!(error instanceof DocumentAlreadyFiledError)) throw error;
+      // Somebody else filed these bytes between stage 2 and here — which, within one process, the
+      // gate makes impossible, so this is the second-process path. The right answer is the one
+      // stage 2 would have given a moment later, not a failure.
+      logRun(this.recueil, context.runId, {
+        level: 'info',
+        message:
+          'another writer filed these bytes while this candidate was in the pipeline; linked and ' +
+          'stopped rather than filing them twice',
+        subjectType: 'document',
+        subjectId: documentId,
+      });
+      this.events.emit({
+        type: 'document.duplicate',
+        documentId,
+        sha256,
+        ref: candidate.ref,
+        arrivals: this.recueil.documents.provenanceFor(documentId).length,
+        occurredAt: nowTimestamp(),
+      });
+      const raced: IngestOutcome = {
+        status: 'duplicate',
+        documentId,
+        sha256,
+        itemId: error.itemId,
+      };
+      journal.write('commit', raced, sha256);
+      journal.compact();
+      return raced;
+    }
 
     // Everything the run learned that made this document filable also answers any open question
     // about it from an earlier attempt (RQ2).
@@ -1664,30 +1944,92 @@ export class IngestPipeline {
   }
 
   /**
-   * Check the run against the library.
+   * Check the run against the library (ADR-0021).
    *
-   * Both sides are named in the type, and each check compares one against the other. Counting the
-   * run's own log entries and calling the result a verification is the failure the Phase 1 review
-   * found in the Zotero importer; it is not repeated here.
+   * Both sides are named in the type: every number in `queried` comes from a `SELECT` over the
+   * library, every number in `claimed` comes from the run's in-memory tally, and each check
+   * compares one against the other.
+   *
+   * The Phase 2 review found the previous version of this method satisfying that rule in form and
+   * defeating it with comparison operators: all four checks were one-sided inequalities open in the
+   * direction that permits duplication, so a run that gave one document four items reported
+   * `pass: true` with `documentsWithoutAttachment: -3`. This version asserts equality wherever
+   * equality is what is meant; the two checks that remain inequalities say below which direction is
+   * the failure and why; and no number here is derived by subtraction, so none of them can be
+   * negative.
+   *
+   * Public, and called by `run()` with its own numbers, because ADR-0021 §4 asks every blocking
+   * check to ship with a test that makes it fail. A check whose only caller is the code it checks
+   * cannot be handed a library that contradicts the run, and one that cannot be made to fail is
+   * decoration. An operator re-deriving the verdict for a finished job wants the same seam.
    */
-  private verify(runId: string, claimed: RunCounts, documentIds: ReadonlySet<string>): IngestVerification {
+  verifyRun(
+    runId: string,
+    claimed: RunCounts,
+    documentIds: ReadonlySet<string>,
+    outcomes: readonly IngestOutcome[],
+  ): IngestVerification {
     const ids = [...documentIds];
+
+    // The run's own account of what it did, flattened through archive members. These are claims,
+    // not evidence: each one is used to *address* a query, never as the answer to one.
+    const claimedItemIds = new Set<string>();
+    const claimedReviewEntryIds = new Set<string>();
+    const walk = (outcome: IngestOutcome): void => {
+      if (outcome.status === 'ingested') claimedItemIds.add(outcome.itemId);
+      if (outcome.status === 'review') claimedReviewEntryIds.add(outcome.reviewQueueEntryId);
+      if ('members' in outcome && outcome.members !== undefined) outcome.members.forEach(walk);
+    };
+    outcomes.forEach(walk);
+    const itemIds = [...claimedItemIds];
+    const reviewEntryIds = [...claimedReviewEntryIds];
+
+    /* ---- The library side ----------------------------------------------------------------- */
 
     const arrivalsRecorded = count(
       this.recueil.db
-        .select({ n: sql<number>`count(*)` })
+        .select({
+          n: sql<number>`count(distinct ${schema.documentProvenance.documentId} || char(31) || coalesce(${schema.documentProvenance.sourceRef}, ''))`,
+        })
         .from(schema.documentProvenance)
         .where(eq(schema.documentProvenance.jobId, runId))
         .get(),
     );
 
+    const documentsWithArrivals =
+      ids.length === 0
+        ? 0
+        : count(
+            this.recueil.db
+              .select({ n: sql<number>`count(distinct ${schema.documentProvenance.documentId})` })
+              .from(schema.documentProvenance)
+              .where(
+                and(
+                  eq(schema.documentProvenance.jobId, runId),
+                  inArray(schema.documentProvenance.documentId, ids),
+                ),
+              )
+              .get(),
+          );
+
     const documentsCreated = count(
       this.recueil.db
-        .select({ n: sql<number>`count(*)` })
+        .select({ n: sql<number>`count(distinct ${schema.documentProvenance.documentId})` })
         .from(schema.documentProvenance)
         .where(and(eq(schema.documentProvenance.jobId, runId), eq(schema.documentProvenance.isFirst, true)))
         .get(),
     );
+
+    const documentsPresent =
+      ids.length === 0
+        ? 0
+        : count(
+            this.recueil.db
+              .select({ n: sql<number>`count(*)` })
+              .from(schema.documents)
+              .where(inArray(schema.documents.id, ids))
+              .get(),
+          );
 
     const attachments =
       ids.length === 0
@@ -1720,6 +2062,50 @@ export class IngestPipeline {
               .get(),
           );
 
+    // Counted, not subtracted. See the field's comment.
+    const documentsWithoutAttachment =
+      ids.length === 0
+        ? 0
+        : count(
+            this.recueil.db
+              .select({ n: sql<number>`count(*)` })
+              .from(schema.documents)
+              .where(
+                and(
+                  inArray(schema.documents.id, ids),
+                  sql`not exists (select 1 from ${schema.attachments} where ${schema.attachments.documentId} = ${schema.documents.id} and ${schema.attachments.trashedAt} is null)`,
+                ),
+              )
+              .get(),
+          );
+
+    const itemsCreatedPresent =
+      itemIds.length === 0
+        ? 0
+        : count(
+            this.recueil.db
+              .select({ n: sql<number>`count(*)` })
+              .from(schema.items)
+              .where(and(inArray(schema.items.id, itemIds), isNull(schema.items.trashedAt)))
+              .get(),
+          );
+
+    const filedRow =
+      itemIds.length === 0
+        ? undefined
+        : this.recueil.db
+            .select({
+              rows: sql<number>`count(*)`,
+              documents: sql<number>`count(distinct ${schema.attachments.documentId})`,
+            })
+            .from(schema.attachments)
+            .where(
+              and(inArray(schema.attachments.itemId, itemIds), isNull(schema.attachments.trashedAt)),
+            )
+            .get();
+    const attachmentsCreated = filedRow?.rows ?? 0;
+    const documentsFiledByRun = filedRow?.documents ?? 0;
+
     const openReviewEntries = count(
       this.recueil.db
         .select({ n: sql<number>`count(*)` })
@@ -1728,40 +2114,109 @@ export class IngestPipeline {
         .get(),
     );
 
-    const documentsWithoutAttachment = ids.length - itemsWithAttachment;
+    const blockerReviewEntries = count(
+      this.recueil.db
+        .select({ n: sql<number>`count(*)` })
+        .from(reviewQueueTable)
+        .where(
+          and(
+            eq(reviewQueueTable.jobId, runId),
+            eq(reviewQueueTable.status, 'open'),
+            eq(reviewQueueTable.severity, 'blocker'),
+          ),
+        )
+        .get(),
+    );
+
+    const namedReviewEntriesOpen =
+      reviewEntryIds.length === 0
+        ? 0
+        : count(
+            this.recueil.db
+              .select({ n: sql<number>`count(*)` })
+              .from(reviewQueueTable)
+              .where(
+                and(inArray(reviewQueueTable.id, reviewEntryIds), eq(reviewQueueTable.status, 'open')),
+              )
+              .get(),
+          );
+
+    /* ---- The comparisons ------------------------------------------------------------------ */
+
+    const unfiledAccountedFor =
+      claimed.review + claimed.containers + claimed.stopped + claimed.failed;
 
     const checks: IngestVerification['checks'] = [
       {
-        id: 'arrivals_match_candidates',
-        ok: arrivalsRecorded >= claimed.ingested + claimed.duplicates,
+        id: 'documents_present',
+        ok: documentsPresent === ids.length,
         detail:
-          `the run says it ingested ${claimed.ingested} and linked ${claimed.duplicates} duplicate(s), ` +
-          `so document_provenance must hold at least ${claimed.ingested + claimed.duplicates} ` +
-          `arrival(s) for this job; it holds ${arrivalsRecorded}`,
+          `the run touched ${String(ids.length)} document(s); the library holds ` +
+          `${String(documentsPresent)} of them`,
       },
       {
-        id: 'items_match_ingested',
-        ok: itemsWithAttachment >= claimed.ingested,
+        // Every document this run touched was reached through `ingestBuffer`, which writes the
+        // arrival in the same transaction as the `documents` row, so equality is what is meant: a
+        // document the run names with no arrival against this job is the run claiming work
+        // `document_provenance` has no record of. There is no other direction — the query is
+        // restricted to the very ids the run named, so it cannot return more of them than exist.
+        id: 'arrivals_recorded',
+        ok: documentsWithArrivals === ids.length,
         detail:
-          `the run says it filed ${claimed.ingested} item(s); the library holds ${itemsWithAttachment} ` +
-          'live item(s) attached to the documents this run touched',
+          `the run touched ${String(ids.length)} document(s); document_provenance records an ` +
+          `arrival against this job for ${String(documentsWithArrivals)} of them, over ` +
+          `${String(arrivalsRecorded)} distinct arrival(s) in total`,
       },
       {
-        id: 'review_entries_match',
-        ok: openReviewEntries >= claimed.review,
+        id: 'items_created_exist',
+        ok: itemsCreatedPresent === claimed.ingested && itemIds.length === claimed.ingested,
         detail:
-          `the run says it queued ${claimed.review} document(s) for review; review_queue holds ` +
-          `${openReviewEntries} open entry(ies) for this job`,
+          `the run says it filed ${String(claimed.ingested)} item(s) and named ` +
+          `${String(itemIds.length)} of them; the library holds ${String(itemsCreatedPresent)} live ` +
+          'item(s) with those ids',
       },
       {
+        // The check the Phase 2 duplication defect could not fail. One document filed twice gives
+        // the run two items and two live attachments over *one* document, so `attachmentsCreated`
+        // and `documentsFiledByRun` come apart. Both are equalities against the run's own count of
+        // what it filed, so the check fails in either direction.
+        id: 'documents_filed_once',
+        ok: attachmentsCreated === claimed.ingested && documentsFiledByRun === claimed.ingested,
+        detail:
+          `the run says it filed ${String(claimed.ingested)} document(s); the items it created ` +
+          `carry ${String(attachmentsCreated)} live attachment(s) over ` +
+          `${String(documentsFiledByRun)} distinct document(s)`,
+      },
+      {
+        // Every entry the run says it raised must still be open in the queue: equality, and it
+        // fails if one is missing or has been closed behind the run's back.
+        //
+        // Against `reviewEntryIds.size` rather than `claimed.review`, because the two are allowed
+        // to differ: `review_queue` keeps at most one *open* row per dedupe key (§6.1, P9), so two
+        // candidates carrying the same bytes and stopping at the same gate for the same reason
+        // refresh one entry rather than opening two. Asserting one entry per review outcome would
+        // report that idempotence as a defect.
+        id: 'review_entries_raised',
+        ok: namedReviewEntriesOpen === reviewEntryIds.length,
+        detail:
+          `the run says it queued ${String(claimed.review)} document(s) for review, naming ` +
+          `${String(reviewEntryIds.length)} distinct entry(ies); ${String(namedReviewEntriesOpen)} ` +
+          `of those are open, out of ${String(openReviewEntries)} open entry(ies) for this job`,
+      },
+      {
+        // An inequality on purpose. The failure is *more* unfiled documents than the run admits to:
+        // documents the run put in the library and then left attached to nothing without saying so.
+        // The other direction — fewer — is reachable without a defect, because a document this run
+        // routed to review can be accepted from the queue, or filed by another run, while this run
+        // is still going; so it is not asserted. The count is a `count(*)`, so unlike the version
+        // this replaces it cannot go negative and wave itself through.
         id: 'every_document_accounted_for',
-        ok:
-          documentsWithoutAttachment <=
-          claimed.review + claimed.containers + claimed.stopped + claimed.failed,
+        ok: documentsWithoutAttachment <= unfiledAccountedFor,
         detail:
-          `${documentsWithoutAttachment} document(s) this run touched carry no live attachment; the ` +
-          `run accounts for ${claimed.review} in review, ${claimed.containers} container(s), ` +
-          `${claimed.stopped} stopped and ${claimed.failed} failed`,
+          `${String(documentsWithoutAttachment)} document(s) this run touched carry no live ` +
+          `attachment; the run accounts for ${String(claimed.review)} in review, ` +
+          `${String(claimed.containers)} container(s), ${String(claimed.stopped)} stopped and ` +
+          `${String(claimed.failed)} failed`,
       },
     ];
 
@@ -1770,10 +2225,17 @@ export class IngestPipeline {
       queried: {
         documentsCreated,
         arrivalsRecorded,
+        documentsWithArrivals,
         itemsWithAttachment,
         attachments,
         openReviewEntries,
+        blockerReviewEntries,
         documentsWithoutAttachment,
+        documentsPresent,
+        itemsCreatedPresent,
+        attachmentsCreated,
+        documentsFiledByRun,
+        namedReviewEntriesOpen,
       },
       checks,
       pass: checks.every((check) => check.ok),

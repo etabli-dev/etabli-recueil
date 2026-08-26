@@ -204,7 +204,7 @@ describe('the parity checks are real comparisons', () => {
 });
 
 describe('the ASN collision path', () => {
-  it('leaves an ASN alone when an item outside the import already holds it', async () => {
+  it('leaves the number alone, keeps it on a field, and fails the report until it is resolved', async () => {
     const fresh = makeLibrary();
     try {
       // A hand-entered item that already has ASN 1002, which Paperless document 2 also claims.
@@ -239,7 +239,36 @@ describe('the ASN collision path', () => {
       expect(carried?.content).toStrictEqual({ type: 'integer', value: 1002 });
 
       expect(report.asn.unique).toBe(true);
-      expect(report.pass).toBe(true);
+
+      // Nothing was lost — the number is on the field, and the report proves that by querying for
+      // it rather than by believing the review entry.
+      expect(report.asn.lost).toStrictEqual([]);
+      expect(report.asn.deferrals).toStrictEqual([
+        { asn: 1002, paperlessId: 2, heldByItemId: existing.item.id, duplicateInSource: false },
+        // Document 6 carries 1001, which Paperless also put on document 1. That one is a defect in
+        // the source, and the report says which item ended up holding the number.
+        {
+          asn: 1001,
+          paperlessId: 6,
+          heldByItemId: fresh.db
+            .select()
+            .from(schema.items)
+            .where(eq(schema.items.sourceId, '1'))
+            .get()?.id,
+          duplicateInSource: true,
+        },
+      ]);
+      expect(check(report, 'asn_preserved')?.pass).toBe(true);
+
+      // But it is not on `item_office.asn`, and the physical filing index is therefore ambiguous
+      // until a person decides which record really holds 1002. That is a blocking failure: the ASN
+      // Paperless itself duplicated (1001, on documents 1 and 6) is the only allowance, because no
+      // importer can satisfy a source that contradicts uniqueness. This collision is resolvable.
+      const toFacet = check(report, 'asn_carried_to_facet');
+      expect(toFacet?.pass).toBe(false);
+      expect(toFacet?.expected).toBe(5);
+      expect(toFacet?.actual).toBe(4);
+      expect(report.pass).toBe(false);
     } finally {
       fresh.dispose();
     }

@@ -19,6 +19,25 @@
  * else. Identity is still the SHA-256 the pipeline computes (P2), so a server that recycles ETags
  * costs a re-ingest that stage 2 will recognise as a duplicate, never a wrong document.
  *
+ * **Credentials never live in the URL.** `https://user:pass@host/dav/` is the form a great many
+ * people paste, and `z.url()` accepts it happily. Left alone it is stored in cleartext in
+ * `ingestion_sources.config`, returned by the API, and interpolated into every error message this
+ * client raises — the Phase 2 review got the password back twice in one `test-connection` response
+ * body. It also cannot work: undici refuses outright to fetch a URL that carries credentials, so
+ * the sole effect of putting a password there was that it leaked. So the constructor strips the
+ * userinfo before anything else happens: `base` never has it, `urlFor` therefore never has it, and
+ * every message here is built from `urlFor`. Where no `auth` is configured the stripped userinfo is
+ * adopted as basic credentials, which is what the person pasting the URL meant, and it then lives
+ * only in an `Authorization` header. `credentialsFromUrl` exposes what was stripped so a host can
+ * move it into its own credential store; nothing here logs it, returns it in an error, or keeps it
+ * anywhere a serialiser will reach.
+ *
+ * **A destructive request carries a precondition.** `DELETE` and `MOVE` take the ETag the caller
+ * believes the object has and send it as `If-Match`, so a share that has been rewritten since the
+ * poll answers 412 instead of destroying a version nobody has read. RFC 7232 §3.1 makes that the
+ * server's decision rather than the client's guess, which is the only way to have no race at all;
+ * a server that ignores the header is why `WebDavSource` also checks for itself (see its header).
+ *
  * There is a WebDAV *storage backend* in `@recueil/storage-backends`, which is a different job:
  * that one writes blobs by digest into a store, this one reads a directory somebody shares with
  * you. They are kept apart deliberately — a bug in the feed must not be able to touch the store.
@@ -33,8 +52,16 @@ export interface WebDavAuth {
 }
 
 export interface WebDavClientOptions {
-  /** The collection to poll, e.g. `https://cloud.example/remote.php/dav/files/rh/Inbox`. */
+  /**
+   * The collection to poll, e.g. `https://cloud.example/remote.php/dav/files/rh/Inbox`.
+   *
+   * Userinfo — `https://user:pass@host/dav/` — is stripped by the constructor and never reaches
+   * `base`, a request URL, a log line or an error message. Where no `auth` is given it becomes the
+   * basic credentials instead, and `credentialsFromUrl` says what was taken so a host can move it
+   * into a credential store. Do not pass a URL with a password in it and expect it to be stored.
+   */
   url: string;
+  /** Explicit credentials. Takes precedence over anything found in the URL. */
   auth?: WebDavAuth;
   /** Extra headers, for a deployment behind something that wants one. */
   headers?: Record<string, string>;
@@ -56,18 +83,78 @@ export interface WebDavEntry {
 
 const DEFAULT_TIMEOUT = 30_000;
 
+/** What a `user:pass@` prefix carried, decoded. */
+export interface UrlCredentials {
+  username: string;
+  password: string;
+}
+
+/**
+ * Split a URL into the part that may be stored and the part that may not.
+ *
+ * Exported because the decision "userinfo is a credential, not part of the address" has to be made
+ * identically wherever a source URL arrives, and because a host that keeps credentials in a secret
+ * box needs the plaintext exactly once, at ingress, to put it there.
+ */
+export const splitUserinfo = (raw: string): { url: URL; credentials: UrlCredentials | null } => {
+  const url = new URL(raw);
+  if (url.username === '' && url.password === '') return { url, credentials: null };
+  // `URL` keeps userinfo percent-encoded, and a password with an `@` or a `:` in it has to be
+  // written that way, so it is decoded here rather than passed on as typed.
+  const credentials: UrlCredentials = {
+    username: decodeURIComponent(url.username),
+    password: decodeURIComponent(url.password),
+  };
+  url.username = '';
+  url.password = '';
+  return { url, credentials };
+};
+
 export class WebDavClient {
-  /** The collection URL, always with a trailing slash so that relative resolution behaves. */
+  /**
+   * The collection URL, always with a trailing slash so that relative resolution behaves, and
+   * never carrying userinfo — see the module header.
+   */
   readonly base: URL;
-  private readonly config: WebDavClientOptions;
-  private readonly doFetch: typeof fetch;
+  /*
+   * Everything that can hold a secret is a `#` field rather than a TypeScript `private` one.
+   *
+   * TypeScript's `private` is a compile-time courtesy: the property is still enumerable, so
+   * `JSON.stringify(client)`, a structured log line that serialises its context, or a crash
+   * reporter that walks the object, all reach the password. `#` fields are not properties at all,
+   * so none of them can. `base` is the only enumerable field this class has, and it never carries
+   * userinfo.
+   */
+  #config: WebDavClientOptions;
+  #auth: WebDavAuth | undefined;
+  #urlCredentials: UrlCredentials | null;
+  #doFetch: typeof fetch;
 
   constructor(options: WebDavClientOptions) {
-    this.config = options;
-    const url = new URL(options.url);
+    const { url, credentials } = splitUserinfo(options.url);
     if (!url.pathname.endsWith('/')) url.pathname = `${url.pathname}/`;
     this.base = url;
-    this.doFetch = options.fetch ?? fetch;
+    this.#urlCredentials = credentials;
+    // The stored config keeps the sanitised URL, so nothing downstream can reach the secret
+    // through it — including a debugger and a structured log line.
+    this.#config = { ...options, url: url.toString() };
+    this.#auth =
+      options.auth ??
+      (credentials === null
+        ? undefined
+        : { kind: 'basic', username: credentials.username, password: credentials.password });
+    this.#doFetch = options.fetch ?? fetch;
+  }
+
+  /**
+   * The credentials that were in the URL, if any, so a host can move them into its own store.
+   *
+   * A getter on the prototype rather than a field on the instance, so that reading it is a
+   * deliberate act and serialising the client is not one. Nothing in this package logs it, returns
+   * it in an error, or puts it in a `detail`.
+   */
+  get credentialsFromUrl(): UrlCredentials | null {
+    return this.#urlCredentials;
   }
 
   /** `OPTIONS`, for the health report: is this a WebDAV endpoint, and does it allow what we need? */
@@ -117,25 +204,86 @@ export class WebDavClient {
     };
   }
 
-  async delete(path: string, signal?: AbortSignal): Promise<'deleted' | 'absent'> {
-    const response = await this.request('DELETE', path, { signal, allow: [204, 200, 404] });
-    await response.arrayBuffer();
-    return response.status === 404 ? 'absent' : 'deleted';
+  /**
+   * `HEAD`, for the one question that has to be asked immediately before something is destroyed:
+   * what is at this path *now*?
+   *
+   * A `PROPFIND` would answer it too, and more expensively; `HEAD` is one round trip and returns
+   * exactly the three fields the revision is built from. A share that does not implement it is
+   * reported as `unsupported` rather than as an empty answer, because "the server did not say" and
+   * "the object is not there" must not be the same value to a caller about to delete something.
+   */
+  async head(
+    path: string,
+    signal?: AbortSignal,
+  ): Promise<
+    | { kind: 'present'; etag: string | null; byteSize: number | null; lastModified: string | null }
+    | { kind: 'absent' }
+    | { kind: 'unsupported'; status: number }
+  > {
+    const response = await this.request('HEAD', path, {
+      signal,
+      allow: [200, 204, 404, 405, 501],
+    });
+    await response.arrayBuffer().catch(() => undefined);
+    if (response.status === 404) return { kind: 'absent' };
+    if (response.status === 405 || response.status === 501) {
+      return { kind: 'unsupported', status: response.status };
+    }
+    const length = response.headers.get('content-length');
+    return {
+      kind: 'present',
+      etag: normaliseEtag(response.headers.get('etag')),
+      byteSize: length === null || length.trim() === '' ? null : Number.parseInt(length.trim(), 10),
+      lastModified: response.headers.get('last-modified'),
+    };
   }
 
+  /**
+   * `DELETE`, conditional on the entity tag the caller was offered when one is known.
+   *
+   * `'stale'` rather than a throw for the 412, because a precondition that fires is the mechanism
+   * working, not an error: the caller's answer is to keep the original and say why (P3).
+   */
+  async delete(
+    path: string,
+    signal?: AbortSignal,
+    conditions: { ifMatch?: string | null } = {},
+  ): Promise<'deleted' | 'absent' | 'stale'> {
+    const response = await this.request('DELETE', path, {
+      signal,
+      allow: [204, 200, 404, 412],
+      headers: ifMatchHeader(conditions.ifMatch),
+    });
+    await response.arrayBuffer();
+    if (response.status === 404) return 'absent';
+    return response.status === 412 ? 'stale' : 'deleted';
+  }
+
+  /**
+   * `MOVE`, conditional in the same way.
+   *
+   * 412 is ambiguous here — RFC 4918 uses it for `Overwrite: F` against an occupied destination,
+   * and RFC 7232 for a failed `If-Match` — so the two are told apart by whether a precondition was
+   * sent at all. A conditional MOVE that comes back 412 is treated as the stale case, which is the
+   * conservative reading: the collision case leaves the original alone as well.
+   */
   async move(
     from: string,
     to: string,
     signal?: AbortSignal,
-  ): Promise<'moved' | 'absent'> {
+    conditions: { ifMatch?: string | null } = {},
+  ): Promise<'moved' | 'absent' | 'stale'> {
+    const precondition = ifMatchHeader(conditions.ifMatch);
     const response = await this.request('MOVE', from, {
-      headers: { destination: this.urlFor(to).toString(), overwrite: 'F' },
+      headers: { destination: this.urlFor(to).toString(), overwrite: 'F', ...precondition },
       signal,
       allow: [201, 204, 404, 412],
     });
     await response.arrayBuffer();
     if (response.status === 404) return 'absent';
     if (response.status === 412) {
+      if (Object.keys(precondition).length > 0) return 'stale';
       throw new SourceProtocolError(
         `MOVE of '${from}' refused: something is already at '${to}'.`,
         { from, to },
@@ -181,17 +329,17 @@ export class WebDavClient {
   ): Promise<Response> {
     const url = this.urlFor(path);
     const headers: Record<string, string> = {
-      ...(this.config.headers ?? {}),
+      ...(this.#config.headers ?? {}),
       ...(init.headers ?? {}),
       ...this.authHeader(),
     };
 
-    const timeout = AbortSignal.timeout(this.config.timeoutMillis ?? DEFAULT_TIMEOUT);
+    const timeout = AbortSignal.timeout(this.#config.timeoutMillis ?? DEFAULT_TIMEOUT);
     const signal = init.signal === undefined ? timeout : AbortSignal.any([timeout, init.signal]);
 
     let response: Response;
     try {
-      response = await this.doFetch(url, {
+      response = await this.#doFetch(url, {
         method,
         headers,
         ...(init.body === undefined ? {} : { body: init.body }),
@@ -223,7 +371,7 @@ export class WebDavClient {
   }
 
   private authHeader(): Record<string, string> {
-    const auth = this.config.auth;
+    const auth = this.#auth;
     if (auth === undefined || auth.kind === 'none') return {};
     if (auth.kind === 'bearer') return { authorization: `Bearer ${auth.token ?? ''}` };
     const pair = `${auth.username ?? ''}:${auth.password ?? ''}`;
@@ -302,6 +450,16 @@ export class WebDavClient {
     return entries;
   }
 }
+
+/**
+ * `If-Match` for an ETag, or nothing at all when there is none.
+ *
+ * Never `*`: `If-Match: *` means "as long as something is there", which is precisely the assumption
+ * that cost the Phase 2 review a document. No tag means no precondition, and the caller's own check
+ * is then the only thing standing between it and the delete — which it says so in its refusal.
+ */
+const ifMatchHeader = (etag: string | null | undefined): Record<string, string> =>
+  etag === null || etag === undefined || etag === '' ? {} : { 'if-match': `"${etag}"` };
 
 /** `"abc"` and `W/"abc"` are the same version; the quotes and the weak marker are not identity. */
 export const normaliseEtag = (value: string | null): string | null => {

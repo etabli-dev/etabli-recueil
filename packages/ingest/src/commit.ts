@@ -19,11 +19,13 @@
  * with no Item, which `spec/data-model.md` D4 explicitly permits — "an ingested file not yet filed,
  * sitting in the review queue" — and which the resume journal finishes.
  */
-import { InvariantError, NotFoundError, ValidationError } from '@recueil/core';
+import { InvariantError, NotFoundError, ValidationError, schema } from '@recueil/core';
 import type { Actor, Recueil } from '@recueil/core';
 import type { FieldValueContent } from '@recueil/schemas';
+import { and, eq, isNull } from 'drizzle-orm';
 
 import { INGEST_REASON_CODES } from './db/schema.js';
+import { IngestError } from './errors.js';
 import type { ReviewQueueRow } from './db/schema.js';
 import type { ReviewQueueService } from './db/review-queue.js';
 import type { ItemProposal, JsonValue, ProposedCreator } from './types.js';
@@ -41,6 +43,42 @@ export interface CommitInput {
   provenanceSource: string;
   runId?: string;
   sourceStage: string;
+  /**
+   * Refuse to file a document that already carries a live attachment.
+   *
+   * The pipeline sets this; the review-queue accept paths do not, because a person accepting an
+   * entry is making the decision this flag exists to protect against making twice by accident.
+   *
+   * It is the *second* half of the anti-duplication guard, and the half that survives a second
+   * process. `IngestPipeline` serialises same-digest candidates on an in-flight set, which holds
+   * only inside one process; this check is inside the same transaction as `createItem`, so a
+   * second process either reads the first one's committed attachment and refuses here, or — if the
+   * first commits after this transaction took its snapshot — is refused by SQLite when it tries to
+   * upgrade that stale snapshot to a write (`SQLITE_BUSY_SNAPSHOT`). Neither outcome files twice.
+   */
+  refuseIfDocumentFiled?: boolean;
+}
+
+/**
+ * The document already has a live attachment, so filing it again would give one document two items.
+ *
+ * Raised only when `refuseIfDocumentFiled` is set, and raised *inside* the transaction, so nothing
+ * of the second commit survives. The pipeline turns it into a `duplicate` outcome: the bytes are in
+ * the library and filed, which is precisely what stage 2 would have said had it run a moment later.
+ */
+export class DocumentAlreadyFiledError extends IngestError {
+  constructor(
+    readonly documentId: string,
+    readonly itemId: string,
+    readonly attachmentId: string,
+  ) {
+    super(
+      `Document '${documentId}' is already filed as item '${itemId}' through attachment ` +
+        `'${attachmentId}', so it was not filed a second time.`,
+      'document_already_filed',
+      { documentId, itemId, attachmentId },
+    );
+  }
 }
 
 export interface CommitResult {
@@ -58,6 +96,24 @@ export const commitProposal = (input: CommitInput): CommitResult => {
   const { recueil, proposal, actor } = input;
 
   return recueil.db.transaction((): CommitResult => {
+    // Inside the transaction, before anything is written: the question stage 2 asked, asked again
+    // at the only moment where the answer and the write are atomic. See `refuseIfDocumentFiled`.
+    if (input.refuseIfDocumentFiled === true) {
+      const filed = recueil.db
+        .select({ id: schema.attachments.id, itemId: schema.attachments.itemId })
+        .from(schema.attachments)
+        .where(
+          and(
+            eq(schema.attachments.documentId, input.documentId),
+            isNull(schema.attachments.trashedAt),
+          ),
+        )
+        .get();
+      if (filed !== undefined) {
+        throw new DocumentAlreadyFiledError(input.documentId, filed.itemId, filed.id);
+      }
+    }
+
     const warnings: string[] = [];
     const itemType = proposal.itemType ?? 'document';
 

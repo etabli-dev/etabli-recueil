@@ -76,6 +76,17 @@ limits carry forward: the OCRmyPDF adapter exists but has never been run against
 here, and the decision to OCR is taken per document rather than per page, so a scanned page inside an
 otherwise digital PDF is missed.
 
+**The hardening round sits between here and Phase 3.** An adversarial review of the shipped
+ingestion path returned twenty-one reproduced findings that the suite had not — a watched-folder
+original deleted without checking it was still the file that had been read, archive and PDF
+decompression with no bound the attacker did not control, a duplicate check that was not atomic with
+its own commit, and a verification that could not fail. They are closed, they are guarded by
+regression tests each watched going red with its fix reverted, and the audit is in
+[`spec/hardening-2026-08.md`](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/hardening-2026-08.md).
+Two of them became [ADR-0021 and ADR-0022](adr.qmd), which govern every phase after this one.
+Phase 3 builds resolvers, a checks engine and a dedup engine directly on ingestion, so it did not
+start until they were closed.
+
 ## Phase 3 — Enrichment, checks, dedup → M3
 
 The resolver framework across every source, with field-level provenance, merge policy and metrics

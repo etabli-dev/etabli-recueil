@@ -66,6 +66,39 @@ HMAC signature. The event vocabulary is the same one plugins subscribe to: `item
 `item.updated`, `item.merged`, `document.ingested`, `check.completed`, `job.finished`, and the rest
 of the [hook catalogue](plugins.qmd).
 
+## Serving stored bytes
+
+`GET /documents/{id}/content` answers from a sandbox, because the bytes it serves arrived from a
+scanner, a mailbox or a zip file and `documents.mime_type` is, for a whole family of inputs, a type
+the sender chose. Every response carries `X-Content-Type-Options: nosniff` and a restrictive
+`Content-Security-Policy`.
+
+`Content-Disposition: inline` — with the document's real media type — is sent only for the types a
+browser paints rather than executes: PDF, the raster images, and `text/plain`. Everything else,
+**HTML and SVG included**, is served as `application/octet-stream` with
+`Content-Disposition: attachment` and a `Content-Security-Policy` that adds `sandbox` and
+`frame-ancestors 'none'`. `?download=true` asks for `attachment` on a type that would otherwise be
+inline; it does not work the other way round, because the allow-list is the safety decision and the
+disposition is only the caller's preference.
+
+This is what the web reader depends on and it is worth being explicit, because the two ways it reads
+a PDF are affected differently:
+
+- The **PDF.js reader** hands the content URL to PDF.js, which fetches it with XHR and paints into a
+  canvas. A fetch is not a navigation, so no disposition, CSP or `nosniff` applies to it, and
+  `Range` requests still work — which is what keeps the first page fast.
+- The **review preview** embeds `<object data="…/content" type="application/pdf">`, which *is* a
+  navigation. It needs `inline`, the real `application/pdf`, and a `frame-ancestors` that admits the
+  embedding page. All three hold for a PDF; none holds for a document whose filename said `.html`.
+
+`frame-ancestors` is `'self'` plus whatever `RECUEIL_CORS_ORIGIN` names, so a UI served from Vite on
+another port in development can still embed the preview. A wildcard `RECUEIL_CORS_ORIGIN=*` is
+deliberately not honoured here.
+
+`Content-Disposition` filenames are stripped of control characters and sent in both the quoted ASCII
+form and the RFC 5987 `filename*` form, so a name carrying CR or LF — which an archive member name
+may — cannot break the header or make the document unreachable.
+
 ## Analytics: tables, not JSON
 
 Bibliometrics needs columns. Paginating a hundred thousand works through JSON to build a co-citation

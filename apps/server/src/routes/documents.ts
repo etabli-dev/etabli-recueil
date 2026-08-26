@@ -17,6 +17,17 @@
  * file to render page one is a reader nobody uses. The `ETag` is the digest: content-addressed
  * storage gives a perfect, permanently stable validator for free.
  *
+ * **The bytes are served from a sandbox, because they are somebody else's bytes.** `mime_type` is
+ * sniffed rather than trusted, but sniffing has a fall-back, and the fall-back is the *filename's*
+ * extension — a zip member name, or a MIME `filename` parameter. `htm` maps to `text/html`. This
+ * route used to answer with that type and `Content-Disposition: inline`, on the API's own origin,
+ * with no `nosniff` and no CSP, so a zip holding one member called `invoice.html` executed script
+ * against `/api/v1` with the caller's scopes. So: `nosniff` and a restrictive Content-Security-
+ * Policy on every response, and `inline` only for an allow-list of types a browser paints rather
+ * than runs — `INLINE_RENDERABLE`, which has PDF and the raster images on it and has HTML, XHTML
+ * and SVG deliberately off it. Everything else is `attachment` and `application/octet-stream`. The
+ * reader is unaffected and `contentSecurityPolicy` says exactly why.
+ *
  * **Nothing is deleted.** Trashing a document is refused while any live attachment references it
  * (D4/TR3) — detach first — and the blob is never removed, because reclaiming storage is a
  * separate, explicit operation (P5, AT2).
@@ -284,12 +295,29 @@ export const documentRoutes: FastifyPluginAsync = async (app) => {
     reply.header('cache-control', 'private, max-age=31536000, immutable');
     if (isFresh(request, etag)) return reply.code(304).send();
 
-    const filename = document.originalFilename ?? `${document.sha256.slice(0, 12)}`;
+    // The sandbox. See `renderableInline` for why a type the library sniffed is still not a type
+    // this route will let a browser render. Two decisions, not one: `renderable` is the safety
+    // question and governs the media type and the policy; `inline` is the caller's preference and
+    // governs only the disposition, so `?download=true` on a PDF still says `application/pdf`.
+    const renderable = renderableInline(document.mimeType);
+    const inline = renderable && query.download !== true;
+    reply.header('x-content-type-options', 'nosniff');
+    // `X-Frame-Options` for the browsers that predate `frame-ancestors`, and only where the two
+    // cannot disagree: it has no syntax for "this origin and that one", so where the operator has
+    // named cross-origin callers it is left off and the CSP — which every current browser prefers
+    // anyway — is the whole answer.
+    const framedOrigins = Array.isArray(config.corsOrigin) ? config.corsOrigin : [];
+    if (!inline) reply.header('x-frame-options', 'DENY');
+    else if (framedOrigins.length === 0) reply.header('x-frame-options', 'SAMEORIGIN');
+    reply.header('content-security-policy', contentSecurityPolicy(renderable, config.corsOrigin));
     reply.header(
       'content-disposition',
-      `${query.download === true ? 'attachment' : 'inline'}; filename="${filename.replace(/["\\]/gu, '')}"`,
+      contentDisposition(
+        inline ? 'inline' : 'attachment',
+        document.originalFilename ?? document.sha256.slice(0, 12),
+      ),
     );
-    reply.type(document.mimeType);
+    reply.type(renderable ? document.mimeType : 'application/octet-stream');
 
     const range = parseRange(request.headers.range, document.byteSize);
     if (range === 'unsatisfiable') {
@@ -333,6 +361,111 @@ export const documentRoutes: FastifyPluginAsync = async (app) => {
       documentToWire(recueil.documents.restoreDocument(id, request.actor)),
     );
   });
+};
+
+/* -------------------------------------------------------------------------------------------- */
+/* The sandboxed disposition                                                                       */
+/* -------------------------------------------------------------------------------------------- */
+
+/**
+ * The types this route will let a browser render as a document, and nothing else.
+ *
+ * An allow-list rather than a deny-list, because the input is not a type somebody chose from a menu
+ * — it is `documents.mime_type`, and §3.3 sniffs that from the bytes only when the bytes are
+ * recognisable. `sniffMagic` returns `null` for any sequence holding a control character below
+ * 0x09, and `sniffMimeType` then falls back to the *filename's* extension, which came out of a zip
+ * member name or a MIME `filename` parameter. `htm` and `html` map to `text/html`. So the type on
+ * the row is, for a whole family of inputs, exactly what an attacker wrote, and a deny-list would
+ * be a list of the ways in somebody had thought of.
+ *
+ * Nothing scriptable is on it. HTML, XHTML and SVG are all documents with a script context; XML has
+ * one in enough browsers to count. What is left is a set of formats a browser paints: PDF, the
+ * raster images, and plain text, which cannot execute anything once `nosniff` stops the browser
+ * from deciding it is really HTML.
+ *
+ * `application/pdf` is on the list deliberately and the reader depends on it — see
+ * `contentSecurityPolicy`.
+ */
+const INLINE_RENDERABLE: ReadonlySet<string> = new Set([
+  'application/pdf',
+  'image/apng',
+  'image/avif',
+  'image/bmp',
+  'image/gif',
+  'image/jpeg',
+  'image/png',
+  'image/tiff',
+  'image/webp',
+  'text/plain',
+]);
+
+const renderableInline = (mimeType: string): boolean =>
+  INLINE_RENDERABLE.has(mimeType.split(';')[0]?.trim().toLowerCase() ?? '');
+
+/**
+ * The policy the bytes are rendered under.
+ *
+ * **Why the reader still works.** `apps/web` reads a PDF two ways and neither is broken by this.
+ * `src/reader/pdf-reader.tsx` hands the content URL to PDF.js, which fetches it with XHR and paints
+ * into a canvas — a fetch is not a navigation, so no disposition, CSP or `nosniff` applies to it at
+ * all, and `Range` still works, which is what keeps the first page fast. `src/review/
+ * subject-preview.tsx` embeds `<object data={contentUrl} type="application/pdf">`, which *is* a
+ * navigation, and needs three things: `Content-Disposition: inline`, the real `application/pdf`
+ * content type, and a `frame-ancestors` that admits the page doing the embedding. All three hold
+ * for a PDF. An attacker's `text/html` gets none of them.
+ *
+ * `frame-ancestors 'self'` plus the configured CORS origins, because the UI is normally served from
+ * the API's own origin and, in development, from Vite on another port — the origins the operator
+ * has already named as allowed to talk to this API are exactly the ones allowed to frame it. A
+ * wildcard `RECUEIL_CORS_ORIGIN=*` is deliberately *not* honoured here: somebody who opened up XHR
+ * did not thereby ask to be clickjacked.
+ *
+ * The non-inline case adds `sandbox` with no tokens, which is the strongest statement available:
+ * opaque origin, no scripts, no forms, no navigation. It is belt and braces over a response that is
+ * already `attachment` and already `application/octet-stream`, and it costs nothing, because a
+ * download is not rendered.
+ */
+const contentSecurityPolicy = (renderable: boolean, corsOrigin: string[] | boolean): string => {
+  const directives = [
+    "default-src 'none'",
+    "script-src 'none'",
+    "object-src 'none'",
+    "base-uri 'none'",
+    "form-action 'none'",
+  ];
+  if (!renderable) {
+    directives.push("frame-ancestors 'none'", 'sandbox');
+    return directives.join('; ');
+  }
+  const origins = Array.isArray(corsOrigin) ? corsOrigin : [];
+  directives.push(`frame-ancestors 'self'${origins.map((origin) => ` ${origin}`).join('')}`);
+  return directives.join('; ');
+};
+
+/**
+ * A `Content-Disposition` that Node will accept, whatever the archive called the file.
+ *
+ * `documents.original_filename` is attacker-chosen: `packages/ingest/src/archive/safe-path.ts`
+ * rejects NUL, absolute paths and `..`, and permits CR and LF. The previous sanitiser stripped
+ * quotes and backslashes but not those, so `reply.header` threw `ERR_INVALID_CHAR` from inside the
+ * handler — past `sendProblem`, so the caller got a raw Fastify 500 in the second error format the
+ * application's own header warns about, and the document's bytes became permanently unreachable
+ * through the API. A denial of access planted by whoever built the zip. Node's validation was doing
+ * the work the sanitiser was supposed to; here the sanitiser does it.
+ *
+ * Both forms are emitted. The quoted one is ASCII and is what every client can read; `filename*`
+ * carries the real name, which for this user's library is routinely `Rechnung_Müller.pdf`.
+ */
+const contentDisposition = (kind: 'inline' | 'attachment', filename: string): string => {
+  // Control characters first, and from both forms: they are the ones that end the header.
+  const cleaned = filename.replace(/[\u0000-\u001f\u007f]/gu, '').slice(0, 200);
+  const ascii = cleaned.replace(/[^\u0020-\u007e]/gu, '_').replace(/["\\]/gu, '').trim();
+  const encoded = encodeURIComponent(cleaned).replace(
+    /['()*]/gu,
+    (character) => `%${character.codePointAt(0)?.toString(16).toUpperCase() ?? ''}`,
+  );
+  const name = ascii === '' ? 'document' : ascii;
+  return `${kind}; filename="${name}"; filename*=UTF-8''${encoded === '' ? 'document' : encoded}`;
 };
 
 /* -------------------------------------------------------------------------------------------- */
@@ -470,7 +603,13 @@ export const documentPaths: ZodOpenApiPathsObject = {
       description:
         'Supports `Range`, which is what lets a PDF reader fetch the cross-reference table before ' +
         'the first page. The `ETag` is the SHA-256 and the bytes are immutable (D3), so the ' +
-        'representation may be cached indefinitely.',
+        'representation may be cached indefinitely.\n\n' +
+        'Every response carries `X-Content-Type-Options: nosniff` and a restrictive ' +
+        '`Content-Security-Policy`. `Content-Disposition: inline` is sent only for the types a ' +
+        'browser paints rather than runs — PDF, the raster images, plain text; anything else, ' +
+        'including HTML and SVG, is `attachment` and `application/octet-stream`, because the ' +
+        "media type can be derived from a filename the uploader chose. `?download=true` forces " +
+        'the attachment form for the inline types too.',
       tags: DOCUMENT_TAGS,
       scope: 'documents:read',
       requestParams: {

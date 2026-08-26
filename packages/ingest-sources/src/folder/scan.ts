@@ -28,13 +28,28 @@ export interface FolderEntry {
   absolutePath: string;
   byteSize: number;
   mtimeMs: number;
+  /**
+   * `dev/ino` of the file this entry was built from.
+   *
+   * Carried because size and mtime alone cannot tell a rewrite in place from the write-then-rename
+   * a well-behaved producer does: the inode is what distinguishes *this* file from a different one
+   * that has taken its name. `revision.ts` says what it is compared against and when.
+   */
+  inode: string;
 }
 
 export interface FolderScanOptions {
   recursive?: boolean;
   skipHidden?: boolean;
   maxBytes?: number;
-  /** Directory names never descended into: the processed and failed trees of a consume policy. */
+  /**
+   * Directories never descended into: the processed and failed trees of a consume policy.
+   *
+   * An entry with no `/` in it is a *name*, excluded wherever it appears in the tree. An entry with
+   * a `/` in it is a path relative to the root, excluded only at that exact place — which is what
+   * a nested consume destination such as `archive/processed` needs, and what it did not get before
+   * (excluding its first segment hid the whole `archive` tree from every scan).
+   */
   excludeDirectories?: readonly string[];
 }
 
@@ -90,7 +105,7 @@ export const scanFolder = async (
         skipped.push({ externalId: relative, reason: 'the name begins with a dot' });
         continue;
       }
-      if (child.isDirectory() && excluded.has(child.name)) {
+      if (child.isDirectory() && (excluded.has(child.name) || excluded.has(relative))) {
         skipped.push({ externalId: relative, reason: 'the directory is excluded from the scan' });
         continue;
       }
@@ -155,6 +170,7 @@ export const scanFolder = async (
         absolutePath: real,
         byteSize: info.size,
         mtimeMs: info.mtimeMs,
+        inode: `${String(info.dev)}/${String(info.ino)}`,
       });
     }
   };

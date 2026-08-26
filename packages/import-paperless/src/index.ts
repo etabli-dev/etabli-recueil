@@ -133,7 +133,10 @@ export type { AttachmentCorrespondence } from './reconcile.js';
 /* The verification report ---------------------------------------------------------------------------- */
 export { REPORT_SCHEMA } from './report/types.js';
 export type {
+  AsnDeferral,
+  AsnLoss,
   AsnReconciliation,
+  CheckComparison,
   CorrespondentReconciliation,
   CustomFieldReconciliation,
   DocumentCounts,
@@ -151,6 +154,7 @@ export type {
   ReviewEntry,
   SkippedRecord,
   TagReconciliation,
+  UnrepresentableValue,
 } from './report/types.js';
 export { buildReport, readImportLog } from './report/build.js';
 export type { BuildReportInput, ImportLog } from './report/build.js';

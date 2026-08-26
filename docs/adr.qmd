@@ -42,17 +42,21 @@ This page is an index; the files are authoritative.
 | **0018** | [Sandboxing tier: in-process until multi-user](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0018-sandboxing-tier-in-process-until-multi-user.md) | Plugins stay in-process and trusted through 1.0, including after the registry ships. Sandboxing waits for multi-user. | Accepted | Phase 0 (governs Phase 9) |
 | **0019** | [Name: Recueil](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0019-name-recueil.md) | The name is Recueil: a gathered collection of texts, from *cueillir*, to gather. Free on npm, CRAN, PyPI and as a URI scheme. | Accepted | Phase 0 |
 | **0020** | [Systematic-review automation disclosure](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0020-systematic-review-automation-disclosure.md) | Automation disclosure is a per-review setting, off by default, exported with the audit trail when on. | Accepted | Phase 0 (governs Phase 7) |
+| **0021** | [A verification check queries both sides](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0021-a-verification-check-queries-both-sides.md) | Each side of a check comes from an independent source, never from the producing code's own narration, and every blocking check ships with a test that makes it fail. | Accepted | Phase 0 (governs every phase) |
+| **0022** | [Resource budgets on untrusted input](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0022-resource-budgets-on-untrusted-input.md) | Every path that decompresses, parses or pattern-matches attacker-influenced input runs under an explicit budget enforced by the call. Declared sizes inform, never bound. | Accepted | Phase 0 (governs every phase) |
 
 :::
 
 ADRs 0001–0012 are the technology decisions catalogued in
 [CONCEPT.md §5.16](https://github.com/etabli-dev/etabli-recueil/blob/main/CONCEPT.md). ADRs
 0013–0020 resolve the open-decision backlog in §10 — the questions the concept document deliberately
-left open until they blocked something.
+left open until they blocked something. ADRs 0021 and 0022 came out of the August 2026 hardening
+round: each records a fault three independent reviewers found in three separate places, which makes
+it a design rule rather than a set of bugs.
 
 ## Reading them in groups
 
-Twenty records is more than anyone wants to read in order. These are the useful clusters.
+Twenty-two records is more than anyone wants to read in order. These are the useful clusters.
 
 **What the thing is.** [0001](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0001-server-first-architecture.md)
 server-first, [0019](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0019-name-recueil.md)
@@ -79,6 +83,12 @@ the Zotero protocol.
 **Ethics and disclosure.** [0005](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0005-agpl-30-or-later.md)
 the licence, [0020](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0020-systematic-review-automation-disclosure.md)
 automation disclosure in systematic reviews.
+
+**How a claim is made, and what may be trusted.** [0021](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0021-a-verification-check-queries-both-sides.md)
+what a verification check has to do before it may be called one,
+[0022](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0022-resource-budgets-on-untrusted-input.md)
+the budgets every parser and decompressor runs under. Both are cross-cutting and both apply to work
+not yet written.
 
 ## When a change needs an ADR
 

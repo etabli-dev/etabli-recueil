@@ -17,7 +17,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { importPaperless } from '../src/import.js';
 import { renderReportMarkdown } from '../src/report/markdown.js';
 import type { PaperlessImportReport } from '../src/report/types.js';
-import { FIXTURE_EXPECTATIONS, fakePdf } from '../src/testing/fixtures.js';
+import { FIXTURE_EXPECTATIONS, fakePdf, fixtureLibrary } from '../src/testing/fixtures.js';
 import { fixtureImportOptions, makeLibrary, startFixtureServer } from './helpers.js';
 import type { TestLibrary, TestServer } from './helpers.js';
 
@@ -283,10 +283,31 @@ describe('tags', () => {
     expect(names).toStrictEqual(['Energie', 'Wohnung']);
   });
 
-  it('reports a tag id that was not in /api/tags/ rather than dropping it silently', () => {
-    const entry = report.skipped.find((row) => row.kind === 'tag_assignment');
-    expect(entry?.paperlessId).toBe(8);
-    expect(entry?.subject).toMatch(/tag 99/u);
+  it('reports a tag id that was not in /api/tags/ rather than dropping it silently', async () => {
+    // Built here rather than kept in the shared fixture: a document naming a tag `/api/tags/` never
+    // defined is a library whose verification report is correctly FAIL, and the shared fixture is
+    // the one every other test asserts a clean import against. `report-checks.test.ts` asserts the
+    // report fails; this asserts the loss is named rather than dropped.
+    const dangling = fixtureLibrary();
+    const eight = dangling.documents.find((row) => row.id === 8) as { tags: number[] };
+    eight.tags = [99];
+
+    const fresh = makeLibrary();
+    const other = await startFixtureServer({}, dangling);
+    try {
+      const { report: withDangling } = await importPaperless(
+        fresh,
+        fixtureImportOptions(other) as never,
+      );
+
+      const entry = withDangling.skipped.find((row) => row.kind === 'tag_assignment');
+      expect(entry?.paperlessId).toBe(8);
+      expect(entry?.subject).toMatch(/tag 99/u);
+      expect(withDangling.tags.danglingTagIds).toStrictEqual([99]);
+    } finally {
+      await other.close();
+      fresh.dispose();
+    }
   });
 });
 

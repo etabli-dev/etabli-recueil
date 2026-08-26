@@ -178,6 +178,14 @@ export interface AttachmentCoverage {
 }
 
 export interface CollectionReconciliation {
+  /**
+   * Zotero collections with a Recueil collection of the same name, each name consumed once.
+   *
+   * The target side of `collection_parity`. `recueilTotal` below counts the whole target and
+   * cannot be compared for equality, because a library may hold collections this import did not
+   * create — which is why the check used to be a `>=` that no amount of duplication could fail.
+   */
+  matchedByName: number;
   zoteroTotal: number;
   zoteroLive: number;
   zoteroTrashed: number;
@@ -193,6 +201,8 @@ export interface CollectionReconciliation {
 export interface TagReconciliation {
   zoteroTotal: number;
   recueilTotal: number;
+  /** Zotero tags with a live Recueil tag of the same name. The target side of `tag_parity`. */
+  matchedByName: number;
   manual: number;
   automatic: number;
   coloured: number;
@@ -240,6 +250,10 @@ export interface CreatorReconciliation {
   singleField: number;
   zoteroAppearances: number;
   recueilAppearances: number;
+  /** Zotero creator appearances on items that became a Recueil item. */
+  zoteroAppearancesOnImported: number;
+  /** `item_creators` rows on those same items, by query. The two are compared for equality. */
+  recueilAppearancesOnImported: number;
   /** Zotero creator types with no Recueil role of their own, by type. */
   lossyRoles: Record<string, number>;
 }
@@ -269,6 +283,12 @@ export interface TrashReconciliation {
   recueilTrashedNotes: number;
   recueilTrashedAttachments: number;
   recueilTrashedCollections: number;
+  /** Zotero rows marked deleted that became a Recueil item. The left of `trash_parity`. */
+  zoteroDeletedWithItem: number;
+  /** How many of those items are in the Recueil trash, by query. */
+  recueilTrashedFromZotero: number;
+  /** Items this import created that are in the trash although Zotero had not deleted them. */
+  trashedNotDeletedInZotero: number;
   /** Children trashed because their parent was, which Zotero hides but does not list. */
   cascaded: number;
 }

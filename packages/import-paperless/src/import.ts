@@ -77,7 +77,14 @@ import type { DocumentTypeMapping } from './map/document-types.js';
 import { DEFAULT_MISSING_CORRESPONDENT, chooseFacetSources, mapOffice } from './map/office.js';
 import type { FacetSourceNominations, FacetSources } from './map/office.js';
 import { slugify, uniqueSlug } from './map/slug.js';
-import { SOURCE_SYSTEM, documentSourceRef, importedItemIds } from './reconcile.js';
+import {
+  ASN_FIELD_KEY,
+  DOCUMENT_TYPE_FIELD_KEY,
+  SOURCE_SYSTEM,
+  STORAGE_PATH_FIELD_KEY,
+  documentSourceRef,
+  importedItemIds,
+} from './reconcile.js';
 import { buildReport, readImportLog } from './report/build.js';
 import type { OriginalReportEntry, PaperlessImportReport, ReviewEntry, SkippedRecord } from './report/types.js';
 import { writeReport } from './report/write.js';
@@ -90,14 +97,16 @@ type CustomFieldRow = schema.CustomFieldRow;
 /** The provenance source every facet field this importer writes carries (§3.6). */
 export const IMPORT_SOURCE = 'import:paperless';
 
-/** The custom field the Paperless document-type name is carried across in, verbatim. */
-export const DOCUMENT_TYPE_FIELD_KEY = 'paperless_document_type';
-
-/** The custom field the Paperless storage-path name is carried across in. */
-export const STORAGE_PATH_FIELD_KEY = 'paperless_storage_path';
-
-/** The custom field an ASN goes to when another item already holds it in `item_office`. */
-export const ASN_FIELD_KEY = 'paperless_asn';
+/*
+ * The three custom-field keys this importer owns are declared in `reconcile.ts` and re-exported
+ * here, because the verification report has to find their values in the target by key and must not
+ * hold a second copy of the string.
+ */
+export {
+  ASN_FIELD_KEY,
+  DOCUMENT_TYPE_FIELD_KEY,
+  STORAGE_PATH_FIELD_KEY,
+} from './reconcile.js';
 
 export interface PaperlessImportOptions {
   /** The Paperless-ngx root, with or without a trailing `/api`. Ignored when `client` is given. */
@@ -658,12 +667,17 @@ class PaperlessImporter {
           and(
             eq(schema.items.sourceSystem, SOURCE_SYSTEM),
             eq(schema.items.sourceId, String(document.id)),
+            // Live only: a trashed item is not a link target, for the reason `leaveTrashedItemAlone`
+            // gives below.
+            isNull(schema.items.trashedAt),
           ),
         )
         .get();
       if (existing !== undefined) this.itemIdByDocumentId.set(document.id, existing.id);
       return;
     }
+
+    if (this.leaveTrashedItemAlone(document)) return;
 
     const mapping =
       document.document_type === null || document.document_type === undefined
@@ -707,6 +721,60 @@ class PaperlessImporter {
     await this.importOriginal(document, itemId);
 
     this.lastDocumentId = Math.max(this.lastDocumentId, document.id);
+  }
+
+  /**
+   * Leave a document alone whose Recueil item is in the trash, and say so.
+   *
+   * A person who bins two obvious duplicates in the freshly migrated library has done an ordinary
+   * thing, and P9 promises the import can then be re-run until the report is clean. Before this
+   * check existed it could not be: `NoteService.create` and `LibraryService.updateItem` both refuse
+   * a trashed item with `ConflictError`, nothing caught it, and the exception left `importPaperless`
+   * entirely — a failed job, no report at all, and a cursor that never advanced past the offending
+   * document, so every later attempt failed identically. One bin action bricked the importer and
+   * with it the M2 exit artefact.
+   *
+   * Restoring the item would be worse than failing: the trash is a decision a person made about
+   * their own library (P5), and an importer that quietly undid it would be the one thing a
+   * migration tool must never be. So the document is skipped whole — no item write, no tags, no
+   * notes, no values, no original — and it goes into the report as a review entry naming the item.
+   *
+   * The item id is deliberately **not** put into `itemIdByDocumentId`. A `documentlink` pointing at
+   * a trashed item is written as an unresolved link rather than as a foreign key into the trash,
+   * which is the same answer the link stage gives for a document outside the import.
+   */
+  private leaveTrashedItemAlone(document: PaperlessDocument): boolean {
+    const existing = this.recueil.db
+      .select({ id: schema.items.id, trashedAt: schema.items.trashedAt })
+      .from(schema.items)
+      .where(
+        and(
+          eq(schema.items.sourceSystem, SOURCE_SYSTEM),
+          eq(schema.items.sourceId, String(document.id)),
+        ),
+      )
+      .get();
+
+    if (existing === undefined || existing.trashedAt === null) return false;
+
+    this.review({
+      kind: 'item_in_trash',
+      paperlessId: document.id,
+      subject: document.title,
+      reason:
+        `Paperless document ${document.id} was imported before and its Recueil item ` +
+        `${existing.id} has since been put in the trash. The item was left exactly as it is: ` +
+        'nothing was written to it, and it was not restored, because emptying or keeping the ' +
+        'trash is a decision for a person (P5).',
+      proposedAction:
+        'Restore the item and run the import again if the document should come back, or delete it ' +
+        'in Paperless if it should not. Until one of those happens this document is not part of ' +
+        'the verification, and the report says so here rather than counting it as imported.',
+      detail: { paperlessId: document.id, itemId: existing.id, trashedAt: existing.trashedAt },
+    });
+
+    this.lastDocumentId = Math.max(this.lastDocumentId, document.id);
+    return true;
   }
 
   /**

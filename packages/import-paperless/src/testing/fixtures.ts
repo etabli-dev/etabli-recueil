@@ -14,9 +14,17 @@
  * | 5 | An original the server 404s: the item must still be there, with a review entry |
  * | 6 | An ASN Paperless already used on document 1 |
  * | 7 | An original whose bytes do not hash to the MD5 Paperless recorded |
- * | 8 | A `select` value whose option id is not in the field, and a tag id that is not in `/api/tags/` |
+ * | 8 | A `select` value whose option id is not in the field |
  * | 9 | A `documentlink` to a document outside this library |
  * | 10 | Byte-for-byte the same original as document 1 |
+ *
+ * One awkward case is deliberately **not** here: a document carrying a tag id `/api/tags/` never
+ * defined. It used to be, on document 8, and it made this library one whose verification report can
+ * never be clean — because a tag the source will not name cannot be carried under any name, and
+ * `tag_references_resolvable` is blocking for that reason (ADR-0021 §2: an exclusion is a finding,
+ * not a subtraction from both sides). A fixture whose correct answer is FAIL cannot also be the
+ * fixture every other test asserts a clean import against, so the dangling reference has its own
+ * adversarial test in `test/report-checks.test.ts`, where the assertion is that the report fails.
  *
  * The names are German because the install this importer was written for is, and because a
  * bilingual recognition table that is only ever tested in English is a table nobody has tested.
@@ -285,8 +293,7 @@ export const fixtureLibrary = (): FakeLibrary => {
         correspondent: 1,
         document_type: null,
         title: 'Unbekannte Auswahl',
-        // Tag 99 is not in `/api/tags/`: a tag created between the two requests looks like this.
-        tags: [99],
+        tags: [3],
         created: '2024-08-01',
         modified: '2024-08-01T12:00:00.000000+02:00',
         added: '2024-08-01T12:00:00.000000+02:00',

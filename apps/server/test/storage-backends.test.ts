@@ -12,7 +12,7 @@
  */
 import { startFakeWebDavServer } from '@recueil/storage-backends/testing';
 import type { FakeWebDavServer } from '@recueil/storage-backends/testing';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { TEST_SECRET_KEY, body, harness } from './helpers.js';
 import type { Harness } from './helpers.js';
@@ -30,12 +30,17 @@ describe('/api/v1/storage/backends', () => {
 
   beforeEach(async () => {
     server = await startFakeWebDavServer({ auth: { kind: 'basic', username: 'rh', password: 's3cret' } });
+    // The fake is on loopback, which `EgressGuard` refuses unless the operator has said that
+    // reaching their own network is deliberate — a store on a NAS is the ordinary case for this.
+    // The refusal itself is asserted in its own test below, without this line.
+    vi.stubEnv('RECUEIL_INGEST_ALLOW_PRIVATE_TARGETS', 'true');
     h = await harness({ env: { RECUEIL_SECRET_KEY: TEST_SECRET_KEY } });
   });
 
   afterEach(async () => {
     await h.close();
     await server.close();
+    vi.unstubAllEnvs();
   });
 
   const create = async (overrides: Record<string, unknown> = {}) =>
@@ -166,6 +171,48 @@ describe('/api/v1/storage/backends', () => {
 
     expect(result.status).toBe('failed');
     expect(result.checks.find((check) => check.check === 'read')?.ok).toBe(false);
+  });
+
+  /**
+   * The same SSRF the ingestion sources had, in the other place the review found it: a storage
+   * backend `url` and an S3 `endpoint` were `z.url()` and nothing else, reachable with
+   * `storage:write`.
+   *
+   * The check is at `buildBackend` rather than at `create`, and deliberately: `create` is
+   * synchronous, and a form-time check is not what stops a name rebinding anyway. So the row is
+   * written and every probe of it is refused, which is the enforcement that matters.
+   */
+  it('refuses to probe a store on an address the operator has not opted in to', async () => {
+    vi.unstubAllEnvs();
+    const guarded = await harness({ env: { RECUEIL_SECRET_KEY: TEST_SECRET_KEY } });
+    try {
+      const created = await guarded.app.inject({
+        method: 'POST',
+        url: '/api/v1/storage/backends',
+        payload: {
+          name: 'Nextcloud',
+          config: { kind: 'webdav', url: server.url, username: 'rh', authKind: 'basic' },
+          secret: { password: 's3cret' },
+        },
+      });
+      const id = body<{ id: string }>(created).id;
+      const before = server.requests.length;
+
+      const result = body<HealthResult>(
+        await guarded.app.inject({
+          method: 'POST',
+          url: `/api/v1/storage/backends/${id}/health`,
+          payload: { mode: 'read' },
+        }),
+      );
+      expect(result.status).toBe('failed');
+      expect(result.checks[0]?.check).toBe('configure');
+      expect(result.checks[0]?.detail).toMatch(/loopback/iu);
+      // Nothing was sent, so the probe is not a port scanner either.
+      expect(server.requests.length).toBe(before);
+    } finally {
+      await guarded.close();
+    }
   });
 
   it('refuses two backends with the same name', async () => {

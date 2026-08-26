@@ -54,20 +54,36 @@ What has been exercised end to end here:
 - **The web client** is a keyboard-first three-pane library with an item pane, a
   PDF.js reader, a sources screen, a review workspace and a rules editor, covered
   by a Playwright suite that drives the built bundle against a real server.
-- 2 190 unit and integration tests across the twelve packages and apps that have
+- 2 316 unit and integration tests across the twelve packages and apps that have
   them (`pnpm -r test`, all passing), plus the Playwright suite
   (`pnpm --filter @recueil/web run test:e2e`). Not one of them needs a container:
   OCR, GROBID, Paperless-ngx, WebDAV, S3 and IMAP are each behind an interface
   with an in-process fake.
 
+### The hardening round
+
+An adversarial review between Phase 2 and Phase 3 returned 8 critical, 8 major and
+5 minor findings, every one reproduced by a runnable script and none of them found
+by the suite. They are recorded verbatim in
+[`spec/findings-phase-2.md`](spec/findings-phase-2.md) and the round that closed
+them is [`spec/hardening-2026-08.md`](spec/hardening-2026-08.md), which carries a
+per-defect audit: what closed it, and which test was watched going red with the fix
+reverted. Two of the findings recurred across independent reviewers, which made
+them design faults rather than mistakes, and both are now binding ADRs —
+[0021](spec/adr/0021-a-verification-check-queries-both-sides.md), a verification
+check queries both sides, and
+[0022](spec/adr/0022-resource-budgets-on-untrusted-input.md), resource budgets on
+untrusted input. Three minor findings remain open and are named in that document.
+
 ### Phase 2, measured
 
 The M2 exit criteria were rehearsed against the repository's own fixtures, in
-throwaway libraries, with no container anywhere:
+throwaway libraries, with no container anywhere, and re-run after the hardening
+round:
 
 | Criterion | Result |
 |---|---|
-| Scanner → searchable item, zero manual steps | **Yes.** Folder source configured over `POST /api/v1/ingestion/sources`, `fixtures/scans/*.pdf` dropped in, `recueil ingest watch` running: 6/6 items, 0 to review, every one found by a word carried only by its text layer. 1.6 s and 1.9 s from drop to searchable, over two runs on this machine. |
+| Scanner → searchable item, zero manual steps | **Yes.** Folder source configured over `POST /api/v1/ingestion/sources`, `fixtures/scans/*.pdf` dropped in, `recueil ingest watch` running: 6/6 items, 0 to review, every one found again through `GET /search` by a word carried only by its own text layer or its own recognised text, and every hit resolving to exactly the item that file became. 1.6 s and 1.9 s from drop to searchable, over two runs on this machine. Re-run under `consume: delete` after the hardening round, the watched folder empties with no refused acknowledgement. |
 | Mail → library | **Yes.** All eight `fixtures/mail/*.eml` through an in-process IMAP server: attachments became documents under the names the messages gave them, bodies became notes, a nested forward was descended into, and rules by sender were applied. |
 | Paperless import verified | **Yes, against the fixture corpus.** `PASS`, 11/11 documents, 90.9 % original hash coverage with the one unfetchable file explained, 1 review entry. |
 | Storage backends interchangeable | **Yes.** LocalFs, WebDAV and S3, 16 cases each, all passing. |

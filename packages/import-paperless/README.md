@@ -224,10 +224,23 @@ The same shape as the Zotero importer's, and built on the same rule:
 
 `job_logs` *is* read — for the reasons: why an original could not be fetched, why a value could not be
 represented, what a review entry suggests doing. Never for a number a check compares. That distinction
-is what the Phase 1 review paid for, and `test/report.test.ts` exists to keep it honest: it damages
-the target library ten different ways — rewrites every `item_type`, deletes an item, orphans a blob,
-drops a tag, drifts the trashed mirror so two live items share an ASN — and asserts that the report
-notices each one. A check that cannot fail is worse than no check.
+is what the Phase 1 review paid for, and the Phase 2 review found it broken again in three blocking
+checks, so it is now enforced three ways (ADR-0021):
+
+- **`pass` is derived from the two numbers the table prints**, through one `check()` helper. The
+  Phase 2 review quoted `PASS asn_preserved expected=6 actual=0`; a verdict that disagrees with its
+  own numbers is no longer expressible.
+- **Every exclusion is a named finding.** A tag id the documents carry that `/api/tags/` never
+  defined, a custom field id `/api/custom_fields/` never defined, a value the source's own field
+  definition gives no meaning to, an item a person has put in the trash: each has its own listed
+  entry, and the first two have their own blocking check. The alternative — subtracting the loss
+  from both sides and calling the remainder parity — is how a report comes to say PASS over a
+  library that lost every one of its tags.
+- **Every blocking check has a falsification test.** `test/report-checks.test.ts` breaks the target
+  (or the source) in the way each check exists to detect and asserts the check FAILS, and its first
+  test asserts that the set of checks with a falsification is exactly the set of blocking checks the
+  report emits — so a check added without one turns the suite red naming it. It also stuffs the job
+  log with fabricated `skipped` records over a damaged target and asserts the report stays red.
 
 Three artefacts, when `reportDirectory` is given:
 
@@ -235,11 +248,27 @@ Three artefacts, when `reportDirectory` is given:
 - `report.md` — the same numbers for a person, rendered from the JSON so the two cannot drift.
 - `_REVIEW/` — one file per thing that needs a decision, plus an index.
 
-The blocking checks are: document-count parity, a complete document list, item-type fidelity, one
-attachment row per stored blob, every document accounted for as stored-or-explained, ASN preservation,
-ASN uniqueness, tags and their assignments, custom-field definitions and values, and notes. A missing
-*file* is **not** blocking — CONCEPT §6 asks for a document whose original cannot be fetched to go to
-the review queue with a reason, not for the run to fail — while a missing *record* is.
+The fifteen blocking checks are `document_count_parity`, `document_list_complete`,
+`item_type_fidelity`, `attachment_records_carried`, `originals_accounted_for`, `asn_preserved`,
+`asn_carried_to_facet`, `asn_unique`, `tags_carried`, `tag_references_resolvable`,
+`tag_assignments_carried`, `custom_fields_defined`, `custom_field_references_resolvable`,
+`custom_field_values_carried` and `notes_carried`. Every one of them asserts **equality**; a
+blocking check with an inequality is refused by a test. A missing *file* is **not** blocking —
+CONCEPT §6 asks for a document whose original cannot be fetched to go to the review queue with a
+reason, not for the run to fail — while a missing *record* is.
+
+Two of them are worth stating plainly, because they decide whether a migration can be signed off:
+
+- **`asn_carried_to_facet`** fails when an archive serial number did not reach `item_office.asn`.
+  The one allowance is an ASN Paperless itself put on two documents — where the source contradicts
+  §6's own premise and no importer can satisfy it. An ASN that lost to an item already in the
+  library is **not** an allowance: that conflict is resolvable, and it has to be resolved before
+  the physical filing index means anything. `asn_preserved` beside it asserts that no number was
+  destroyed on the way, by querying `paperless_asn` rather than by counting review entries.
+- **`tag_references_resolvable`** and **`custom_field_references_resolvable`** fail when a document
+  names a tag or a field the vocabulary endpoints did not return. That is the case the Phase 2
+  review used to produce a green report over a library that lost all four of its tags and all
+  nineteen of its custom-field values.
 
 ---
 
@@ -249,6 +278,15 @@ Every write is keyed by something Paperless owns: an item by `(source_system, so
 by the SHA-256 of its bytes, a tag by its name, a custom field by its key, a value by its
 `(field, item, group, ordinal)` slot, a note by its item and its text. Running the import twice
 produces the same library, not a doubled one.
+
+A re-run over an item a person has since put in the trash **completes and reports it**. It is not
+written to and it is not restored — emptying or keeping the trash is a decision for a person (P5) —
+and the document is excluded from both sides of every count with `documents.trashedInRecueil` and
+the `items_not_in_trash` check saying so. Before this, `NoteService.create` refused the trashed item
+with a `ConflictError` that left `importPaperless` entirely: a failed job, no report at all, and a
+cursor that never moved, so every later attempt failed identically at the same document.
+`test/trashed-reimport.test.ts` runs the import four times over two binned items and asserts the
+report is clean each time.
 
 A second run also **compares before writing**. `items.version` is the REST ETag, so a re-run that
 rewrote every unchanged row would invalidate every client's conditional-write token while changing

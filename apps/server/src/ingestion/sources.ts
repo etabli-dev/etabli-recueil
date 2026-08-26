@@ -14,6 +14,25 @@
  * from its own column, so listing sources needs no key at all. A server with no `RECUEIL_SECRET_KEY`
  * can still hold and list a source that needs no credential.
  *
+ * **A URL is an address, never a credential.** `https://user:pass@host/dav/` is the form a great
+ * many people paste, and `z.url()` accepts it happily. Left alone the password is stored in
+ * cleartext in `ingestion_sources.config`, returned verbatim by `GET /ingestion/sources`, and
+ * interpolated into every error a WebDAV client raises — the Phase 2 review got it back twice in
+ * one `test-connection` body. So the userinfo is split off at ingress, before anything is stored:
+ * the address goes into `config.url` and the secret goes into the same AES-256-GCM box as every
+ * other credential. `sourceToWire` strips it again on the way out, because a row written by an
+ * older build is a real possibility, and `redactFor` scrubs the stored plaintext out of every
+ * `detail`, log line and `last_error` this service produces. Three layers, because a credential
+ * that escapes once is a credential that has to be rotated.
+ *
+ * **Where the server may connect is not the caller's decision.** A source URL comes out of a
+ * request body, so an unrestricted one makes the server a proxy into its own loopback interface and
+ * its operator's network — the review reached a metadata endpoint on `127.0.0.1` and got the
+ * response body back in a check `detail`. `EgressGuard` (see `egress.ts`) refuses loopback,
+ * link-local, unique-local, multicast and private ranges, at the socket rather than at the form, so
+ * a name that rebinds between the two gains nothing. `RECUEIL_INGEST_ALLOW_PRIVATE_TARGETS=true` is
+ * the operator's opt-in for a NAS that really is on 192.168.1.x.
+ *
  * **A test is a set of checks, not an opinion.** `testConnection` returns each thing it tried with
  * what happened, and `ok` is the conjunction of those rows. A caller is never told "connected" by
  * something that only constructed a client object.
@@ -28,6 +47,8 @@ import type { ConsumePolicy, IngestSource } from '@recueil/ingest-sources';
 import { and, asc, eq } from 'drizzle-orm';
 import * as z from 'zod';
 
+import { EgressGuard } from './egress.js';
+import type { HostResolver } from './egress.js';
 import { SecretBox, SecretsUnavailableError } from './secrets.js';
 import { ingestionSources } from './tables.js';
 import type { IngestionSourceRow } from './tables.js';
@@ -54,6 +75,13 @@ export interface SourceServiceOptions {
   readonly allowedRoots: readonly string[];
   /** Swapped by the tests, so a WebDAV check can run against an in-process fake. */
   readonly fetch?: typeof fetch;
+  /**
+   * `RECUEIL_INGEST_ALLOW_PRIVATE_TARGETS`. Off unless the operator says otherwise, which is what
+   * makes "point the server at 127.0.0.1" a refusal rather than a feature.
+   */
+  readonly allowPrivateTargets?: boolean;
+  /** Swapped by the test that stages a DNS rebinding without owning a domain. */
+  readonly resolve?: HostResolver;
 }
 
 /** The wire shape, assembled without ever touching the ciphertext. */
@@ -87,13 +115,25 @@ export class IngestionSourceService {
 
   private readonly allowedRoots: readonly string[];
 
-  private readonly fetchImpl: typeof fetch | undefined;
+  /**
+   * The one way out of this process.
+   *
+   * Every WebDAV request this service makes goes through `egress.fetch`, including the ones a test
+   * points at an in-process fake, so there is no configuration in which the address rule is not
+   * running. `fetch` is not held separately: a second reference to the unguarded one would be a
+   * second way out.
+   */
+  private readonly egress: EgressGuard;
 
   constructor(options: SourceServiceOptions) {
     this.recueil = options.recueil;
     this.secrets = options.secrets;
     this.allowedRoots = options.allowedRoots;
-    this.fetchImpl = options.fetch;
+    this.egress = new EgressGuard({
+      allowPrivateTargets: options.allowPrivateTargets ?? allowPrivateTargetsFromEnvironment(),
+      ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
+      ...(options.resolve === undefined ? {} : { resolve: options.resolve }),
+    });
   }
 
   /* ---- reading ----------------------------------------------------------------------------- */
@@ -116,11 +156,15 @@ export class IngestionSourceService {
   /* ---- writing ------------------------------------------------------------------------------ */
 
   async create(input: SourceCreate, actor: Actor): Promise<IngestionSourceRow> {
-    const config = await this.checkConfig(input.config);
+    const checked = await this.checkConfig(input.config);
+    const config = checked.config;
     const consume = await this.checkConsume(config, input.consume);
     this.assertNameFree(input.name, null);
 
-    const secret = this.sealSecret(input.secret, input.config.kind);
+    const secret = this.sealSecret(
+      mergeUrlCredentials(input.secret, checked.urlCredentials),
+      input.config.kind,
+    );
     const now = nowTimestamp();
     const row: IngestionSourceRow = {
       id: newId(),
@@ -169,20 +213,24 @@ export class IngestionSourceService {
       );
     }
 
-    const config =
+    const checked =
       input.config === undefined
-        ? (JSON.parse(existing.config) as SourceConfig)
+        ? { config: this.configOf(existing), urlCredentials: null }
         : await this.checkConfig(input.config);
+    const config = checked.config;
     const consume =
       input.consume === undefined
         ? { mode: existing.consumeMode, ...(existing.consumeTo === null ? {} : { to: existing.consumeTo }) }
         : await this.checkConsume(config, input.consume);
     if (input.name !== undefined) this.assertNameFree(input.name, id);
 
+    // A password that arrived in the URL is a password the caller supplied, so it seals like any
+    // other. Where neither an explicit secret nor a URL carried one, the stored ciphertext stands.
+    const supplied = mergeUrlCredentials(input.secret, checked.urlCredentials);
     const secret =
-      input.secret === undefined
+      supplied === undefined
         ? { ciphertext: existing.secretCiphertext, names: JSON.parse(existing.secretNames) as string[] }
-        : this.sealSecret(input.secret, existing.kind);
+        : this.sealSecret(supplied, existing.kind);
 
     const now = nowTimestamp();
     const patch = {
@@ -257,12 +305,14 @@ export class IngestionSourceService {
           entityType: 'ingestion_source',
           entityId: id,
           // The ciphertext is deliberately not copied into the log: the log is the artefact most
-          // likely to be exported, and an audit row is not a backup of a credential.
+          // likely to be exported, and an audit row is not a backup of a credential. `configOf`
+          // for the same reason — a legacy row's URL may carry one, and an audit row that
+          // preserves it outlives the source it was removed with.
           before: {
             name: existing.name,
             kind: existing.kind,
             sourceKind: existing.sourceKind,
-            config: JSON.parse(existing.config) as unknown,
+            config: this.configOf(existing) as unknown,
             consumeMode: existing.consumeMode,
             consumeTo: existing.consumeTo,
             secretNames: JSON.parse(existing.secretNames) as unknown,
@@ -274,14 +324,22 @@ export class IngestionSourceService {
     });
   }
 
-  /** Record the outcome of a run against the source, so the list view can show it. */
+  /**
+   * Record the outcome of a run against the source, so the list view can show it.
+   *
+   * `last_error` is a stored, API-visible copy of an exception message from somewhere below this
+   * package, so it is redacted before it is written rather than before it is read: a secret in a
+   * column is a secret in every backup of that column.
+   */
   recordRun(id: string, outcome: { jobId: string; at: string; error?: string }): void {
+    const error =
+      outcome.error === undefined ? null : this.redactFor(this.get(id), outcome.error);
     this.recueil.db
       .update(ingestionSources)
       .set({
         lastRunJobId: outcome.jobId,
         lastRunAt: outcome.at,
-        lastError: outcome.error ?? null,
+        lastError: error,
         updatedAt: nowTimestamp(),
       })
       .where(eq(ingestionSources.id, id))
@@ -297,7 +355,7 @@ export class IngestionSourceService {
    * socket and a state cursor, and handing two runs the same one would have them fight over both.
    */
   buildSource(row: IngestionSourceRow): IngestSource {
-    const config = JSON.parse(row.config) as SourceConfig;
+    const config = this.configOf(row);
     const secrets = this.openSecret(row);
     const consume: ConsumePolicy =
       row.consumeMode === 'move'
@@ -332,7 +390,9 @@ export class IngestionSourceService {
         ...(config.recursive === undefined ? {} : { recursive: config.recursive }),
         ...(config.maxDepth === undefined ? {} : { maxDepth: config.maxDepth }),
         ...(config.timeoutMillis === undefined ? {} : { timeoutMillis: config.timeoutMillis }),
-        ...(this.fetchImpl === undefined ? {} : { fetch: this.fetchImpl }),
+        // Always the guarded one. A poll runs unattended, hours after the configuration was
+        // checked, which is exactly when a rebind pays.
+        fetch: this.egress.fetch,
       });
     }
 
@@ -362,10 +422,16 @@ export class IngestionSourceService {
    * has been switched off, which makes it worse than no check.
    */
   async testConnection(row: IngestionSourceRow, signal?: AbortSignal): Promise<ConnectionCheck[]> {
-    const config = JSON.parse(row.config) as SourceConfig;
-    if (config.kind === 'folder') return this.testFolder(config.root, row.consumeTo);
-    if (config.kind === 'webdav') return this.testWebDav(row, config, signal);
-    return this.testImap(row, config);
+    const config = this.configOf(row);
+    const checks =
+      config.kind === 'folder'
+        ? await this.testFolder(config.root, row.consumeTo)
+        : config.kind === 'webdav'
+          ? await this.testWebDav(row, config, signal)
+          : await this.testImap(row, config);
+    // One place, on the way out, rather than at each of the fourteen sites that build a `detail`:
+    // a redaction that has to be remembered is a redaction that will be forgotten.
+    return checks.map((check) => ({ ...check, detail: this.redactFor(row, check.detail) }));
   }
 
   private async testFolder(root: string, consumeTo: string | null): Promise<ConnectionCheck[]> {
@@ -427,7 +493,7 @@ export class IngestionSourceService {
       url: config.url,
       auth: webDavAuth(config.authKind, config.username, secrets),
       ...(config.timeoutMillis === undefined ? {} : { timeoutMillis: config.timeoutMillis }),
-      ...(this.fetchImpl === undefined ? {} : { fetch: this.fetchImpl }),
+      fetch: this.egress.fetch,
     });
 
     try {
@@ -575,28 +641,54 @@ export class IngestionSourceService {
     return resolved;
   }
 
-  private async checkConfig(config: SourceConfig): Promise<SourceConfig> {
+  /**
+   * Everything that has to be true of a configuration before it is written down.
+   *
+   * Returns the credentials it took out of the URL rather than storing them itself, because the
+   * only correct place for them is the same sealed box every other credential lives in and this
+   * method has no business writing rows.
+   */
+  private async checkConfig(
+    config: SourceConfig,
+  ): Promise<{ config: SourceConfig; urlCredentials: UrlCredentials | null }> {
     if (config.kind === 'folder') {
       const real = await this.resolveRoot(config.root);
       const info = await stat(real);
       if (!info.isDirectory()) {
         throw new ValidationError(`'${real}' is not a directory.`, { path: 'config.root' });
       }
-      return { ...config, root: real };
+      return { config: { ...config, root: real }, urlCredentials: null };
     }
 
     if (config.kind === 'webdav') {
-      const url = new URL(config.url);
-      if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      let split: { url: URL; credentials: UrlCredentials | null };
+      try {
+        split = splitUserinfo(config.url);
+      } catch {
+        throw new ValidationError(`'${config.url}' is not a URL.`, { path: 'config.url' });
+      }
+      if (split.url.protocol !== 'http:' && split.url.protocol !== 'https:') {
         throw new ValidationError(
-          `A WebDAV collection must be http or https; '${url.protocol}' is neither.`,
+          `A WebDAV collection must be http or https; '${split.url.protocol}' is neither.`,
           { path: 'config.url' },
         );
       }
-      return config;
+      // The address, never the string that was sent: nothing downstream should have to remember
+      // that `config.url` might still carry a password.
+      await this.egress.checkAtConfigTime(split.url.toString(), 'config.url');
+      return {
+        config: {
+          ...config,
+          url: split.url.toString(),
+          ...(split.credentials === null || config.username !== undefined
+            ? {}
+            : { username: split.credentials.username, authKind: 'basic' as const }),
+        },
+        urlCredentials: split.credentials,
+      };
     }
 
-    return config;
+    return { config, urlCredentials: null };
   }
 
   private async checkConsume(
@@ -658,6 +750,38 @@ export class IngestionSourceService {
     };
   }
 
+  /**
+   * The stored configuration, with any userinfo an older build wrote taken back off the URL.
+   *
+   * Every read of `row.config` in this class goes through here. A row written before the ingress
+   * split existed still carries `https://user:pass@host/dav/`, and the guarantee "a credential
+   * never comes back" has to hold for those rows too — not only for the ones created since.
+   */
+  configOf(row: IngestionSourceRow): SourceConfig {
+    return sanitiseConfig(JSON.parse(row.config) as SourceConfig);
+  }
+
+  /**
+   * Take this source's stored secrets out of a string that is about to leave the process.
+   *
+   * The point is not that any particular message is known to carry one. It is that a `detail`, a
+   * job log line and a `last_error` are all assembled from an exception raised somewhere below
+   * this package, and "does that library interpolate the password" is not a question this service
+   * can keep answering correctly as the libraries change. So it answers it once, here, on the way
+   * out. A secret too short to be distinguishable from ordinary prose is left alone: redacting
+   * every `a` would destroy the message and protect nothing.
+   */
+  redactFor(row: IngestionSourceRow, text: string): string {
+    let secrets: Record<string, string>;
+    try {
+      secrets = this.openSecret(row);
+    } catch {
+      // No key, so no plaintext — and equally, nothing below could have interpolated one.
+      return text;
+    }
+    return redact(text, Object.values(secrets));
+  }
+
   private openSecret(row: IngestionSourceRow): Record<string, string> {
     if (row.secretCiphertext === null) return {};
     if (!this.secrets.available) {
@@ -670,14 +794,21 @@ export class IngestionSourceService {
   }
 }
 
-/** The wire shape. Takes the row and nothing else, so there is no path to a plaintext secret. */
+/**
+ * The wire shape. Takes the row and nothing else, so there is no path to a plaintext secret.
+ *
+ * "No path to the ciphertext" was never quite the same as "no path to a credential": the `url`
+ * field was outside that guarantee until the ingress split, and a row written by an older build
+ * still carries whatever was pasted into it. `sanitiseConfig` is therefore applied here as well as
+ * at ingress — this function is the last thing between the row and the response body.
+ */
 export const sourceToWire = (row: IngestionSourceRow): SourceWire => ({
   id: row.id,
   name: row.name,
   kind: row.kind,
   enabled: row.enabled,
   sourceKind: row.sourceKind as DocumentSourceKind,
-  config: JSON.parse(row.config) as SourceConfig,
+  config: sanitiseConfig(JSON.parse(row.config) as SourceConfig),
   consume: {
     mode: row.consumeMode,
     ...(row.consumeTo === null ? {} : { to: row.consumeTo }),
@@ -720,3 +851,95 @@ export const isInside = (root: string, candidate: string): boolean => {
 
 const describe = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
+
+/* -------------------------------------------------------------------------------------------- */
+/* Credentials that arrived somewhere they should not have                                         */
+/* -------------------------------------------------------------------------------------------- */
+
+/** What a `user:pass@` prefix carried, decoded. */
+export interface UrlCredentials {
+  readonly username: string;
+  readonly password: string;
+}
+
+/**
+ * Split a URL into the part that may be stored and the part that may not.
+ *
+ * `URL` keeps userinfo percent-encoded — a password with an `@` or a `:` in it has to be written
+ * that way — so it is decoded here rather than passed on as typed. `WebDavClient` makes the same
+ * split for its own protection; this one exists because the decision has to be made *before* a row
+ * is written, and a client the row is built from is too late.
+ */
+export const splitUserinfo = (raw: string): { url: URL; credentials: UrlCredentials | null } => {
+  const url = new URL(raw);
+  if (url.username === '' && url.password === '') return { url, credentials: null };
+  const credentials: UrlCredentials = {
+    username: decodeURIComponent(url.username),
+    password: decodeURIComponent(url.password),
+  };
+  url.username = '';
+  url.password = '';
+  return { url, credentials };
+};
+
+/** Strip userinfo from whatever address a stored configuration carries. */
+export const sanitiseConfig = (config: SourceConfig): SourceConfig => {
+  if (config.kind !== 'webdav') return config;
+  try {
+    return { ...config, url: splitUserinfo(config.url).url.toString() };
+  } catch {
+    // Not a URL at all. Returning it unchanged is right: it holds no credential to leak, and a
+    // configuration this service cannot parse is something the operator has to be able to see.
+    return config;
+  }
+};
+
+/**
+ * Fold a password taken out of a URL into the secret the caller sent, without overwriting one.
+ *
+ * An explicit `secret.password` wins: somebody who filled in both fields meant the field, and
+ * silently preferring the one they pasted into the address bar would be a surprising place to lose
+ * a credential.
+ */
+const mergeUrlCredentials = (
+  secret: SourceCreate['secret'],
+  credentials: UrlCredentials | null,
+): SourceCreate['secret'] => {
+  if (credentials === null || credentials.password === '') return secret;
+  if (secret?.['password'] !== undefined && secret['password'] !== '') return secret;
+  return { ...(secret ?? {}), password: credentials.password };
+};
+
+/**
+ * Replace every occurrence of a stored secret, in the forms it plausibly travels in.
+ *
+ * Two forms per secret: itself, and percent-encoded, which is how it looks once something has put
+ * it back into a URL. Anything shorter than three characters is left alone — see `redactFor`.
+ *
+ * Plus one form that belongs to no particular secret: an `Authorization` header value. Basic
+ * carries `base64(user:pass)`, so the password is in there but the *password* is not the string to
+ * search for, and Bearer carries a token this service may not even hold. Both are scrubbed
+ * wholesale by shape, because there is no case in which the correct thing to do with a credential
+ * header quoted back inside an exception is to print it.
+ */
+export const redact = (text: string, secrets: readonly string[]): string => {
+  let out = text.replace(/\b(Basic|Bearer)\s+[\w+/=._~-]+/giu, '$1 [redacted]');
+  for (const secret of secrets) {
+    if (secret.length < 3) continue;
+    for (const form of [secret, encodeURIComponent(secret)]) {
+      out = out.split(form).join('[redacted]');
+    }
+  }
+  return out;
+};
+
+/**
+ * The operator's opt-in for deliberately internal targets, read where an operator sets it.
+ *
+ * Read at construction rather than per request: this is a property of the deployment, and a value
+ * that could change between the check and the connection would be one more thing to race.
+ */
+const allowPrivateTargetsFromEnvironment = (): boolean => {
+  const raw = (process.env['RECUEIL_INGEST_ALLOW_PRIVATE_TARGETS'] ?? '').trim().toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
+};

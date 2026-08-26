@@ -109,5 +109,21 @@ export {
   parseHeaderBlock,
 } from './imap/headers.js';
 export type { HeaderMap } from './imap/headers.js';
-export { mailRuleMatches, matchingMailRules, skippedBy, toIngestRules } from './imap/rules.js';
-export type { MailEnvelope, MailPattern, MailRule } from './imap/rules.js';
+export {
+  MAIL_RULE_MAX_STEPS,
+  MAIL_RULE_TIMEOUT_MS,
+  evaluateMailRule,
+  evaluateMailRules,
+  mailRuleMatches,
+  matchingMailRules,
+  skippedBy,
+  toIngestRules,
+} from './imap/rules.js';
+export type {
+  MailEnvelope,
+  MailPattern,
+  MailRule,
+  MailRuleEvaluation,
+  MailRuleOutcome,
+  MailRuleRefusal,
+} from './imap/rules.js';
