@@ -54,6 +54,46 @@ import {
 
 export type { TrashOptions } from './trash-record.js';
 
+/* -------------------------------------------------------------------------------------------- */
+/* The archive serial number                                                                       */
+/* -------------------------------------------------------------------------------------------- */
+
+/**
+ * Refuse an ASN that a live item already holds, naming the item that holds it.
+ *
+ * `ux_item_office_asn` — `unique (asn) where asn is not null and item_trashed_at is null` — is and
+ * remains the authority: this function does not enforce uniqueness, it explains it. Without it the
+ * three paths that can bring a number into the live index (creating a facet, updating one, and
+ * restoring a trashed item whose number was taken while it was in the bin) each surfaced a raw
+ * `SqliteError: UNIQUE constraint failed: item_office.asn`, which a caller cannot tell from an
+ * internal fault and which does not say which item is in the way. Every comparable refusal in this
+ * service is a `ConflictError` naming the obstacle, and CONCEPT §6 makes "preserved and unique" a
+ * property an operator has to be able to act on.
+ *
+ * There is no window between the check and the write: both run inside one `better-sqlite3`
+ * transaction, which is synchronous and holds SQLite's writer lock throughout, so nothing can
+ * interleave — and if anything ever did, the partial index still refuses the write.
+ */
+const assertAsnAvailable = (
+  tx: RecueilTransaction,
+  asn: number | null | undefined,
+  exceptItemId: string,
+): void => {
+  if (asn === null || asn === undefined) return;
+  const holder = tx
+    .select({ itemId: itemOffice.itemId })
+    .from(itemOffice)
+    .where(and(eq(itemOffice.asn, asn), isNull(itemOffice.itemTrashedAt)))
+    .get();
+  if (holder === undefined || holder.itemId === exceptItemId) return;
+  throw new ConflictError(
+    `Archive serial number ${asn} is already held by the live item '${holder.itemId}'. An ASN is ` +
+      'unique among live items (ux_item_office_asn); give this one a different number, or trash ' +
+      'or renumber the item that holds it.',
+    { asn, itemId: exceptItemId, heldBy: holder.itemId },
+  );
+};
+
 /** Everything on the bibliographic facet that a caller may write. */
 export type BibliographicInput = Partial<
   Omit<ItemBibliographicRow, 'itemId' | 'itemTrashedAt' | 'createdAt' | 'updatedAt'>
@@ -816,7 +856,16 @@ export class LibraryService {
       let restoredChildren = 0;
       for (const row of siblings) {
         switch (row.entityType) {
-          case 'item':
+          case 'item': {
+            // Bringing an item back re-enters its ASN into the live unique index. A number taken
+            // while the item sat in the bin is an ordinary conflict, not a driver fault.
+            const office = tx
+              .select({ asn: itemOffice.asn })
+              .from(itemOffice)
+              .where(eq(itemOffice.itemId, row.entityId))
+              .get();
+            assertAsnAvailable(tx, office?.asn, row.entityId);
+
             tx.update(items)
               .set({ trashedAt: null, dateModified: now, version: current.version + 1 })
               .where(eq(items.id, row.entityId))
@@ -830,6 +879,7 @@ export class LibraryService {
               .where(eq(itemOffice.itemId, row.entityId))
               .run();
             break;
+          }
           case 'attachment':
             tx.update(attachments)
               .set({ trashedAt: null, updatedAt: now })
@@ -1070,6 +1120,10 @@ export class LibraryService {
     // The normalised mirror follows its source column and is not a field of its own (§1.1).
     if (allowed.includes('correspondent')) {
       writable['correspondentNormalised'] = values['correspondentNormalised'];
+    }
+
+    if (allowed.includes('asn')) {
+      assertAsnAvailable(tx, values['asn'] as number | null | undefined, itemId);
     }
 
     if (current === null) {

@@ -166,9 +166,26 @@ export const CountryCodeSchema = z
   .regex(/^[A-Z]{2}$/, 'must be a two-letter uppercase ISO-3166-1 alpha-2 code')
   .meta({ id: 'CountryCode', title: 'CountryCode', examples: ['DE'] });
 
+/**
+ * The subtag repetition is counted, not open (ADR-0022 §2).
+ *
+ * `(?:-[A-Za-z0-9]{2,8})*` cannot backtrack — every repetition must begin with `-`, which the
+ * class inside it excludes, so the split points are fixed — but it is proportional to the input
+ * rather than to the pattern, and V8's engine recurses on a repeated group: an 11.4 MB value,
+ * inside the server's own 16 MiB body limit, threw `RangeError: Maximum call stack size exceeded`
+ * out of `RegExp.test`, which is to say out of validation, as a 500 rather than a 422. `{0,12}`
+ * makes the work a function of the pattern; the same string now answers `false` in 12 ms.
+ *
+ * The `max()` is a second bound rather than the first one, deliberately: Zod runs every check and
+ * collects the issues, so a length check does not stop the pattern from being applied — which is
+ * exactly how the original defect survived a schema that looked bounded.
+ *
+ * Twelve subtags is far past anything the registry defines: `zh-Hans-CN-x-private` is five.
+ */
 export const LanguageTagSchema = z
   .string()
-  .regex(/^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/, 'must be a BCP-47 language tag')
+  .max(64)
+  .regex(/^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,12}$/, 'must be a BCP-47 language tag')
   .meta({ id: 'LanguageTag', title: 'LanguageTag', examples: ['en-GB'] });
 
 export const UrlSchema = z

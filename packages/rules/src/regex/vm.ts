@@ -13,9 +13,16 @@
  * are there because "linear" still multiplies: a 200 MB extracted text against a 5 000-instruction
  * program is a real cost even without backtracking, and a rule engine that can be made to spend
  * five minutes on one document is still a denial of service.
+ *
+ * The clock is an **absolute deadline** handed in by the caller rather than a stopwatch started
+ * here, because the preparation of the input happens before the first step and has to be inside the
+ * same allowance (see ./input.ts). Building the result — the matched text and the captures — is
+ * inside it too: a `[\s\S]*` over a megabyte materialises a megabyte of substring, and a budget
+ * that stops at the last step would not cover it.
  */
 import { RegexBudgetError, RegexTimeoutError } from './errors.js';
 import type { Inst, Program } from './compile.js';
+import type { CodePointInput } from './input.js';
 import type { Assertion, CodeRange } from './parse.js';
 
 export interface VmOptions {
@@ -23,7 +30,12 @@ export interface VmOptions {
   readonly multiline: boolean;
   /** Hard ceiling on simulation steps for one match attempt. */
   readonly maxSteps: number;
-  /** Wall-clock ceiling in milliseconds, or `undefined` for none. */
+  /**
+   * Absolute epoch milliseconds past which the attempt is abandoned, or `undefined` for no clock.
+   * Absolute rather than a duration so that work done before `runProgram` was called still counts.
+   */
+  readonly deadline: number | undefined;
+  /** The allowance the deadline was derived from. For the error message only. */
   readonly timeoutMs: number | undefined;
   /** For the error messages. */
   readonly pattern: string;
@@ -94,35 +106,40 @@ interface Thread {
 /**
  * Run `program` over `input`, returning the leftmost match or `undefined`.
  *
- * `input` is taken as an array of code points so that positions, and therefore reported spans, are
- * code points rather than UTF-16 units — an astral character is one character to a rule author.
+ * `input` is a random-access sequence of code points rather than a string, so that positions — and
+ * therefore reported spans — are code points and not UTF-16 units: an astral character is one
+ * character to a rule author. It is an interface rather than an array because the common case, a
+ * string with no surrogate in it, needs no array at all (see ./input.ts).
  */
-export const runProgram = (program: Program, input: readonly number[], options: VmOptions): VmMatch | undefined => {
+export const runProgram = (program: Program, input: CodePointInput, options: VmOptions): VmMatch | undefined => {
   const { insts } = program;
   const length = input.length;
   const visited = new Int32Array(insts.length).fill(-1);
-  const started = options.timeoutMs === undefined ? 0 : Date.now();
   let steps = 0;
   let generation = 0;
+
+  const expire = (): void => {
+    if (options.deadline !== undefined && Date.now() > options.deadline) {
+      throw new RegexTimeoutError(options.pattern, options.timeoutMs ?? 0);
+    }
+  };
 
   const spend = (): void => {
     steps += 1;
     if (steps > options.maxSteps) throw new RegexBudgetError(options.pattern, options.maxSteps);
-    if (options.timeoutMs !== undefined && steps % CLOCK_INTERVAL === 0 && Date.now() - started > options.timeoutMs) {
-      throw new RegexTimeoutError(options.pattern, options.timeoutMs);
-    }
+    if (steps % CLOCK_INTERVAL === 0) expire();
   };
 
   const holds = (assertion: Assertion, position: number): boolean => {
     switch (assertion) {
       case 'start':
-        return position === 0 || (options.multiline && isNewline(input[position - 1]));
+        return position === 0 || (options.multiline && isNewline(input.at(position - 1)));
       case 'end':
-        return position === length || (options.multiline && isNewline(input[position]));
+        return position === length || (options.multiline && isNewline(input.at(position)));
       case 'word-boundary':
-        return isWordChar(input[position - 1]) !== isWordChar(input[position]);
+        return isWordChar(input.at(position - 1)) !== isWordChar(input.at(position));
       case 'not-word-boundary':
-        return isWordChar(input[position - 1]) === isWordChar(input[position]);
+        return isWordChar(input.at(position - 1)) === isWordChar(input.at(position));
     }
   };
 
@@ -188,7 +205,7 @@ export const runProgram = (program: Program, input: readonly number[], options: 
       spend();
       const inst = insts[thread.pc] as Inst;
       if (inst.op === 'class') {
-        const codePoint = input[position];
+        const codePoint = input.at(position);
         if (codePoint !== undefined && consumes(inst, codePoint)) {
           addThread(nlist, thread.pc + 1, position + 1, thread.slots);
         }
@@ -209,9 +226,13 @@ export const runProgram = (program: Program, input: readonly number[], options: 
 
   if (matched === undefined) return undefined;
 
+  // Materialising the match is proportional to the match, not to a step, so it gets its own reading
+  // of the clock rather than riding on the last one taken inside the loop.
+  expire();
+
   const start = matched[0]!;
   const end = matched[1]!;
-  const slice = (from: number, to: number): string => input.slice(from, to).map((cp) => String.fromCodePoint(cp)).join('');
+  const slice = (from: number, to: number): string => input.slice(from, to);
   const captures: (string | undefined)[] = [];
   for (let group = 1; group <= program.groupCount; group += 1) {
     const from = matched[group * 2]!;

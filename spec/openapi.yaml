@@ -9882,7 +9882,8 @@ components:
         - DE
     LanguageTag:
       type: string
-      pattern: ^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$
+      maxLength: 64
+      pattern: ^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,12}$
       title: LanguageTag
       examples:
         - en-GB
@@ -12965,6 +12966,7 @@ components:
         wikidataId:
           anyOf:
             - type: string
+              maxLength: 32
               pattern: ^Q\d+$
             - type: 'null'
       required:
@@ -13069,6 +13071,7 @@ components:
         wikidataId:
           anyOf:
             - type: string
+              maxLength: 32
               pattern: ^Q\d+$
             - type: 'null'
       required:
@@ -13165,6 +13168,7 @@ components:
         wikidataId:
           anyOf:
             - type: string
+              maxLength: 32
               pattern: ^Q\d+$
             - type: 'null'
       additionalProperties: false

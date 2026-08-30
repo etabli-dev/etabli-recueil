@@ -60,6 +60,14 @@ export const INGEST_REASON_CODES = {
   ocrFailed: 'ocr_failed',
   ruleConflict: 'rule_conflict',
   ruleRequested: 'rule_requested_review',
+  /**
+   * A rule clause ran out of its regular-expression budget, or would not compile at all.
+   *
+   * Distinct from `rule_conflict`, which is two rules disagreeing about an answer. This is one
+   * rule having *no* answer: the pattern was not evaluated, so filing the document as though it
+   * had not matched would be asserting something nobody checked (ADR-0022 §6, P3).
+   */
+  ruleUnevaluable: 'rule_unevaluable',
   archiveUnreadable: 'archive_unreadable',
   unsafeArchivePath: 'unsafe_archive_path',
   archiveLimitExceeded: 'archive_limit_exceeded',

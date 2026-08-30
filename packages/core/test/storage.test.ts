@@ -7,13 +7,26 @@
  * behind that looks like a blob.
  */
 import { createHash } from 'node:crypto';
-import { existsSync, readdirSync, readFileSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  existsSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { LocalFsBackend, storageKeyFor } from '../src/index.js';
+import {
+  DEFAULT_MAX_BUFFER_BYTES,
+  LocalFsBackend,
+  ResourceBudgetError,
+  storageKeyFor,
+} from '../src/index.js';
 import { makeTempDirectory } from './helpers.js';
 
 const sha256 = (bytes: Buffer): string => createHash('sha256').update(bytes).digest('hex');
@@ -221,5 +234,88 @@ describe('LocalFsBackend', () => {
     const store = backend();
     expect(() => store.path('../../etc/passwd')).toThrow(/Not a SHA-256 digest/u);
     expect(() => store.path('ABC')).toThrow(/Not a SHA-256 digest/u);
+  });
+});
+
+/**
+ * A whole-blob read is a whole-file read into memory, and a library holds four-hundred-megabyte
+ * scans that arrived from a mailbox or a watched folder (ADR-0022 §2).
+ */
+describe('LocalFsBackend.getBuffer is bounded', () => {
+  it('refuses a blob larger than the caller will hold, naming the limit', async () => {
+    const store = backend();
+    const bytes = Buffer.alloc(64 * 1024, 7);
+    const { sha256: digest } = await store.put(bytes);
+
+    await expect(store.getBuffer(digest, { maxBytes: bytes.byteLength - 1 })).rejects.toThrow(
+      ResourceBudgetError,
+    );
+    await expect(store.getBuffer(digest, { maxBytes: bytes.byteLength - 1 })).rejects.toThrow(
+      /Stream it with get\(\) instead/u,
+    );
+    expect(await store.getBuffer(digest, { maxBytes: bytes.byteLength })).toEqual(bytes);
+  });
+
+  it('has a default ceiling rather than none at all', async () => {
+    const store = backend();
+    const { sha256: digest } = await store.put(Buffer.from('small', 'utf8'));
+    expect(DEFAULT_MAX_BUFFER_BYTES).toBe(64 * 1024 * 1024);
+    expect(await store.getBuffer(digest)).toEqual(Buffer.from('small', 'utf8'));
+  });
+});
+
+/**
+ * `sweepTempFiles` is a stat-then-delete with a directory walk in the gap.
+ *
+ * A `.part` file belongs to a `put` that may still be running, and the only thing separating
+ * "abandoned" from "in flight" is when it was last written to — read once, during the listing, and
+ * acted on afterwards. A stalled upload that resumes inside that window used to have its temporary
+ * file deleted underneath it, so the `rename` that ends `put` failed and the bytes were lost.
+ */
+describe('LocalFsBackend.sweepTempFiles re-checks before it deletes', () => {
+  const stale = (path: string): void => {
+    const when = Date.now() / 1000 - 7200;
+    utimesSync(path, when, when);
+  };
+
+  it('leaves a temporary file that changed after the listing', async () => {
+    const store = backend();
+    await store.put(Buffer.from('warm the store', 'utf8'));
+    const part = join(store.root, '.tmp', '01STALLEDUPLOAD.part');
+    writeFileSync(part, Buffer.alloc(1024));
+    stale(part);
+
+    // The writer resumes in the gap between the listing and the delete the listing authorises.
+    const listed = store.listStrayTempFiles.bind(store);
+    store.listStrayTempFiles = async () => {
+      const found = await listed();
+      appendFileSync(part, Buffer.alloc(4096));
+      return found;
+    };
+
+    expect(await store.sweepTempFiles()).toEqual({ removed: 0, bytes: 0 });
+    expect(existsSync(part), 'an upload that was still running was swept away').toBe(true);
+    expect(statSync(part).size).toBe(5120);
+  });
+
+  it('still reclaims one that really was abandoned', async () => {
+    const store = backend();
+    await store.put(Buffer.from('warm the store', 'utf8'));
+    const part = join(store.root, '.tmp', '01ABANDONED.part');
+    writeFileSync(part, Buffer.alloc(2048));
+    stale(part);
+
+    expect(await store.sweepTempFiles()).toEqual({ removed: 1, bytes: 2048 });
+    expect(existsSync(part)).toBe(false);
+  });
+
+  it('leaves a recent one alone', async () => {
+    const store = backend();
+    await store.put(Buffer.from('warm the store', 'utf8'));
+    const part = join(store.root, '.tmp', '01INFLIGHT.part');
+    writeFileSync(part, Buffer.alloc(512));
+
+    expect(await store.sweepTempFiles()).toEqual({ removed: 0, bytes: 0 });
+    expect(existsSync(part)).toBe(true);
   });
 });

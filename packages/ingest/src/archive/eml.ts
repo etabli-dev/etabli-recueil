@@ -8,13 +8,38 @@
  *
  * Written by hand rather than taken from a mail library because the surface needed is small and
  * because a mail parser is a parser of hostile input in the most literal sense: a `.eml` arriving
- * from a watched folder is something a stranger composed. Nothing here writes a file, nothing here
- * trusts a filename, and every part is bounded by the caller's limits before it is decoded.
+ * from a watched folder is something a stranger composed. Nothing here writes a file and nothing
+ * here trusts a filename.
+ *
+ * ## The budget
+ *
+ * The sentence that used to sit here — "every part is bounded by the caller's limits before it is
+ * decoded" — was the reverse of what happened, and both the Phase 2 review and the re-attack said
+ * so: `parseEmail(raw)` took no limits argument, had no access to `IngestConfig`, and decoded the
+ * whole MIME tree before `extract.ts` made its first size comparison. A 24 MB quoted-printable
+ * message decoded 8.8 MB and moved resident memory by 166 MB; a 16.6 MB message built two hundred
+ * thousand `EmailPart`s before the entry limit was consulted.
+ *
+ * So `parseEmail` now takes an `EmailBudget` and the sentence is true (ADR-0022 §2):
+ *
+ *   - The raw message and the header block are refused by size before anything is read.
+ *   - Parts are counted **as they are built**, so the two-hundred-thousandth is never allocated.
+ *   - Each decode is handed an allowance — the smaller of the per-part ceiling and what the whole
+ *     message has left — and *the decode enforces it*, rather than the length being compared after
+ *     the buffer exists. Quoted-printable writes into a `Buffer` sized to that allowance instead of
+ *     accumulating into a `number[]` at eight bytes a byte, which is where the 6.9x came from.
+ *   - Base64 and the identity encodings are refused from the length of the bytes in hand, which is
+ *     the one number about the input that nobody can lie about.
+ *
+ * Exceeding one raises a `ResourceBudgetError`, which the pipeline routes to the review queue with
+ * the reason rather than crashing or silently truncating (P3, ADR-0022 §6).
  *
  * Deliberately absent: S/MIME and PGP (encrypted or signed payloads are passed through as the
  * attachments they are, unverified and marked so) and `message/partial` reassembly. RFC 2231
  * continued and extended parameters *are* assembled — see `assembleParameters`.
  */
+import { BudgetLedger, DEFAULT_EMAIL_BUDGET, ResourceBudgetError } from '../budgets.js';
+import type { EmailBudget } from '../budgets.js';
 import { ArchiveFormatError } from '../errors.js';
 
 export interface EmailPart {
@@ -58,12 +83,39 @@ export const looksLikeEmail = (bytes: Buffer): boolean => {
   return names.has('from') || names.has('subject') || names.has('message-id') || names.has('received');
 };
 
-export const parseEmail = (raw: Buffer): ParsedEmail => {
-  const { headers, body } = splitHeaders(raw);
+/**
+ * Parse a message under an explicit budget.
+ *
+ * `budget` defaults to the conservative one rather than to "no limit", because a caller that
+ * forgets to pass one is precisely the failure this parameter exists to prevent — and for two
+ * years there was no parameter to forget.
+ *
+ * @throws {ResourceBudgetError} when the message, its header block, its part count, one part's
+ *   decoded size or the decoded size of all its parts passes a ceiling. The message names the
+ *   limit.
+ */
+export const parseEmail = (raw: Buffer, budget: EmailBudget = DEFAULT_EMAIL_BUDGET): ParsedEmail => {
+  if (raw.length > budget.maxInputBytes) {
+    throw new ResourceBudgetError(
+      'eml.maxInputBytes',
+      budget.maxInputBytes,
+      `The message is ${raw.length} bytes, over the eml.maxInputBytes budget of ` +
+        `${budget.maxInputBytes}. It was refused before any part was decoded.`,
+      { byteSize: raw.length },
+    );
+  }
+
+  const walk: Walk = {
+    budget,
+    ledger: new BudgetLedger(budget.maxTotalBytes, 'eml.maxTotalBytes'),
+    parts: 0,
+  };
+
+  const { headers, body } = splitHeaders(raw, budget);
   const contentType = parseContentType(firstHeader(headers, 'content-type') ?? 'text/plain');
 
   const parts: EmailPart[] = [];
-  collectParts(body, headers, contentType, parts, 0);
+  collectParts(body, headers, contentType, parts, 0, walk);
 
   let bodyText: string | null = null;
   let bodyHtml: string | null = null;
@@ -99,8 +151,24 @@ export const parseEmail = (raw: Buffer): ParsedEmail => {
 /* Header parsing                                                                               */
 /* ------------------------------------------------------------------------------------------ */
 
-const splitHeaders = (raw: Buffer): { headers: Record<string, string[]>; body: Buffer } => {
+const splitHeaders = (
+  raw: Buffer,
+  budget: EmailBudget,
+): { headers: Record<string, string[]>; body: Buffer } => {
   const separator = findHeaderEnd(raw);
+  // A message with no blank line anywhere makes `separator.end` the whole buffer, so without this
+  // the `latin1` copy and the `split` below are over the entire file. A header block past the
+  // ceiling is not a header block.
+  if (separator.end > budget.maxHeaderBytes) {
+    throw new ResourceBudgetError(
+      'eml.maxHeaderBytes',
+      budget.maxHeaderBytes,
+      `The message's header block is ${separator.end} bytes, over the eml.maxHeaderBytes budget ` +
+        `of ${budget.maxHeaderBytes}. A message with no blank line after its headers is the whole ` +
+        'file being read as one header.',
+      { headerBytes: separator.end },
+    );
+  }
   const headerText = raw.subarray(0, separator.end).toString('latin1');
   const body = raw.subarray(separator.bodyStart);
 
@@ -275,12 +343,22 @@ const parseContentType = (raw: string): ContentType => {
 
 const MAX_MIME_DEPTH = 12;
 
+/** The budget state one `parseEmail` call carries down its MIME tree. */
+interface Walk {
+  budget: EmailBudget;
+  /** Decoded bytes across every part of this message. */
+  ledger: BudgetLedger;
+  /** Parts built so far, counted before the next one is allocated. */
+  parts: number;
+}
+
 const collectParts = (
   body: Buffer,
   headers: Record<string, string[]>,
   contentType: ContentType,
   into: EmailPart[],
   depth: number,
+  walk: Walk,
 ): void => {
   if (depth > MAX_MIME_DEPTH) {
     throw new ArchiveFormatError(`The message nests MIME parts more than ${MAX_MIME_DEPTH} deep.`);
@@ -292,11 +370,25 @@ const collectParts = (
       throw new ArchiveFormatError(`A ${contentType.mediaType} part declares no boundary.`);
     }
     for (const section of splitMultipart(body, boundary)) {
-      const { headers: partHeaders, body: partBody } = splitHeaders(section);
+      const { headers: partHeaders, body: partBody } = splitHeaders(section, walk.budget);
       const partType = parseContentType(firstHeader(partHeaders, 'content-type') ?? 'text/plain');
-      collectParts(partBody, partHeaders, partType, into, depth + 1);
+      collectParts(partBody, partHeaders, partType, into, depth + 1, walk);
     }
     return;
+  }
+
+  // Counted here, before the part is built, rather than by measuring `attachments.length`
+  // afterwards. Two hundred thousand `EmailPart`s cost two hundred thousand buffers whether or not
+  // a later check disapproves of them.
+  walk.parts += 1;
+  if (walk.parts > walk.budget.maxParts) {
+    throw new ResourceBudgetError(
+      'eml.maxParts',
+      walk.budget.maxParts,
+      `The message holds more than ${walk.budget.maxParts} MIME parts, which is the eml.maxParts ` +
+        'budget. The count was reached while walking the tree, not after building it.',
+      { parts: walk.parts },
+    );
   }
 
   const encoding = (firstHeader(headers, 'content-transfer-encoding') ?? '7bit').trim().toLowerCase();
@@ -305,6 +397,17 @@ const collectParts = (
     disposition.parameters['filename'] ??
     contentType.parameters['name'] ??
     null;
+
+  const bytes = decodeBody(body, encoding, contentType, walk);
+  if (!walk.ledger.spend(bytes.length)) {
+    throw new ResourceBudgetError(
+      'eml.maxTotalBytes',
+      walk.budget.maxTotalBytes,
+      `The message's parts have decoded to ${walk.ledger.spent} bytes, over the ` +
+        `eml.maxTotalBytes budget of ${walk.budget.maxTotalBytes}.`,
+      { parts: walk.parts, decoded: walk.ledger.spent },
+    );
+  }
 
   into.push({
     filename: decodeWords(filename),
@@ -316,7 +419,7 @@ const collectParts = (
           ? 'inline'
           : null,
     contentId: firstHeader(headers, 'content-id'),
-    bytes: decodeBody(body, encoding, contentType),
+    bytes,
   });
 };
 
@@ -351,13 +454,55 @@ const trimEol = (body: Buffer, index: number): number => {
   return end;
 };
 
-const decodeBody = (body: Buffer, encoding: string, contentType: ContentType): Buffer => {
+/**
+ * The refusal for a part that produced, or would have produced, more than it was allowed.
+ *
+ * It names whichever of the two ceilings actually bit — the per-part one, or what was left of the
+ * whole-message one — because "over budget" without the number is not something an operator can
+ * raise.
+ */
+const partTooBig = (
+  produced: number,
+  allowance: number,
+  walk: Walk,
+  how: string,
+): ResourceBudgetError => {
+  const hitTotal = allowance < walk.budget.maxPartBytes;
+  const limitName = hitTotal ? 'eml.maxTotalBytes' : 'eml.maxPartBytes';
+  const limit = hitTotal ? walk.budget.maxTotalBytes : walk.budget.maxPartBytes;
+  return new ResourceBudgetError(
+    limitName,
+    limit,
+    `Part ${walk.parts} of the message ${how} ${produced} bytes, past its allowance of ` +
+      `${allowance} (${limitName} is ${limit}). The decode was stopped at the budget rather than ` +
+      'measured after it.',
+    { part: walk.parts, allowance, spent: walk.ledger.spent },
+  );
+};
+
+const decodeBody = (
+  body: Buffer,
+  encoding: string,
+  contentType: ContentType,
+  walk: Walk,
+): Buffer => {
+  // The allowance is the composition rule: a part may produce at most its own ceiling, and at most
+  // what the message as a whole still has left (ADR-0022 §3).
+  const allowance = walk.ledger.allowance(walk.budget.maxPartBytes);
+
   if (encoding === 'base64') {
+    // Three bytes out per four characters in, so the length of the bytes in hand is an upper bound
+    // on the output — and unlike a declared size it is a number nobody can lie about. Checking it
+    // first means the full-length `latin1` copy and the `replace` are never made for a part that
+    // could not be kept anyway.
+    const ceiling = Math.ceil((body.length * 3) / 4);
+    if (ceiling > allowance) throw partTooBig(ceiling, allowance, walk, 'would decode to up to');
     return Buffer.from(body.toString('latin1').replace(/[^A-Za-z0-9+/=]/gu, ''), 'base64');
   }
   if (encoding === 'quoted-printable') {
-    return decodeQuotedPrintable(body);
+    return decodeQuotedPrintable(body, allowance, walk);
   }
+  if (body.length > allowance) throw partTooBig(body.length, allowance, walk, 'holds');
   if (contentType.mediaType.startsWith('text/')) {
     const charset = (contentType.parameters['charset'] ?? 'utf-8').toLowerCase();
     if (charset === 'utf-8' || charset === 'utf8' || charset === 'us-ascii' || charset === 'ascii') {
@@ -372,13 +517,30 @@ const decodeBody = (body: Buffer, encoding: string, contentType: ContentType): B
   return Buffer.from(body);
 };
 
-const decodeQuotedPrintable = (body: Buffer): Buffer => {
+/**
+ * Decode quoted-printable into a buffer the allowance sizes, one byte at a time.
+ *
+ * The version this replaces accumulated into a JS `number[]`, which V8 stores at roughly eight
+ * bytes per decoded byte: that is where a 24 MB message's 166 MB of resident growth came from, and
+ * it happened before any limit was consulted. Quoted-printable never expands — every output byte
+ * costs at least one input byte — so `min(body.length, allowance + 1)` is a sound size for the
+ * destination, and writing past the allowance is what raises the refusal.
+ */
+const decodeQuotedPrintable = (body: Buffer, allowance: number, walk: Walk): Buffer => {
   const text = body.toString('latin1');
-  const out: number[] = [];
+  const out = Buffer.allocUnsafe(Math.min(text.length, allowance + 1));
+  let length = 0;
+
+  const emit = (byte: number): void => {
+    if (length >= allowance) throw partTooBig(length + 1, allowance, walk, 'decodes to at least');
+    out[length] = byte;
+    length += 1;
+  };
+
   for (let index = 0; index < text.length; index += 1) {
     const char = text[index] as string;
     if (char !== '=') {
-      out.push(char.charCodeAt(0));
+      emit(char.charCodeAt(0));
       continue;
     }
     const next = text.slice(index + 1, index + 3);
@@ -387,13 +549,13 @@ const decodeQuotedPrintable = (body: Buffer): Buffer => {
       continue;
     }
     if (/^[0-9a-f]{2}$/iu.test(next)) {
-      out.push(Number.parseInt(next, 16));
+      emit(Number.parseInt(next, 16));
       index += 2;
       continue;
     }
-    out.push(char.charCodeAt(0));
+    emit(char.charCodeAt(0));
   }
-  return Buffer.from(out);
+  return Buffer.from(out.subarray(0, length));
 };
 
 /* ------------------------------------------------------------------------------------------ */
@@ -410,11 +572,27 @@ export const decodeWords = (value: string | null): string | null => {
       const bytes =
         encoding.toLowerCase() === 'b'
           ? Buffer.from(payload, 'base64')
-          : decodeQuotedPrintable(Buffer.from(payload.replace(/_/gu, ' '), 'latin1'));
+          : decodeEncodedWordQ(payload);
       return new TextDecoder(charset.toLowerCase()).decode(bytes);
     } catch {
       return match;
     }
+  });
+};
+
+/**
+ * The `Q` half of an encoded word, which is quoted-printable over a single header token.
+ *
+ * It gets its own allowance rather than the part budget: the payload is already in hand and is
+ * bounded by `eml.maxHeaderBytes`, so the ceiling here only has to be a real number rather than
+ * `Infinity`. `payload.length` is exactly that — quoted-printable cannot expand.
+ */
+const decodeEncodedWordQ = (payload: string): Buffer => {
+  const source = Buffer.from(payload.replace(/_/gu, ' '), 'latin1');
+  return decodeQuotedPrintable(source, source.length, {
+    budget: DEFAULT_EMAIL_BUDGET,
+    ledger: new BudgetLedger(source.length, 'eml.maxPartBytes'),
+    parts: 0,
   });
 };
 

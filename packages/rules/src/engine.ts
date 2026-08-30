@@ -44,28 +44,56 @@ export interface ResolvedLimits {
   readonly maxSteps: number;
   readonly timeoutMs: number;
   readonly maxTextLength: number;
+  readonly maxInputLength: number;
 }
 
 /**
  * The defaults a rule set inherits when it says nothing.
  *
- * `maxTextLength` is the one worth explaining: extracted text from a long scanned contract is
- * routinely megabytes, and a `text` condition that reads all of it against twenty rules is the
- * slowest thing this engine does. Sixteen megabytes is far more than any real document and still a
- * bound; beyond it the text is truncated and the trace records that it was, because a condition
- * evaluated against part of a document must never be reported as if it had seen all of it.
+ * The two length limits are not the same limit and it is worth being exact about which does what,
+ * because they answer different questions and only one of them can refuse anything.
+ *
+ * - **`maxTextLength` truncates.** Extracted text from a long scanned contract is routinely
+ *   megabytes, and a `text` condition that reads all of it against twenty rules is the slowest
+ *   thing this engine does. Past this length the `text` condition sees the beginning of the
+ *   document and the trace says so, because a condition evaluated against part of a document must
+ *   never be reported as if it had seen all of it.
+ * - **`maxInputLength` refuses.** It is the matcher's own ceiling, applied to *every* value a rule
+ *   reads — a filename, a mail subject, a path, a tag, as well as text — and a value above it is a
+ *   named refusal that routes the subject to review rather than a verdict nobody computed. It is
+ *   also what stops the matcher allocating anything proportional to a value it was never going to
+ *   be able to finish reading.
+ *
+ * The effective bound on a `text` condition is therefore the smaller of the two: it truncates to
+ * `maxInputLength` rather than being refused for exceeding it, which keeps the documented behaviour
+ * of a long document ("the rule saw the first N characters") instead of turning every long document
+ * into a review entry.
+ *
+ * `maxTextLength` stays at sixteen megabytes because that is the honest statement of what a rule
+ * author may ask for; the shipped `maxInputLength` of 256 KiB is what an unconfigured engine can
+ * actually finish inside `timeoutMs`, and raising one without the other does nothing.
  */
 export const DEFAULT_LIMITS: ResolvedLimits = {
   maxSteps: 5_000_000,
   timeoutMs: 250,
   maxTextLength: 16 * 1024 * 1024,
+  maxInputLength: 256 * 1024,
 };
 
-export const resolveLimits = (limits?: RuleLimits, overrides?: Partial<ResolvedLimits>): ResolvedLimits => ({
-  maxSteps: overrides?.maxSteps ?? limits?.maxSteps ?? DEFAULT_LIMITS.maxSteps,
-  timeoutMs: overrides?.timeoutMs ?? limits?.timeoutMs ?? DEFAULT_LIMITS.timeoutMs,
-  maxTextLength: overrides?.maxTextLength ?? limits?.maxTextLength ?? DEFAULT_LIMITS.maxTextLength,
-});
+export const resolveLimits = (limits?: RuleLimits, overrides?: Partial<ResolvedLimits>): ResolvedLimits => {
+  // `maxInputLength` is not a field of `RuleLimitsSchema` yet: that schema is rendered into
+  // `apps/server/openapi.yaml`, a committed artefact belonging to another package, and adding a
+  // field to it without regenerating that document leaves the drift test red. It is read leniently
+  // here so that the engine default and a caller's `EvaluateOptions.limits` both work today, and
+  // the day the wire schema carries it nothing on these lines has to change.
+  const declared = limits as (RuleLimits & { readonly maxInputLength?: number }) | undefined;
+  return {
+    maxSteps: overrides?.maxSteps ?? limits?.maxSteps ?? DEFAULT_LIMITS.maxSteps,
+    timeoutMs: overrides?.timeoutMs ?? limits?.timeoutMs ?? DEFAULT_LIMITS.timeoutMs,
+    maxTextLength: overrides?.maxTextLength ?? limits?.maxTextLength ?? DEFAULT_LIMITS.maxTextLength,
+    maxInputLength: overrides?.maxInputLength ?? declared?.maxInputLength ?? DEFAULT_LIMITS.maxInputLength,
+  };
+};
 
 /** What a facet is handed while it evaluates one rule. */
 export interface EvaluationContext {
@@ -123,6 +151,17 @@ const asComposite = <Condition extends object>(condition: Condition): Composite<
   return undefined;
 };
 
+/**
+ * How deeply `all`, `any` and `not` may nest inside one rule.
+ *
+ * `parse.ts` refuses a document deeper than this before the schema sees it, but `evaluateRules`
+ * takes a `RuleSetLike` — a plain object another package may have built without going through the
+ * parser, which is exactly what the ingest pipeline's rule adapter does. A guard here turns what
+ * would be a `RangeError` out of the middle of an evaluation into an ordinary undecidable
+ * condition, so the rule is traced as `error` and the subject goes to a human (P3).
+ */
+export const MAX_CONDITION_DEPTH = 64;
+
 /** Did anything in this trace fail to evaluate? A rule with an undecidable condition is not a non-match. */
 export const traceHasError = (trace: ConditionTrace): boolean =>
   trace.error !== undefined || (trace.children ?? []).some(traceHasError);
@@ -132,14 +171,19 @@ const evaluateCondition = <Subject, Condition extends object, Action extends { t
   subject: Subject,
   facet: RuleFacet<Subject, Condition, Action, Draft, Outcome>,
   context: EvaluationContext,
+  depth = 1,
 ): ConditionTrace => {
+  if (depth > MAX_CONDITION_DEPTH) {
+    const detail = `condition nests more than ${MAX_CONDITION_DEPTH} levels deep (MAX_CONDITION_DEPTH)`;
+    return { type: 'unknown', matched: false, detail, error: detail };
+  }
   const composite = asComposite(condition);
   if (composite === undefined) return facet.evaluateLeaf(condition, subject, context);
 
   if (composite.type === 'not') {
     const wasCollecting = context.collecting;
     context.collecting = false;
-    const child = evaluateCondition(composite.of, subject, facet, context);
+    const child = evaluateCondition(composite.of, subject, facet, context, depth + 1);
     context.collecting = wasCollecting;
     return {
       type: 'not',
@@ -152,7 +196,7 @@ const evaluateCondition = <Subject, Condition extends object, Action extends { t
   const children: ConditionTrace[] = [];
   const wantAll = composite.type === 'all';
   for (const member of composite.of) {
-    const child = evaluateCondition(member, subject, facet, context);
+    const child = evaluateCondition(member, subject, facet, context, depth + 1);
     children.push(child);
     // Short-circuit: the remaining members are not evaluated, and are therefore absent from the
     // trace rather than reported with a verdict nobody computed.

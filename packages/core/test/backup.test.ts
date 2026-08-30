@@ -23,7 +23,9 @@ import {
   MANIFEST_FILE,
   blobPath,
   createBackup,
+  MAX_MANIFEST_BYTES,
   parseManifest,
+  readManifestFile,
   restoreBackup,
   verifyBackup,
 } from '../src/index.js';
@@ -236,5 +238,103 @@ describe('a snapshot restores', () => {
       expect(existsSync(join(into, blobPath(digest)))).toBe(true);
     }
     expect(existsSync(join(out, DATABASE_FILE))).toBe(true);
+  });
+});
+
+/**
+ * A snapshot's blob list is the index a restore reads, and its totals are a summary of that list.
+ *
+ * When the two disagree the report becomes a comparison of nothing against nothing: the reviewer's
+ * `blobs: []` over a `blobCount: 5` made `verifyBackup` report zero failures and `restoreBackup`
+ * complete with `blobsRestored: 0` into an empty store — a restore that "verified everything it
+ * wrote", having written nothing. ADR-0021 §3: a check that cannot fail is decoration, and a
+ * blocking set that can be emptied is the same defect one level up.
+ */
+describe('a snapshot cannot pass by holding nothing (ADR-0021)', () => {
+  it('refuses a manifest whose blob list disagrees with its own count', async () => {
+    const { databaseFile, storageRoot } = await libraryWithBlobs();
+    const out = directory();
+    const snapshot = await createBackup({ databaseUrl: databaseFile, storagePath: storageRoot, out });
+    expect(snapshot.manifest.storage.blobCount).toBeGreaterThan(0);
+
+    rewriteManifest(out, (manifest) => {
+      (manifest.storage as unknown as { blobs: unknown[] }).blobs = [];
+    });
+
+    await expect(verifyBackup(out)).rejects.toThrow(BackupFormatError);
+    await expect(verifyBackup(out)).rejects.toThrow(/lists 0/u);
+    await expect(restoreBackup({ from: out, into: directory(), force: true })).rejects.toThrow(
+      /lists 0/u,
+    );
+  });
+
+  it('refuses a manifest whose byte total disagrees with the blobs it lists', async () => {
+    const { databaseFile, storageRoot } = await libraryWithBlobs();
+    const out = directory();
+    await createBackup({ databaseUrl: databaseFile, storagePath: storageRoot, out });
+
+    rewriteManifest(out, (manifest) => {
+      (manifest.storage as unknown as { totalBytes: number }).totalBytes += 1;
+    });
+
+    await expect(verifyBackup(out)).rejects.toThrow(/come to /u);
+  });
+
+  it('fails the restore when fewer blobs were verified than the snapshot claims', async () => {
+    // The floor under the loop, for a manifest that is self-consistent and still hides a blob:
+    // aliasing the database entry onto a blob's path sends both through `targetFor` to the database
+    // destination, so one listed blob is never restored as a blob while every total agrees.
+    const { databaseFile, storageRoot } = await libraryWithBlobs();
+    const workspace = directory();
+    const out = join(workspace, 'snapshot');
+    const into = join(workspace, 'restored');
+    const snapshot = await createBackup({ databaseUrl: databaseFile, storagePath: storageRoot, out });
+    const victim = snapshot.manifest.storage.blobs[0]!;
+
+    writeFileSync(join(out, DATABASE_FILE), readFileSync(join(out, victim.path)));
+    rewriteManifest(out, (manifest) => {
+      const database = manifest.database as unknown as { path: string; sha256: string; size: number };
+      database.path = victim.path;
+      database.sha256 = victim.sha256;
+      database.size = victim.size;
+    });
+
+    await expect(restoreBackup({ from: out, into, force: true })).rejects.toThrow(
+      /claims a store of \d+ blob\(s\)/u,
+    );
+    expect(existsSync(join(into, DATABASE_FILE)), 'a half-restored library was left behind').toBe(false);
+  });
+
+  it('counts the blobs it actually read, so a caller can compare that with the claim', async () => {
+    const { databaseFile, storageRoot } = await libraryWithBlobs();
+    const out = directory();
+    const snapshot = await createBackup({ databaseUrl: databaseFile, storagePath: storageRoot, out });
+
+    const verified = await verifyBackup(out);
+    expect(verified.failures).toEqual([]);
+    expect(verified.blobsChecked).toBe(snapshot.manifest.storage.blobCount);
+  });
+});
+
+/**
+ * A manifest is read whole into a string before `JSON.parse` sees a key, and it arrives on
+ * removable media, so the read is over bytes a stranger chose (ADR-0022 §2).
+ */
+describe('the manifest read is bounded', () => {
+  it('refuses a manifest larger than the ceiling, naming it', async () => {
+    const { databaseFile, storageRoot } = await libraryWithBlobs();
+    const out = directory();
+    await createBackup({ databaseUrl: databaseFile, storagePath: storageRoot, out });
+    const path = join(out, MANIFEST_FILE);
+    const size = readFileSync(path, 'utf8').length;
+
+    // Both bounds share the limit: the `stat` is the fast rejection over metadata, and the running
+    // total over the stream is the one that holds when the file grows between the two calls. Only
+    // the first can be driven from a static file, which is why the second is written as a running
+    // total rather than as a second size comparison.
+    await expect(readManifestFile(path)).resolves.toContain('"format"');
+    await expect(readManifestFile(path, size - 1)).rejects.toThrow(BackupFormatError);
+    await expect(readManifestFile(path, size - 1)).rejects.toThrow(/will not read more than/u);
+    expect(MAX_MANIFEST_BYTES).toBe(256 * 1024 * 1024);
   });
 });

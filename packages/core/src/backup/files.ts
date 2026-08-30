@@ -70,6 +70,61 @@ export const copyFileHashing = async (from: string, to: string): Promise<HashedF
 };
 
 /**
+ * The largest `manifest.json` this build will read into memory (ADR-0022 §2).
+ *
+ * A manifest is data off removable media, and `parseManifest` needs the whole of it as a string
+ * before `JSON.parse` can see a single key — so an unbounded read is the caller's resident set in
+ * somebody else's hands. Two hundred and fifty-six mebibytes is roughly three and a half million
+ * blob entries, far past any library this is meant for, and a snapshot larger than that is a
+ * refusal naming the limit rather than an out-of-memory kill or V8's opaque `ERR_STRING_TOO_LONG`.
+ *
+ * The `stat` is a fast rejection over metadata, so it cannot be the only bound; the read that
+ * follows is capped by the same number through an explicit byte budget rather than trusting it.
+ */
+export const MAX_MANIFEST_BYTES = 256 * 1024 * 1024;
+
+/**
+ * Read a manifest file, refusing one too large to hold.
+ *
+ * `maxBytes` is a parameter and not only a constant so that a test can drive the refusal without
+ * writing a quarter of a gigabyte: ADR-0022 asks for a test that goes past the limit and watches a
+ * clean refusal, and a limit that can only be exceeded by exceeding it is a limit nobody tests.
+ */
+export const readManifestFile = async (path: string, maxBytes = MAX_MANIFEST_BYTES): Promise<string> => {
+  const found = await stat(path).catch(() => null);
+  if (found !== null && found.size > maxBytes) {
+    throw new BackupFormatError(
+      `'${path}' is ${found.size} bytes; a Recueil manifest is read whole and this build will ` +
+        `not read more than ${maxBytes}. That file is not a manifest this snapshot can be ` +
+        'restored from.',
+      { path, size: found.size, limit: maxBytes },
+    );
+  }
+
+  // Bounded by the read itself and not by the `stat` above: the file can grow between the two, and
+  // on removable media the size the filesystem reports is not a promise about the bytes. The
+  // stream is destroyed the moment the running total passes the limit, so the refusal costs one
+  // chunk rather than the whole file.
+  const stream = createReadStream(path);
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for await (const chunk of stream) {
+    const buffer = chunk as Buffer;
+    total += buffer.byteLength;
+    if (total > maxBytes) {
+      stream.destroy();
+      throw new BackupFormatError(
+        `'${path}' passed ${maxBytes} bytes while being read; a Recueil manifest is read whole ` +
+          'and this build will not read more than that.',
+        { path, limit: maxBytes },
+      );
+    }
+    chunks.push(buffer);
+  }
+  return Buffer.concat(chunks).toString('utf8');
+};
+
+/**
  * Join a snapshot-relative path onto a root and prove the result is inside it.
  *
  * The belt to `assertSnapshotRelativePath`'s braces. The syntactic check runs at the parse and

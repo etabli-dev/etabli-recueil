@@ -22,6 +22,8 @@
  * field, `min`/`max` for a number, `targetItemTypes` for a reference. Two checks, because the first
  * says "this is a well-formed number" and the second says "this is a number this field allows".
  */
+import { isRegexLimitError, RegexSyntaxError, safeRegex } from '@recueil/rules';
+import type { SafeRegex } from '@recueil/rules';
 import {
   CustomFieldDataTypeSchema,
   FieldValueContentSchema,
@@ -755,25 +757,104 @@ const checkRange = (
   }
 };
 
+/* -------------------------------------------------------------------------------------------- */
+/* The validation pattern (ADR-0022 §4)                                                            */
+/* -------------------------------------------------------------------------------------------- */
+
+/**
+ * The budget a `config.pattern` match runs under, surfaced here rather than spelt as literals.
+ *
+ * A custom field's `pattern` is operator configuration, but the *value* it is matched against is
+ * not: it arrives from `POST /api/v1/custom-fields/.../values` (any HTTP client; auth is off by
+ * default), from stage 10 of ingestion where a rule interpolates it out of a document's own
+ * extracted text, and from the Paperless importer, where it is whatever the remote server holds.
+ * ADR-0022 §4 therefore applies with no exception for "internal" configuration, and the match here
+ * is worse than the mail-rule case it is a sibling of: `encode` runs inside `this.db.transaction`,
+ * so a stall holds SQLite's writer lock and no other write to the library can proceed.
+ *
+ * `@recueil/rules`'s `safeRegex` is the bounded matcher; it cannot backtrack, and it carries both a
+ * step budget and a wall clock. The value length is bounded here as well, because the engine's
+ * first act is to build a code-point array of the whole input, which the clock does not cover
+ * (ADR-0022 §2: bound the operation, not the result).
+ */
+const PATTERN_MAX_VALUE_LENGTH = 65_536;
+const PATTERN_MAX_LENGTH = 4_096;
+const PATTERN_MAX_STEPS = 5_000_000;
+const PATTERN_TIMEOUT_MS = 250;
+
+/**
+ * Compile a `config.pattern`, or say why it cannot be compiled.
+ *
+ * Returns `undefined` for "there is no pattern". A pattern the linear engine cannot express — a
+ * backreference, a lookaround, a Unicode property escape, a program above the engine's ceiling —
+ * comes back as a message rather than a throw, so that both callers can use it: definition time
+ * refuses the configuration, and value time declines to enforce it.
+ */
+const compileFieldPattern = (
+  config: Record<string, unknown>,
+): { pattern: string; regex: SafeRegex } | { pattern: string; problem: string } | undefined => {
+  const pattern = config['pattern'];
+  if (typeof pattern !== 'string' || pattern === '') return undefined;
+  if (pattern.length > PATTERN_MAX_LENGTH) {
+    return {
+      pattern,
+      problem: `it is ${pattern.length} characters long; the limit is ${PATTERN_MAX_LENGTH}`,
+    };
+  }
+  try {
+    return {
+      pattern,
+      regex: safeRegex(pattern, { maxSteps: PATTERN_MAX_STEPS, timeoutMs: PATTERN_TIMEOUT_MS }),
+    };
+  } catch (error) {
+    if (error instanceof RegexSyntaxError) return { pattern, problem: error.message };
+    throw error;
+  }
+};
+
 const checkPattern = (
   field: CustomFieldRow,
   config: Record<string, unknown>,
   value: string,
 ): void => {
-  const pattern = config['pattern'];
-  if (typeof pattern !== 'string' || pattern === '') return;
-  let expression: RegExp;
-  try {
-    expression = new RegExp(pattern, 'u');
-  } catch {
-    // A field configured with a broken pattern must not make every write to it fail; the config
-    // is the bug, and the `completeness` check is where a bad definition is reported.
+  const compiled = compileFieldPattern(config);
+  if (compiled === undefined) return;
+  if (!('regex' in compiled)) {
+    // A field configured with a pattern this engine cannot run must not make every write to it
+    // fail; the config is the bug, `defineField`/`updateField` refuse it at the boundary, and a
+    // row that predates that refusal is reported by the `completeness` check.
     return;
   }
-  if (!expression.test(value)) {
-    throw new ValidationError(`'${field.fieldKey}' requires values matching /${pattern}/.`, {
+
+  // The bound is the call's, not the value's. A value longer than the budget is refused naming the
+  // limit rather than silently skipping the check (ADR-0022 §6): an unenforced pattern is a
+  // validation hole, and a silent one is worse than a loud refusal.
+  if (value.length > PATTERN_MAX_VALUE_LENGTH) {
+    throw new ValidationError(
+      `'${field.fieldKey}' is pattern-validated, and this value is ${value.length} characters; ` +
+        `the most that can be matched is ${PATTERN_MAX_VALUE_LENGTH}.`,
+      { fieldKey: field.fieldKey, pattern: compiled.pattern, length: value.length, limit: PATTERN_MAX_VALUE_LENGTH },
+    );
+  }
+
+  let matched: boolean;
+  try {
+    matched = compiled.regex.test(value);
+  } catch (error) {
+    if (isRegexLimitError(error)) {
+      throw new ValidationError(
+        `'${field.fieldKey}' could not be checked against /${compiled.pattern}/: ` +
+          `${error.message}. Simplify the pattern or shorten the value.`,
+        { fieldKey: field.fieldKey, pattern: compiled.pattern, budget: error.message },
+      );
+    }
+    throw error;
+  }
+
+  if (!matched) {
+    throw new ValidationError(`'${field.fieldKey}' requires values matching /${compiled.pattern}/.`, {
       fieldKey: field.fieldKey,
-      pattern,
+      pattern: compiled.pattern,
     });
   }
 };
@@ -798,5 +879,20 @@ const validateFieldConfig = (
   }
   if (config['currency'] !== undefined && typeof config['currency'] !== 'string') {
     throw new ValidationError('`currency` must be an ISO-4217 code.', { dataType });
+  }
+  if (config['pattern'] !== undefined && typeof config['pattern'] !== 'string') {
+    throw new ValidationError('`pattern` must be a regular expression, as a string.', { dataType });
+  }
+  // Refused here rather than at the first write, because the pattern is configuration and the
+  // value is not: an operator who types `^(\w+\s?)*$` learns at definition time that the linear
+  // engine will not run it, instead of learning at ingest time that the library has stopped.
+  const compiled = compileFieldPattern(config);
+  if (compiled !== undefined && !('regex' in compiled)) {
+    throw new ValidationError(
+      `\`pattern\` /${compiled.pattern}/ cannot be used: ${compiled.problem}. Recueil matches ` +
+        'with a linear-time engine (ADR-0022 §4), which has no backreferences, no lookahead and ' +
+        'no lookbehind, because a backtracking pattern over a value a stranger chose is a stall.',
+      { dataType, pattern: compiled.pattern, problem: compiled.problem },
+    );
   }
 };

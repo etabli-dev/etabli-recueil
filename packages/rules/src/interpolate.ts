@@ -13,11 +13,28 @@
  * The scan below is written by hand rather than with a `RegExp` for the same reason as everything
  * else in this package: the template is user input, and nothing in this package runs a backtracking
  * engine over user input.
+ *
+ * Substitution is an *expansion*, so it carries a bound of its own. The template is short — the
+ * schema caps it at 1 024 characters — but each `${name}` in it can be replaced by a capture as
+ * long as the whole matched value, so a 1 KB template holding two hundred placeholders against a
+ * quarter-mebibyte subject builds sixty megabytes of string for one tag name. `MAX_INTERPOLATED`
+ * bounds the result rather than the template, because the template was never the size that mattered
+ * (ADR-0022 §2).
  */
+
+/**
+ * Longest value one interpolation may produce.
+ *
+ * Far above any collection path, tag, correspondent or custom-field value the schema will accept
+ * downstream, and far below the amplification available without it.
+ */
+export const MAX_INTERPOLATED = 64 * 1024;
 
 export type Interpolation =
   | { readonly ok: true; readonly value: string; readonly used: readonly string[] }
-  | { readonly ok: false; readonly missing: readonly string[] };
+  | { readonly ok: false; readonly missing: readonly string[] }
+  /** The substitution would have produced more than `limit` characters. */
+  | { readonly ok: false; readonly tooLong: number; readonly limit: number };
 
 const isNameStart = (char: string): boolean => /^[A-Za-z_$]$/u.test(char);
 const isNameRest = (char: string): boolean => /^[A-Za-z0-9_$]$/u.test(char);
@@ -38,7 +55,12 @@ const readPlaceholder = (template: string, index: number): { readonly name: stri
 };
 
 /** Substitute `${name}` from `captures`. `$${` is a literal `${`. */
-export const interpolate = (template: string, captures: ReadonlyMap<string, string>): Interpolation => {
+export const interpolate = (
+  template: string,
+  captures: ReadonlyMap<string, string>,
+  options: { readonly maxLength?: number } = {},
+): Interpolation => {
+  const limit = options.maxLength ?? MAX_INTERPOLATED;
   const missing: string[] = [];
   const used: string[] = [];
   let out = '';
@@ -59,6 +81,9 @@ export const interpolate = (template: string, captures: ReadonlyMap<string, stri
     const capture = captures.get(placeholder.name);
     if (capture === undefined) missing.push(placeholder.name);
     else {
+      if (out.length + capture.length > limit) {
+        return { ok: false, tooLong: out.length + capture.length, limit };
+      }
       used.push(placeholder.name);
       out += capture;
     }

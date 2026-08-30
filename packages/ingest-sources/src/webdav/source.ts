@@ -21,25 +21,55 @@
  *     and then, because that check is about the bytes already in the library and not about the
  *     object on the share, through the revision guard below.
  *
- * **Consume is conditional on the revision the candidate was offered under** (H1,
- * `spec/hardening-2026-08.md`). The window here is not a millisecond: it is a whole poll interval,
- * and after a crash the whole downtime until the next process replays the acknowledgement. Two
- * mechanisms close it, and both are used because neither is sufficient alone:
+ * **Consume is conditional on the digest the pipeline committed** (H1,
+ * `spec/hardening-2026-08.md`, and the re-attack that followed it). The window here is not a
+ * millisecond: it is a whole poll interval, and after a crash the whole downtime until the next
+ * process replays the acknowledgement. Three mechanisms narrow it, and all three are used because
+ * none is sufficient alone:
  *
- *   1. **The client's own check.** A `HEAD` immediately before the destructive call, and a refusal
- *      when the ETag — or, on a share that sends none, the `(Last-Modified, size)` pair — is not
- *      the one the candidate was offered under. This is a check, so it has a race: the object can
- *      change between the `HEAD` and the `DELETE`.
- *   2. **The server's decision.** `If-Match` on the `DELETE` and on the `MOVE`, carrying that same
- *      ETag. RFC 7232 §3.1 makes the far side evaluate the condition atomically with the operation,
- *      which is the only thing that closes the race rather than narrowing it, and it is the one
- *      mechanism WebDAV provides for exactly this. A 412 is a refusal, not an error.
+ *   1. **The client's own metadata check.** A `HEAD` immediately before the destructive call, and
+ *      a refusal when the ETag — or, on a share that sends none, the `(Last-Modified, size)`
+ *      pair — is not the one the candidate was offered under. Cheap, and it catches every ordinary
+ *      replacement.
+ *   2. **The client's own identity check.** A `GET`, streamed through a SHA-256, compared against
+ *      the digest the pipeline committed. This is the one the first version of this file did not
+ *      have, and its absence made the other two decorative on two entirely ordinary share
+ *      configurations. A revision is not identity: on a share that sends no ETag it is
+ *      `Last-Modified` — an HTTP-date, one second of resolution by RFC 9110 — plus a byte count,
+ *      and on a share whose ETag is metadata-derived, which is Apache's shipped default
+ *      (`FileETag INode MTime Size`) against a client that preserves mtimes (`X-OC-MTime`,
+ *      `rsync -t`), it is those same facts wearing a hash. A 617-byte object replaced 75 ms later
+ *      by 617 different bytes inside the same wall-clock second was deleted with
+ *      `verified: true`, three runs out of three, having never been read; on the metadata-ETag
+ *      share `If-Match` was sent, evaluated by the server and *passed*, so the precondition
+ *      positively endorsed the destruction. The watched folder had answered the identical attack by
+ *      streaming the file and comparing the digest since H1; this is that principle carried across,
+ *      which is what "identity remains the SHA-256 the pipeline computes (P2)" was always supposed
+ *      to mean here. It costs one extra read of the object per consumed file, which is the price of
+ *      the sentence.
+ *   3. **The server's decision.** `If-Match` on the `DELETE` and on the `MOVE`, carrying the ETag
+ *      the `GET` in (2) came back with — the tag of the very bytes that were just hashed, rather
+ *      than one from a round trip ago. RFC 7232 §3.1 makes the far side evaluate the condition
+ *      atomically with the operation, which is the only thing that closes a race rather than
+ *      narrowing it. A 412 is a refusal, not an error.
  *
- * What remains open, stated rather than implied: a share that ignores `If-Match` — a plain
- * `mod_dav` without preconditions, or a proxy that strips the header — leaves only mechanism 1,
- * and mechanism 1 has a window of one round trip. There is no way for a client to detect that from
- * the outside, so the refusal wording never claims the precondition was honoured. A share that will
- * not answer `HEAD` at all leaves neither, and the acknowledgement refuses rather than guessing.
+ * **What remains open, stated rather than implied, and measured.**
+ *
+ *   - A share that ignores `If-Match` — a plain `mod_dav` without preconditions, or a proxy that
+ *     strips the header — leaves only (1) and (2), and both are checks, so both have a window: the
+ *     round trip from the last byte of the `GET` to the `DELETE` arriving. On loopback that was
+ *     measured at 5.5 ms; over a WAN it is tens to hundreds. It is not zero and this file does not
+ *     pretend it is.
+ *   - The same is true of a share that sends no ETag at all, where there is no precondition to
+ *     send. `matchNote` says so on every acknowledgement rather than leaving the record to imply a
+ *     guarantee that was never obtained.
+ *   - A client cannot tell the two apart from a 204. It could: one deliberately non-matching
+ *     conditional `HEAD` answers 412 against a share that evaluates preconditions and 200 against
+ *     one that does not (RFC 9110 §13.1.1 applies `If-Match` to every method, and Apache's default
+ *     handler runs `ap_meets_conditions` for `GET` and `HEAD`). This source does not make that
+ *     probe, so it never claims the precondition was honoured — only that the request carried it.
+ *   - A share that will not answer `HEAD` at all leaves nothing, and the acknowledgement refuses
+ *     rather than guessing.
  */
 import { basename, extname } from 'node:path/posix';
 
@@ -59,6 +89,8 @@ import { decideConsume } from '../consume.js';
 import { SourceError, UnsafeSourcePathError } from '../errors.js';
 import { sourceState } from '../state.js';
 import type { SourceStateStore } from '../state.js';
+import { DEFAULT_MAX_SOURCE_BYTES } from '../types.js';
+import { subjectDocumentId } from '../verify.js';
 import type {
   Acknowledgement,
   CommonSourceOptions,
@@ -118,6 +150,8 @@ export class WebDavSource implements IngestSource {
   private readonly options: WebDavSourceOptions;
   private readonly policy: ConsumePolicy;
   private readonly destination: string | null;
+  /** ADR-0022: every source reads under a bound, and the bound has a default (see `types.ts`). */
+  private readonly maxBytes: number;
   /** In-memory only, and deliberately: a second sighting is about *this* process's evidence. */
   private readonly sightings = new Map<string, Sighting>();
   private state: SourceStateStore | null = null;
@@ -125,8 +159,13 @@ export class WebDavSource implements IngestSource {
 
   constructor(options: WebDavSourceOptions) {
     this.options = options;
+    this.maxBytes = options.maxBytes ?? DEFAULT_MAX_SOURCE_BYTES;
     this.client = new WebDavClient({
       url: options.url,
+      // The client's own ceiling is the source's, so there is one number rather than two that can
+      // disagree — and the client still carries a default of its own for callers outside this
+      // package (ADR-0022: budgets are configuration surfaced in one place).
+      maxObjectBytes: this.maxBytes,
       ...(options.auth === undefined ? {} : { auth: options.auth }),
       ...(options.headers === undefined ? {} : { headers: options.headers }),
       ...(options.timeoutMillis === undefined ? {} : { timeoutMillis: options.timeoutMillis }),
@@ -189,10 +228,10 @@ export class WebDavSource implements IngestSource {
           skipped.push({ externalId: entry.path, reason: 'it is empty' });
           continue;
         }
-        if (this.options.maxBytes !== undefined && (entry.byteSize ?? 0) > this.options.maxBytes) {
+        if ((entry.byteSize ?? 0) > this.maxBytes) {
           skipped.push({
             externalId: entry.path,
-            reason: `it is ${String(entry.byteSize)} bytes, over the ${String(this.options.maxBytes)}-byte limit`,
+            reason: `it is ${String(entry.byteSize)} bytes, over the ${String(this.maxBytes)}-byte limit`,
           });
           continue;
         }
@@ -302,10 +341,30 @@ export class WebDavSource implements IngestSource {
       };
     }
 
+    // The metadata agrees. That is not identity, so the bytes are read again and hashed (see the
+    // module header, mechanism 2). Nothing on the share is touched until this has passed.
+    const identity = await this.stillTheObjectThatWasRead(path, outcome, ctx);
+    if (identity.objection !== null) {
+      this.flagForReview(ctx, ref, outcome, identity.objection);
+      return {
+        action: 'refused',
+        detail:
+          `the original was kept: ${identity.objection}. The store verification passed ` +
+          `(${decision.detail}), but it is about the bytes already in the library, not about the ` +
+          'object on the share; it will be offered again under its own revision on the next poll',
+        verified: false,
+      };
+    }
+    if (identity.vanished) {
+      return { action: 'vanished', detail: `'${path}' was already gone from the share`, verified: true };
+    }
+
     // The ETag goes back to the server as a precondition, so the decision is the server's rather
-    // than a guess made one round trip ago. Null on a share that sends no ETags: the header is then
-    // omitted and the check above is all there is, which the refusal wording is careful about.
-    const ifMatch = current.etag;
+    // than a guess made one round trip ago — and it is the tag the `GET` above came back with,
+    // which belongs to the bytes that were actually hashed, rather than the `HEAD`'s. Null on a
+    // share that sends no ETags: the header is then omitted and the two checks above are all
+    // there is, which `matchNote` is careful about.
+    const ifMatch = identity.etag ?? current.etag;
 
     if (this.policy.mode === 'delete') {
       const result = await this.client.delete(path, ctx.signal, { ifMatch });
@@ -401,6 +460,70 @@ export class WebDavSource implements IngestSource {
   }
 
   /**
+   * Read the object again and prove it is the one the pipeline committed.
+   *
+   * `objection` is null when it is, and the sentence that says why not when it is not. This is the
+   * check the folder source has had since H1 — "what is acknowledged is the digest the pipeline
+   * committed, not the path" — finally made true on this side as well. It is not optional and
+   * there is no configuration to turn it off, for the same reason it is not optional there: a
+   * revision is metadata, metadata is reproducible by anything that writes a file, and the
+   * acknowledgement is the destructive half.
+   *
+   * The bytes are streamed through the hash by the client and never held, so a large scan does not
+   * need a large heap to be consumed safely.
+   */
+  private async stillTheObjectThatWasRead(
+    path: string,
+    outcome: IngestOutcome,
+    ctx: SourceContext,
+  ): Promise<{ objection: string | null; vanished: boolean; etag: string | null }> {
+    const committed = 'sha256' in outcome ? outcome.sha256 : undefined;
+    if (committed === undefined) {
+      return {
+        objection:
+          `the '${outcome.status}' outcome names no digest, so '${path}' cannot be shown to be ` +
+          'the object the pipeline committed',
+        vanished: false,
+        etag: null,
+      };
+    }
+
+    let reread;
+    try {
+      reread = await this.client.digest(path, ctx.signal, { maxBytes: this.maxBytes });
+    } catch (error) {
+      return {
+        objection:
+          `'${path}' could not be re-read to confirm its identity: ` +
+          `${error instanceof Error ? error.message : String(error)}`,
+        vanished: false,
+        etag: null,
+      };
+    }
+
+    if (reread.kind === 'absent') return { objection: null, vanished: true, etag: null };
+    if (reread.kind === 'over-limit') {
+      return {
+        objection:
+          `'${path}' passed the ${String(reread.limit)}-byte limit this source reads under while ` +
+          'it was being re-read, so its identity could not be confirmed',
+        vanished: false,
+        etag: null,
+      };
+    }
+    if (reread.sha256 !== committed) {
+      return {
+        objection:
+          `'${path}' now holds ${String(reread.byteSize)} bytes hashing to ${reread.sha256}, and ` +
+          `the pipeline committed ${committed}`,
+        vanished: false,
+        etag: reread.etag,
+      };
+    }
+    return { objection: null, vanished: false, etag: reread.etag };
+  }
+
+  /**
    * Compare the revision a candidate was offered under with what a `HEAD` says is there now.
    *
    * Null when they agree, and the sentence that says how they differ when they do not. The two
@@ -473,8 +596,8 @@ export class WebDavSource implements IngestSource {
     outcome: IngestOutcome,
     reason: string,
   ): void {
-    const documentId = 'documentId' in outcome ? outcome.documentId : undefined;
-    if (documentId === undefined) return;
+    const documentId = subjectDocumentId(outcome);
+    if (documentId === null) return;
     try {
       ensureIngestSchema(ctx.recueil.connection);
       new ReviewQueueService(ctx.recueil.db, ctx.recueil.audit).raise({
@@ -585,13 +708,17 @@ export const SOURCE_CHANGED_BEFORE_CONSUME = 'source_changed_before_consume';
  * What the acknowledgement is allowed to claim about the precondition.
  *
  * A share that sends no ETag gets no `If-Match`, and the record must not read as though the far
- * side agreed to something it was never asked.
+ * side agreed to something it was never asked. Nor may the *success* wording: the old
+ * `(conditional on If-Match: "…")` asserted a guarantee that was never obtained, because a share
+ * that ignores preconditions answers 204 exactly like one that honours them. Saying what was sent
+ * is a fact; saying what was evaluated would be narration (ADR-0021 §1).
  */
 const matchNote = (ifMatch: string | null): string =>
   ifMatch === null
-    ? ' (the share sends no ETag, so the request carried no precondition and the check before it ' +
-      'is the only evidence)'
-    : ` (conditional on If-Match: "${ifMatch}")`;
+    ? ' (the share sends no ETag, so the request carried no precondition and the re-read of the ' +
+      'bytes is the only evidence; the window between that read and this request is open)'
+    : ` (the request carried If-Match: "${ifMatch}"; whether the share evaluated it is not ` +
+      'something a client can observe from the answer, so this record does not claim it did)';
 
 /** The `(path, etag, size)` key of §5.3, as a revision string. */
 const revisionOf = (entry: WebDavEntry): string =>

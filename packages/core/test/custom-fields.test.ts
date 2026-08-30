@@ -382,3 +382,97 @@ describe('CustomFieldService — slots and blanks', () => {
     ).toThrow(/needs content/iu);
   });
 });
+
+/**
+ * `config.pattern` is operator configuration; the value it is matched against is not.
+ *
+ * The re-attack found `checkPattern` compiling the pattern with the native `RegExp` and running
+ * `.test()` with no budget, inside `this.db.transaction` — so the ADR's own example of an innocent
+ * rule, `^(\w+\s?)*$` ("the value is just plain words"), held SQLite's writer lock for 54 seconds
+ * against a 33-character value. The value reaches here from `POST /api/v1/custom-fields/…/values`,
+ * from stage 10 of ingestion where a rule interpolates it out of a document's own text, and from
+ * the Paperless importer. ADR-0022 §4 admits no exception for "internal" patterns.
+ */
+describe('CustomFieldService — pattern validation is bounded (ADR-0022 §4)', () => {
+  const catastrophic = '^(\\w+\\s?)*$';
+
+  it('decides the ADR’s own catastrophic pattern in milliseconds, not seconds', () => {
+    library.customFields.define(
+      { fieldKey: 'reference', name: 'Reference', dataType: 'text', config: { pattern: catastrophic } },
+      library.actor,
+    );
+    const subject = item();
+
+    // Thirty characters. Against the native backtracking engine this took about five seconds, and
+    // every further character roughly quadrupled it; the linear engine is flat.
+    const value = `${'a'.repeat(29)}!`;
+    const started = performance.now();
+    expect(() =>
+      library.customFields.setValue(
+        { fieldKey: 'reference', itemId: subject.id, content: { type: 'text', value } },
+        library.actor,
+      ),
+    ).toThrow(ValidationError);
+    const elapsed = performance.now() - started;
+
+    expect(elapsed, `deciding a ${value.length}-character value took ${elapsed.toFixed(0)} ms`).toBeLessThan(
+      1_000,
+    );
+  }, 15_000);
+
+  it('still accepts what the pattern allows and refuses what it does not', () => {
+    library.customFields.define(
+      { fieldKey: 'invoice', name: 'Invoice', dataType: 'text', config: { pattern: '^RE-\\d{4}-\\d{4}$' } },
+      library.actor,
+    );
+    const subject = item();
+
+    const stored = library.customFields.setValue(
+      { fieldKey: 'invoice', itemId: subject.id, content: { type: 'text', value: 'RE-2024-0031' } },
+      library.actor,
+    );
+    expect(stored.row.valueText).toBe('RE-2024-0031');
+
+    expect(() =>
+      library.customFields.setValue(
+        { fieldKey: 'invoice', itemId: subject.id, content: { type: 'text', value: 'RE-24-1' } },
+        library.actor,
+      ),
+    ).toThrow(/requires values matching/u);
+  });
+
+  it('refuses a pattern the linear engine cannot run, at definition time', () => {
+    // A backreference: expressible in the native engine, and the reason the native engine can be
+    // made to hang. The operator learns here rather than at the first write.
+    expect(() =>
+      library.customFields.define(
+        { fieldKey: 'doubled', name: 'Doubled', dataType: 'text', config: { pattern: '^(a+)\\1$' } },
+        library.actor,
+      ),
+    ).toThrow(/backreference/iu);
+
+    // And on the way in through `updateField`, which is the other door to `config`.
+    const field = library.customFields.define(
+      { fieldKey: 'plain', name: 'Plain', dataType: 'text' },
+      library.actor,
+    );
+    expect(() =>
+      library.customFields.updateField(field.id, { config: { pattern: '^(?=x)y$' } }, library.actor),
+    ).toThrow(/lookahead/iu);
+  });
+
+  it('refuses a value too long to match, naming the limit, rather than skipping the check', () => {
+    library.customFields.define(
+      { fieldKey: 'body', name: 'Body', dataType: 'long_text', config: { pattern: '^[a-z]+$' } },
+      library.actor,
+    );
+    const subject = item();
+
+    expect(() =>
+      library.customFields.setValue(
+        { fieldKey: 'body', itemId: subject.id, content: { type: 'long_text', value: 'a'.repeat(70_000) } },
+        library.actor,
+      ),
+    ).toThrow(/the most that can be matched is 65536/u);
+  });
+});

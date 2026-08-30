@@ -21,7 +21,10 @@
  *   entry (`spec/data-model.md` §6.1) something a human can act on.
  * - **Safe on hostile input.** No pattern in a rule set is run through a backtracking engine. The
  *   regular expressions and the globs are compiled to a Pike VM whose cost is bounded by input
- *   length times program size, with a step budget and a wall-clock allowance on top.
+ *   length times program size, with a step budget and a wall-clock allowance on top. The pattern is
+ *   hostile too — it is typed into an editor and POSTed — so it is bounded at compile time by
+ *   length, nesting depth, repetition count, program size and compilation work, each with a named
+ *   refusal. `safeMatch` is the bounded matcher other packages should use in place of `RegExp`.
  *
  * The engine decides; it never writes. Applying an outcome is the ingestion pipeline's job, inside
  * the single transaction of stage 10, and that separation is what makes the dry run a prediction
@@ -80,12 +83,21 @@ export {
 export type { DedupAction, DedupCondition, DedupLeafCondition, DedupRule, DedupRuleSet, MergeWinner } from './schema/dedup.js';
 
 /* Reading and validating a rule set ------------------------------------------------------------ */
-export { flattenIssues, formatIssues, loadRuleSet, parseRuleSet, parseRuleSetOrThrow, RuleSetError } from './parse.js';
+export {
+  flattenIssues,
+  formatIssues,
+  loadRuleSet,
+  MAX_DOCUMENT_DEPTH,
+  MAX_RULE_SET_CHARS,
+  parseRuleSet,
+  parseRuleSetOrThrow,
+  RuleSetError,
+} from './parse.js';
 export type { ParseRuleSetOptions, RuleSetIssue, RuleSetParse } from './parse.js';
 export { RULE_SET_SCHEMA_ID, ruleSetJsonSchema } from './json-schema.js';
 
 /* Evaluation ----------------------------------------------------------------------------------- */
-export { DEFAULT_LIMITS, evaluateRules, resolveLimits, sortRules, traceHasError } from './engine.js';
+export { DEFAULT_LIMITS, evaluateRules, MAX_CONDITION_DEPTH, resolveLimits, sortRules, traceHasError } from './engine.js';
 export type {
   ActionContext,
   EvaluateOptions,
@@ -117,19 +129,29 @@ export type { MatchResult } from './match.js';
 export { globRegex, globToPattern } from './glob.js';
 export { basename, normalisePath } from './path.js';
 export type { NormalisedPath } from './path.js';
-export { hasPlaceholder, interpolate } from './interpolate.js';
+export { hasPlaceholder, interpolate, MAX_INTERPOLATED } from './interpolate.js';
 export type { Interpolation } from './interpolate.js';
 
 /* The linear-time regular expression engine ------------------------------------------------------ */
 export {
+  DEFAULT_MAX_INPUT_LENGTH,
   DEFAULT_MAX_STEPS,
   DEFAULT_TIMEOUT_MS,
   isRegexLimitError,
+  MAX_COMPILE_STEPS,
+  MAX_DEPTH,
+  MAX_PATTERN_LENGTH,
+  MAX_PROGRAM,
+  MAX_REPEAT,
   RegexBudgetError,
+  RegexInputTooLongError,
   RegexSyntaxError,
   RegexTimeoutError,
+  regexLimitName,
   SafeRegex,
+  safeMatch,
   safeRegex,
+  safeTest,
   SUPPORTED_FLAGS,
 } from './regex/index.js';
-export type { SafeRegexOptions, VmMatch } from './regex/index.js';
+export type { CodePointInput, RegexLimitError, SafeMatchResult, SafeRegexOptions, VmMatch } from './regex/index.js';

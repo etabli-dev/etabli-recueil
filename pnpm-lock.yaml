@@ -206,6 +206,9 @@ importers:
 
   packages/core:
     dependencies:
+      '@recueil/rules':
+        specifier: workspace:*
+        version: link:../rules
       '@recueil/schemas':
         specifier: workspace:*
         version: link:../schemas
@@ -309,6 +312,9 @@ importers:
       '@recueil/core':
         specifier: workspace:*
         version: link:../core
+      '@recueil/rules':
+        specifier: workspace:*
+        version: link:../rules
       '@recueil/schemas':
         specifier: workspace:*
         version: link:../schemas

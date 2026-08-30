@@ -19,6 +19,16 @@
  * Bytes are kept as bytes. A message is never decoded to a string on the way through — `Buffer` in,
  * `Buffer` out, hashed by the pipeline — because a subject in ISO-8859-1 and a PDF attachment are
  * both things a `toString()` would quietly destroy.
+ *
+ * **And the reader runs under a budget** (ADR-0022 §2, §5). Everything above describes a state
+ * machine driven entirely by the far side: it decides when a line ends, how long a literal is, and
+ * how many untagged responses one command produces. None of those had a ceiling. A server that
+ * declared `BODY[] {536870912}` moved this process's resident set by 1,014 MB and was stopped only
+ * by the command timeout — by which point the memory was long since committed — and one that simply
+ * never sent a CRLF grew `buffer` for as long as it was allowed to. A declared literal size is
+ * input, not fact, so it is used for a fast rejection and never as the bound; the bound is a
+ * running total of every byte that arrives while one command is in flight, checked as the bytes
+ * arrive, and passing it closes the connection with the limit named rather than filling the heap.
  */
 import { connect as netConnect } from 'node:net';
 import type { Socket } from 'node:net';
@@ -26,6 +36,7 @@ import { connect as tlsConnect } from 'node:tls';
 import type { ConnectionOptions as TlsOptions, TLSSocket } from 'node:tls';
 
 import { SourceProtocolError, SourceUnavailableError } from '../errors.js';
+import { DEFAULT_MAX_SOURCE_BYTES } from '../types.js';
 
 export interface ImapClientOptions {
   host: string;
@@ -36,8 +47,34 @@ export interface ImapClientOptions {
   password: string;
   /** Per-command timeout. Default 60 s: a `FETCH` of a 40 MB attachment is not quick. */
   timeoutMillis?: number;
+  /**
+   * Most bytes one command's whole answer may be, literals included. Defaults to
+   * `DEFAULT_MAX_SOURCE_BYTES` plus a margin for the response text around the message.
+   *
+   * It is one number rather than three because it has to bound three different things that all
+   * cost the same memory: a line that never ends, a literal larger than the mailbox could hold, and
+   * an unbounded flood of untagged responses. `ImapSource` passes its own `maxBytes` down so the
+   * two agree. Exceeding it is a `SourceProtocolError` naming the limit, and the connection is
+   * dropped, because a server that has already sent this much is not going to stop being asked to.
+   */
+  maxResponseBytes?: number;
+  /**
+   * Most bytes one un-terminated response line may grow to. Default 8 MiB.
+   *
+   * Separate from `maxResponseBytes` and far smaller, because a *line* has no legitimate reason to
+   * be large: the biggest one IMAP produces is an untagged `SEARCH` listing every UID in the
+   * mailbox, which is roughly a million of them at this size. A server that sends bytes and never a
+   * CRLF is otherwise bounded only by the whole-response budget, which is sized for a message body
+   * and is three hundred times too generous for this.
+   */
+  maxLineBytes?: number;
   tls?: TlsOptions;
 }
+
+/** The margin over one message for the response text, the flags and the envelope around it. */
+const RESPONSE_OVERHEAD_BYTES = 32 * 1024 * 1024;
+/** Roughly a million UIDs on one untagged `SEARCH` line, which is the largest legitimate one. */
+const DEFAULT_MAX_LINE_BYTES = 8 * 1024 * 1024;
 
 /** One logical response, with its literals kept apart from its text. */
 export interface ImapResponse {
@@ -87,6 +124,8 @@ export class ImapClient {
   private greeting: ((response: ImapResponse) => void) | null = null;
   private failure: Error | null = null;
   private counter = 0;
+  /** Bytes taken from the socket since the command in flight was sent. See `maxResponseBytes`. */
+  private commandBytes = 0;
   private readonly capabilities = new Set<string>();
 
   constructor(private readonly options: ImapClientOptions) {}
@@ -370,6 +409,7 @@ export class ImapClient {
       }, this.options.timeoutMillis ?? 60_000);
       timer.unref?.();
 
+      this.commandBytes = 0;
       this.pending = { tag, untagged: [], resolve: resolvePromise, reject: rejectPromise, timer };
       socket.write(`${tag} ${text}\r\n`);
     });
@@ -380,6 +420,23 @@ export class ImapClient {
   /* ---------------------------------------------------------------------------------------- */
 
   private consume(chunk: Buffer): void {
+    // ADR-0022 §2: the budget bounds the accumulation as it happens rather than inspecting it
+    // afterwards. Everything that can grow without a ceiling — an unterminated line, a literal, a
+    // flood of untagged responses — arrives through here, so one counter covers all three.
+    const limit = this.maxResponseBytes();
+    this.commandBytes += chunk.byteLength;
+    if (this.commandBytes > limit) {
+      this.fail(
+        new SourceProtocolError(
+          `The IMAP server sent more than ${String(limit)} bytes in answer to one command, which ` +
+            'is the limit this client reads under; the connection was dropped.',
+          { limit, received: this.commandBytes },
+        ),
+      );
+      this.close();
+      return;
+    }
+
     this.buffer = this.buffer.length === 0 ? chunk : Buffer.concat([this.buffer, chunk]);
 
     for (;;) {
@@ -396,7 +453,20 @@ export class ImapClient {
       }
 
       const end = this.buffer.indexOf('\r\n');
-      if (end === -1) return;
+      if (end === -1) {
+        const lineLimit = this.options.maxLineBytes ?? DEFAULT_MAX_LINE_BYTES;
+        if (this.buffer.length > lineLimit) {
+          this.fail(
+            new SourceProtocolError(
+              `The IMAP server sent ${String(this.buffer.length)} bytes of one response line ` +
+                `without a CRLF, over the ${String(lineLimit)}-byte limit this client reads under.`,
+              { limit: lineLimit },
+            ),
+          );
+          this.close();
+        }
+        return;
+      }
       // `latin1`, not `utf8`: the text part of a response is ASCII, and a byte-preserving decode
       // keeps a server that sends raw 8-bit in a flag or a mailbox name from producing a
       // replacement character that would then not match itself.
@@ -405,8 +475,23 @@ export class ImapClient {
 
       const literal = /\{(\d+)\+?\}$/u.exec(line);
       if (literal !== null) {
+        const declared = Number.parseInt(literal[1] ?? '0', 10);
+        // A declared size is attacker-controlled, so it may inform a fast rejection and may never
+        // be the bound (ADR-0022 §1). The running total above is the bound; this only saves the
+        // trouble of reading half a gigabyte to find that out.
+        if (!Number.isFinite(declared) || declared < 0 || declared > limit) {
+          this.fail(
+            new SourceProtocolError(
+              `The IMAP server declared a ${String(declared)}-byte literal, over the ` +
+                `${String(limit)}-byte limit this client reads under.`,
+              { limit, declared },
+            ),
+          );
+          this.close();
+          return;
+        }
         this.segments.push({ kind: 'text', value: line.slice(0, literal.index) });
-        this.literalRemaining = Number.parseInt(literal[1] ?? '0', 10);
+        this.literalRemaining = declared;
         if (this.literalRemaining === 0) this.segments.push({ kind: 'literal', bytes: Buffer.alloc(0) });
         continue;
       }
@@ -449,6 +534,7 @@ export class ImapClient {
 
     clearTimeout(pending.timer);
     this.pending = null;
+    this.commandBytes = 0;
     const status = (tagged[1] ?? '').toUpperCase();
     pending.resolve({
       ok: status === 'OK',
@@ -470,6 +556,10 @@ export class ImapClient {
       this.greeting = null;
       notify({ text: `* BAD ${error.message}`, literals: [] });
     }
+  }
+
+  private maxResponseBytes(): number {
+    return this.options.maxResponseBytes ?? DEFAULT_MAX_SOURCE_BYTES + RESPONSE_OVERHEAD_BYTES;
   }
 
   private readCapabilities(text: string): void {

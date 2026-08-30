@@ -178,6 +178,32 @@ export const parseManifest = (raw: string, where: string): BackupManifest => {
     return { ...file, key: asString(record['key'], `${where}.storage.blobs[${index}].key`) };
   });
 
+  // The list is the index; the totals are a summary of it. When the two disagree, the manifest
+  // describes a store that is not the one it enumerates, and every consumer downstream reads the
+  // list — `manifestFiles` returns `storage.blobs`, so `verifyBackup` checks what the list names
+  // and `restoreBackup` copies what the list names. A manifest saying `blobCount: 5` over an empty
+  // list therefore verified clean with zero failures and restored into an empty store, reporting
+  // success: a comparison of nothing against nothing, which ADR-0021 says must not pass. Refused
+  // at the parse, because that is the one place every consumer goes through.
+  const blobCount = asNumber(storage['blobCount'], `${where}.storage.blobCount`);
+  const totalBytes = asNumber(storage['totalBytes'], `${where}.storage.totalBytes`);
+  if (blobs.length !== blobCount) {
+    throw new BackupFormatError(
+      `${where} says the store holds ${blobCount} blob(s) and lists ${blobs.length}. The list is ` +
+        'the index a restore reads, so a manifest that disagrees with itself is not a snapshot of ' +
+        'anything; do not restore from it.',
+      { blobCount, listed: blobs.length },
+    );
+  }
+  const listedBytes = blobs.reduce((sum, blob) => sum + blob.size, 0);
+  if (listedBytes !== totalBytes) {
+    throw new BackupFormatError(
+      `${where} says the store holds ${totalBytes} byte(s); the blobs it lists come to ` +
+        `${listedBytes}.`,
+      { totalBytes, listedBytes },
+    );
+  }
+
   return {
     format: BACKUP_FORMAT,
     formatVersion,
@@ -206,8 +232,8 @@ export const parseManifest = (raw: string, where: string): BackupManifest => {
       backend: asString(storage['backend'], `${where}.storage.backend`),
       root: typeof storage['root'] === 'string' ? storage['root'] : null,
       blobsIncluded: storage['blobsIncluded'] !== false,
-      blobCount: asNumber(storage['blobCount'], `${where}.storage.blobCount`),
-      totalBytes: asNumber(storage['totalBytes'], `${where}.storage.totalBytes`),
+      blobCount,
+      totalBytes,
       blobs,
     },
   };

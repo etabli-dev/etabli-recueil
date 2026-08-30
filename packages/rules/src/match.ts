@@ -4,9 +4,16 @@
  * Every leaf condition in both facets ends up here, which is why the result carries the sentence
  * for the trace as well as the verdict: the explanation is produced where the comparison happens,
  * by the code that knows what was compared, rather than reconstructed afterwards from the rule.
+ *
+ * It is also the one place `limits.maxInputLength` is applied to *every* operator rather than only
+ * to the two that compile a pattern. `equals` and `contains` do not backtrack, but they still fold
+ * the whole value to lower case — a full copy of it — before they compare, and a bound that covers
+ * `matches` and leaves `contains` unbounded would be a bound with a hole in it exactly where an
+ * attacker would look. The refusal is the same one the engine raises, so a caller that already
+ * handles an undecidable regex handles this too.
  */
 import { globRegex, globToPattern } from './glob.js';
-import { isRegexLimitError, safeRegex } from './regex/index.js';
+import { DEFAULT_MAX_INPUT_LENGTH, RegexInputTooLongError, isRegexLimitError, safeRegex } from './regex/index.js';
 import type { SafeRegexOptions } from './regex/index.js';
 import type { Matcher } from './schema/matchers.js';
 
@@ -64,6 +71,14 @@ export const describeMatcher = (matcher: Matcher): string => {
 export const applyMatcher = (matcher: Matcher, value: string | undefined, limits: SafeRegexOptions = {}): MatchResult => {
   const wanted = describeMatcher(matcher);
   if (value === undefined) return { matched: false, detail: `no value to test; the rule wanted ${wanted}` };
+
+  const maxInputLength = limits.maxInputLength ?? DEFAULT_MAX_INPUT_LENGTH;
+  if (value.length > maxInputLength) {
+    // Not a non-match. Nothing was compared, so nothing may be concluded: the caller turns this
+    // into a rule outcome of `error` and the subject goes to a human (P3, ADR-0022 §6).
+    const refusal = new RegexInputTooLongError(wanted, value.length, maxInputLength);
+    return { matched: false, detail: `could not test whether it ${wanted}`, error: refusal.message };
+  }
 
   if ('equals' in matcher) {
     const matched = fold(value, matcher.caseSensitive) === fold(matcher.equals, matcher.caseSensitive);

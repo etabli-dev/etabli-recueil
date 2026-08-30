@@ -39,11 +39,26 @@ const readField = (side: DedupSide, field: DedupField): string | undefined => {
   }
 };
 
-const scored = (type: string, score: number, atLeast: number, what: string): ConditionTrace => ({
-  type,
-  matched: score >= atLeast,
-  detail: `${what} similarity ${score.toFixed(3)} ${score >= atLeast ? '≥' : '<'} ${atLeast}`,
-});
+/**
+ * A similarity leaf, with `undefined` kept apart from a low score.
+ *
+ * `similarity` and `nameOverlap` return `undefined` when a side is longer than the measure is
+ * allowed to read, which is a refusal and not a verdict: a title a hostile PDF made a megabyte long
+ * must send the pair to a human, not score 0 and be filed as "not a duplicate". That is the same
+ * rule the matchers follow for an undecidable regex, and the engine turns it into a rule outcome
+ * of `error`.
+ */
+const scored = (type: string, score: number | undefined, atLeast: number, what: string, limit: number): ConditionTrace => {
+  if (score === undefined) {
+    const detail = `${what} could not be measured: a value exceeds the limit of ${limit} characters (maxInputLength)`;
+    return { type, matched: false, detail, error: detail };
+  }
+  return {
+    type,
+    matched: score >= atLeast,
+    detail: `${what} similarity ${score.toFixed(3)} ${score >= atLeast ? '≥' : '<'} ${atLeast}`,
+  };
+};
 
 const sharedIdentifiers = (pair: DedupPair, identifier: string | undefined): readonly [string, string][] => {
   const left = pair.left.identifiers ?? {};
@@ -67,7 +82,11 @@ const evaluateLeaf = (condition: DedupCondition, pair: DedupPair, context: Evalu
   if (!('type' in condition)) {
     return { type: 'unknown', matched: false, detail: 'composite condition reached the facet', error: 'composite condition reached the facet' };
   }
-  const limits = { maxSteps: context.limits.maxSteps, timeoutMs: context.limits.timeoutMs };
+  const limits = {
+    maxSteps: context.limits.maxSteps,
+    timeoutMs: context.limits.timeoutMs,
+    maxInputLength: context.limits.maxInputLength,
+  };
 
   switch (condition.type) {
     case 'always':
@@ -108,16 +127,22 @@ const evaluateLeaf = (condition: DedupCondition, pair: DedupPair, context: Evalu
     }
 
     case 'title-similarity':
-      return scored('title-similarity', similarity(pair.left.title, pair.right.title), condition.atLeast, 'title');
+      return scored('title-similarity', similarity(pair.left.title, pair.right.title, limits), condition.atLeast, 'title', limits.maxInputLength);
 
     case 'venue-similarity':
-      return scored('venue-similarity', similarity(pair.left.venue, pair.right.venue), condition.atLeast, 'venue');
+      return scored('venue-similarity', similarity(pair.left.venue, pair.right.venue, limits), condition.atLeast, 'venue', limits.maxInputLength);
 
     case 'creator-similarity': {
       const left = condition.firstOnly === true ? (pair.left.creators ?? []).slice(0, 1) : pair.left.creators;
       const right = condition.firstOnly === true ? (pair.right.creators ?? []).slice(0, 1) : pair.right.creators;
-      const score = nameOverlap(left, right);
-      return scored('creator-similarity', score, condition.atLeast, condition.firstOnly === true ? 'first creator' : 'creator');
+      const score = nameOverlap(left, right, limits);
+      return scored(
+        'creator-similarity',
+        score,
+        condition.atLeast,
+        condition.firstOnly === true ? 'first creator' : 'creator',
+        limits.maxInputLength,
+      );
     }
 
     case 'year-within': {

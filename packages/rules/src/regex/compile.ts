@@ -7,6 +7,16 @@
  * the body five times, which is why `MAX_REPEAT` in the parser and `MAX_PROGRAM` here both exist. A
  * pattern that would need a program larger than the cap is refused at compile time; the alternative
  * is a rule set that quietly costs a gigabyte.
+ *
+ * `MAX_PROGRAM` alone is not enough, because it counts what was *emitted* and a repetition can cost
+ * a great deal while emitting nothing. `(?:(?:(?:){1000}){1000}){1000}` is thirty characters, has a
+ * three-instruction program, and took 15.8 seconds to compile: the empty body emits no instruction,
+ * so the copying loops ran a billion times without the cap ever being consulted. A fourth level of
+ * nesting is four hours. `MAX_COMPILE_STEPS` below counts the *work*, whether or not it produces an
+ * instruction, so the refusal is a function of what compiling costs rather than of what it yields.
+ * This matters at the front door and not only in the engine: `MatcherSchema` compiles the pattern
+ * inside Zod validation, so a rule set POSTed to the API is compiled synchronously on the request
+ * thread before anything else looks at it.
  */
 import { RegexSyntaxError } from './errors.js';
 import type { Assertion, CodeRange, ParsedPattern, RegexNode } from './parse.js';
@@ -40,6 +50,17 @@ export interface Program {
 /** A program larger than this is refused rather than compiled. */
 export const MAX_PROGRAM = 20_000;
 
+/**
+ * Units of compilation work — nodes visited and repetition copies attempted — allowed for one
+ * pattern, whether or not they emit anything.
+ *
+ * Generous next to any pattern a person writes: the whole of the README's rule set compiles in
+ * under a hundred, and a pattern that fills `MAX_PROGRAM` legitimately spends a little over
+ * `MAX_PROGRAM` here. It is the pathological case it exists to catch, and there the growth is
+ * multiplicative, so no near-miss is possible.
+ */
+export const MAX_COMPILE_STEPS = 200_000;
+
 /** Does every branch of this node start with `^`? Used to skip the sliding start of the search. */
 const startsAnchored = (node: RegexNode): boolean => {
   switch (node.kind) {
@@ -60,6 +81,15 @@ const startsAnchored = (node: RegexNode): boolean => {
 
 export const compilePattern = (parsed: ParsedPattern, pattern: string): Program => {
   const insts: MutableInst[] = [];
+  let work = 0;
+
+  /** Charged for every node visited and every repetition copy attempted, emitting or not. */
+  const spend = (): void => {
+    work += 1;
+    if (work > MAX_COMPILE_STEPS) {
+      throw new RegexSyntaxError(`pattern needs more than ${MAX_COMPILE_STEPS} steps to compile`, pattern, 0);
+    }
+  };
 
   const emit = (inst: MutableInst): number => {
     if (insts.length >= MAX_PROGRAM) {
@@ -81,6 +111,7 @@ export const compilePattern = (parsed: ParsedPattern, pattern: string): Program 
   };
 
   const emitNode = (node: RegexNode): void => {
+    spend();
     switch (node.kind) {
       case 'empty':
         return;
@@ -155,12 +186,21 @@ export const compilePattern = (parsed: ParsedPattern, pattern: string): Program 
         emitStar(body, lazy);
         return;
       }
-      for (let index = 0; index < min - 1; index += 1) emitNode(body);
+      for (let index = 0; index < min - 1; index += 1) {
+        spend();
+        emitNode(body);
+      }
       emitPlus(body, lazy);
       return;
     }
-    for (let index = 0; index < min; index += 1) emitNode(body);
-    for (let index = min; index < max; index += 1) emitOptional(body, lazy);
+    for (let index = 0; index < min; index += 1) {
+      spend();
+      emitNode(body);
+    }
+    for (let index = min; index < max; index += 1) {
+      spend();
+      emitOptional(body, lazy);
+    }
   };
 
   emit({ op: 'save', slot: 0 });

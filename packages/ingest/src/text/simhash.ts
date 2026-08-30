@@ -12,12 +12,20 @@
  */
 import { createHash } from 'node:crypto';
 
+import { DEFAULT_SIMHASH_MAX_CHARS } from '../budgets.js';
+
 const SHINGLE = 3;
 const BITS = 64;
 
-/** Sixteen hex characters, or null when there is not enough text to say anything. */
-export const simhash = (text: string): string | null => {
-  const tokens = tokenise(text);
+/**
+ * Sixteen hex characters, or null when there is not enough text to say anything.
+ *
+ * `maxChars` bounds the work (ADR-0022 §5: nothing unbounded runs synchronously). Text past it is
+ * not read: see `DEFAULT_SIMHASH_MAX_CHARS` for why a prefix is the right answer here and a refusal
+ * is not.
+ */
+export const simhash = (text: string, maxChars: number = DEFAULT_SIMHASH_MAX_CHARS): string | null => {
+  const tokens = tokenise(text.length > maxChars ? text.slice(0, maxChars) : text);
   if (tokens.length === 0) return null;
 
   const shingles = new Map<string, number>();

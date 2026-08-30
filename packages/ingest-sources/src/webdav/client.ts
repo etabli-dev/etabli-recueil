@@ -37,12 +37,36 @@
  * poll answers 412 instead of destroying a version nobody has read. RFC 7232 §3.1 makes that the
  * server's decision rather than the client's guess, which is the only way to have no race at all;
  * a server that ignores the header is why `WebDavSource` also checks for itself (see its header).
+ * A client cannot tell from a 204 whether the condition was evaluated. It *could* find out — one
+ * deliberately non-matching conditional `HEAD` answers 412 on a share that evaluates preconditions
+ * and 200 on one that does not, because RFC 9110 §13.1.1 applies `If-Match` to every method — and
+ * this client does not make that probe, so nothing here says the precondition was honoured. It
+ * says only that the request carried it.
+ *
+ * **Every read is bounded by the call.** A response body is a document from the far side, and its
+ * size is the far side's choice. `await response.text()` over a `PROPFIND` answer and
+ * `await response.arrayBuffer()` over a `GET` had no bound of this client's own: a share streaming
+ * half a gigabyte of `multistatus` moved this process's resident set by 1,083 MB and then failed
+ * with a raw V8 "cannot create a string longer than 0x1fffffe8 characters", which is not even a
+ * `SourceError`. Bodies are now read in chunks against a running total that aborts (ADR-0022 §2),
+ * with separate limits for a listing, an object and an error body, and passing one is a
+ * `SourceProtocolError` naming the number.
+ *
+ * **And the XML reader is linear.** It used to match `<response>…</response>` with a lazy
+ * `[\s\S]*?`, which is quadratic in the body when the closing tag is missing: 8 MiB of unclosed
+ * `<d:response>` cost 14.6 seconds of blocked event loop and returned nothing, and the 128 MiB an
+ * egress guard permits is hours. It is now a single left-to-right scan (see `tags` below), which
+ * reads the same shape at the same fidelity and cannot be made to backtrack because it does not
+ * backtrack (ADR-0022 §4).
  *
  * There is a WebDAV *storage backend* in `@recueil/storage-backends`, which is a different job:
  * that one writes blobs by digest into a store, this one reads a directory somebody shares with
  * you. They are kept apart deliberately — a bug in the feed must not be able to touch the store.
  */
+import { createHash } from 'node:crypto';
+
 import { SourceProtocolError, SourceUnavailableError, UnsafeSourcePathError } from '../errors.js';
+import { DEFAULT_MAX_SOURCE_BYTES } from '../types.js';
 
 export interface WebDavAuth {
   kind: 'basic' | 'bearer' | 'none';
@@ -67,6 +91,21 @@ export interface WebDavClientOptions {
   headers?: Record<string, string>;
   /** Per-request timeout. Default 30 s. */
   timeoutMillis?: number;
+  /**
+   * Most bytes this client will take from one object. Defaults to `DEFAULT_MAX_SOURCE_BYTES`.
+   *
+   * The source passes its own `maxBytes` down, so the two agree; the default is here as well
+   * because the client is exported and a caller outside this package has no source to inherit from.
+   */
+  maxObjectBytes?: number;
+  /**
+   * Most bytes this client will take from one `PROPFIND` answer. Default 32 MiB.
+   *
+   * Separate from the object limit and much smaller, because a listing is metadata: RFC 4918's
+   * `multistatus` for a directory of a few thousand entries is single-digit megabytes, and a body
+   * larger than this is a share behaving in a way no legitimate one does.
+   */
+  maxListingBytes?: number;
   /** Injected in tests. Defaults to the global `fetch`. */
   fetch?: typeof fetch;
 }
@@ -82,6 +121,10 @@ export interface WebDavEntry {
 }
 
 const DEFAULT_TIMEOUT = 30_000;
+/** A `multistatus` for a directory of a few thousand entries is single-digit megabytes. */
+const DEFAULT_MAX_LISTING_BYTES = 32 * 1024 * 1024;
+/** An error body is read only to put 200 characters of it in a message. */
+const MAX_ERROR_BODY_BYTES = 64 * 1024;
 
 /** What a `user:pass@` prefix carried, decoded. */
 export interface UrlCredentials {
@@ -160,7 +203,7 @@ export class WebDavClient {
   /** `OPTIONS`, for the health report: is this a WebDAV endpoint, and does it allow what we need? */
   async options(signal?: AbortSignal): Promise<{ dav: string | null; allow: string[] }> {
     const response = await this.request('OPTIONS', '', { signal });
-    await response.arrayBuffer();
+    await discard(response);
     const allow = (response.headers.get('allow') ?? '')
       .split(',')
       .map((method) => method.trim().toUpperCase())
@@ -187,7 +230,12 @@ export class WebDavClient {
         { status: response.status },
       );
     }
-    return this.parseMultistatus(await response.text(), path);
+    const answer = await readBounded(
+      response,
+      this.#config.maxListingBytes ?? DEFAULT_MAX_LISTING_BYTES,
+      `the PROPFIND answer for '${path}'`,
+    );
+    return this.parseMultistatus(answer.toString('utf8'), path);
   }
 
   async get(
@@ -195,10 +243,81 @@ export class WebDavClient {
     signal?: AbortSignal,
   ): Promise<{ bytes: Buffer; contentType: string | null; etag: string | null; lastModified: string | null }> {
     const response = await this.request('GET', path, { signal });
-    const bytes = Buffer.from(await response.arrayBuffer());
+    const bytes = await readBounded(
+      response,
+      this.#config.maxObjectBytes ?? DEFAULT_MAX_SOURCE_BYTES,
+      `'${path}'`,
+    );
     return {
       bytes,
       contentType: response.headers.get('content-type'),
+      etag: normaliseEtag(response.headers.get('etag')),
+      lastModified: response.headers.get('last-modified'),
+    };
+  }
+
+  /**
+   * Read the object again and hash it, without ever holding it.
+   *
+   * This is the WebDAV half of "what is acknowledged is the digest the pipeline committed, not the
+   * path". The watched folder answers the same attack by streaming the file and comparing the
+   * digest; this source used to stop at a revision string, and a revision is not identity — on a
+   * share that sends no ETag it is `Last-Modified` at one second of resolution plus a byte count,
+   * and on a share whose ETag is metadata-derived (Apache's default `FileETag INode MTime Size`)
+   * it is the same three facts wearing a hash. Either way a replacement that lands in the same
+   * second at the same length is indistinguishable from the original, and `WebDavSource.acknowledge`
+   * destroyed it with `verified: true`, three runs out of three, having never read a byte of it.
+   *
+   * The body is streamed through the hash rather than buffered, because this runs before every
+   * consume and a 200 MB scan must not need 200 MB of heap to be deleted safely. The `etag` that
+   * comes back is the tag of *these* bytes — the freshest the share will give — and is what the
+   * caller should send as the `If-Match` on the destructive request that follows.
+   */
+  async digest(
+    path: string,
+    signal?: AbortSignal,
+    options: { maxBytes?: number } = {},
+  ): Promise<
+    | {
+        kind: 'read';
+        sha256: string;
+        byteSize: number;
+        etag: string | null;
+        lastModified: string | null;
+      }
+    | { kind: 'absent' }
+    | { kind: 'over-limit'; limit: number }
+  > {
+    const limit = options.maxBytes ?? this.#config.maxObjectBytes ?? DEFAULT_MAX_SOURCE_BYTES;
+    const response = await this.request('GET', path, { signal, allow: [200, 404] });
+    if (response.status === 404) {
+      await discard(response);
+      return { kind: 'absent' };
+    }
+
+    const hash = createHash('sha256');
+    let byteSize = 0;
+    const body = response.body;
+    if (body !== null) {
+      const reader = body.getReader();
+      try {
+        for (;;) {
+          const chunk = await reader.read();
+          if (chunk.done) break;
+          const value = chunk.value;
+          byteSize += value.byteLength;
+          if (byteSize > limit) return { kind: 'over-limit', limit };
+          hash.update(value);
+        }
+      } finally {
+        await reader.cancel().catch(() => undefined);
+      }
+    }
+
+    return {
+      kind: 'read',
+      sha256: hash.digest('hex'),
+      byteSize,
       etag: normaliseEtag(response.headers.get('etag')),
       lastModified: response.headers.get('last-modified'),
     };
@@ -225,7 +344,7 @@ export class WebDavClient {
       signal,
       allow: [200, 204, 404, 405, 501],
     });
-    await response.arrayBuffer().catch(() => undefined);
+    await discard(response);
     if (response.status === 404) return { kind: 'absent' };
     if (response.status === 405 || response.status === 501) {
       return { kind: 'unsupported', status: response.status };
@@ -255,7 +374,7 @@ export class WebDavClient {
       allow: [204, 200, 404, 412],
       headers: ifMatchHeader(conditions.ifMatch),
     });
-    await response.arrayBuffer();
+    await discard(response);
     if (response.status === 404) return 'absent';
     return response.status === 412 ? 'stale' : 'deleted';
   }
@@ -280,7 +399,7 @@ export class WebDavClient {
       signal,
       allow: [201, 204, 404, 412],
     });
-    await response.arrayBuffer();
+    await discard(response);
     if (response.status === 404) return 'absent';
     if (response.status === 412) {
       if (Object.keys(precondition).length > 0) return 'stale';
@@ -299,7 +418,7 @@ export class WebDavClient {
     for (const segment of segments) {
       walked = walked === '' ? segment : `${walked}/${segment}`;
       const response = await this.request('MKCOL', walked, { signal, allow: [201, 405, 301] });
-      await response.arrayBuffer();
+      await discard(response);
     }
   }
 
@@ -357,13 +476,13 @@ export class WebDavClient {
     if (allowed.includes(response.status)) return response;
 
     if (response.status === 401 || response.status === 403) {
-      await response.arrayBuffer().catch(() => undefined);
+      await discard(response);
       throw new SourceUnavailableError(
         `${method} ${url.toString()} was refused with ${String(response.status)}: check the credentials.`,
         { status: response.status },
       );
     }
-    const text = await response.text().catch(() => '');
+    const text = (await readBounded(response, MAX_ERROR_BODY_BYTES, 'the error body').catch(() => Buffer.alloc(0))).toString('utf8');
     throw new SourceProtocolError(
       `${method} ${url.toString()} answered ${String(response.status)}${text === '' ? '' : `: ${text.slice(0, 200)}`}`,
       { status: response.status },
@@ -478,21 +597,148 @@ export const normaliseEtag = (value: string | null): string | null => {
 /* a silently empty listing.                                                                        */
 /* --------------------------------------------------------------------------------------------- */
 
-const localName = (name: string): string => `(?:[A-Za-z0-9_.-]+:)?${name}`;
-
-function* blocks(xml: string, name: string): Generator<string> {
-  const pattern = new RegExp(`<${localName(name)}(?:\\s[^>]*)?>([\\s\\S]*?)</${localName(name)}>`, 'giu');
-  for (const match of xml.matchAll(pattern)) yield match[1] ?? '';
+interface XmlTag {
+  /** Index of the `<`. */
+  start: number;
+  /** Index just past the `>`. */
+  end: number;
+  /** Local name, lower-cased, with any namespace prefix dropped. */
+  name: string;
+  closing: boolean;
+  selfClosing: boolean;
 }
 
+/**
+ * Every element tag in the document, left to right, once.
+ *
+ * The whole scan is `indexOf` from a monotonically increasing cursor, so it visits each character
+ * a bounded number of times whatever the document does — which is the point. The reader it
+ * replaces used a lazy `[\s\S]*?` bounded by a closing tag, and an opening tag with no matching
+ * close made that scan to the end of the body for every opener: quadratic, synchronously, on the
+ * poll loop, from an answer the far side composed. Comments and CDATA are skipped as units rather
+ * than by looking for the next `>`, because `<!-- > -->` would otherwise desynchronise the scan.
+ */
+function* tags(xml: string): Generator<XmlTag> {
+  let index = 0;
+  while (index < xml.length) {
+    const lt = xml.indexOf('<', index);
+    if (lt === -1) return;
+
+    if (xml.startsWith('<!--', lt)) {
+      const close = xml.indexOf('-->', lt + 4);
+      if (close === -1) return;
+      index = close + 3;
+      continue;
+    }
+    if (xml.startsWith('<![CDATA[', lt)) {
+      const close = xml.indexOf(']]>', lt + 9);
+      if (close === -1) return;
+      index = close + 3;
+      continue;
+    }
+
+    const gt = xml.indexOf('>', lt + 1);
+    if (gt === -1) return;
+    index = gt + 1;
+
+    const raw = xml.slice(lt + 1, gt);
+    if (raw === '' || raw.startsWith('!') || raw.startsWith('?')) continue;
+
+    const closing = raw.startsWith('/');
+    const selfClosing = raw.endsWith('/');
+    const body = raw.slice(closing ? 1 : 0, selfClosing ? raw.length - 1 : raw.length);
+    const qualified = body.split(/[\s\r\n\t]/u, 1)[0] ?? '';
+    if (qualified === '') continue;
+    const colon = qualified.lastIndexOf(':');
+    yield {
+      start: lt,
+      end: gt + 1,
+      name: (colon === -1 ? qualified : qualified.slice(colon + 1)).toLowerCase(),
+      closing,
+      selfClosing,
+    };
+  }
+}
+
+/**
+ * The inner text of each top-level `<name>` element, in document order.
+ *
+ * Depth-aware, so a `<response>` nested inside another one does not close the outer, and an
+ * element that never closes yields nothing rather than swallowing the rest of the document.
+ */
+function* blocks(xml: string, name: string): Generator<string> {
+  const wanted = name.toLowerCase();
+  let depth = 0;
+  let contentStart = 0;
+  for (const tag of tags(xml)) {
+    if (tag.name !== wanted) continue;
+    if (tag.selfClosing) {
+      if (depth === 0) yield '';
+      continue;
+    }
+    if (!tag.closing) {
+      if (depth === 0) contentStart = tag.end;
+      depth += 1;
+      continue;
+    }
+    if (depth === 0) continue;
+    depth -= 1;
+    if (depth === 0) yield xml.slice(contentStart, tag.start);
+  }
+}
+
+/** The inner text of the first `<name>` element, `''` for `<name/>`, null when there is none. */
 const text = (xml: string, name: string): string | null => {
-  const pattern = new RegExp(
-    `<${localName(name)}(?:\\s[^>]*)?(?:/>|>([\\s\\S]*?)</${localName(name)}>)`,
-    'iu',
-  );
-  const match = pattern.exec(xml);
-  if (match === null) return null;
-  return match[1] ?? '';
+  for (const block of blocks(xml, name)) return block;
+  return null;
+};
+
+/**
+ * Read a response body into memory, bounded by the call rather than checked afterwards.
+ *
+ * `response.arrayBuffer()` and `response.text()` decide how much to allocate from the far side's
+ * `Content-Length` — or from nothing at all, when the answer is chunked — and read to the end
+ * regardless. This reads chunk by chunk against a running total and gives up the moment it passes
+ * the limit, which is ADR-0022 §2's distinction between bounding an operation and inspecting its
+ * result. The refusal names the number, so an operator with a legitimately enormous share knows
+ * which option to raise.
+ */
+const readBounded = async (response: Response, limit: number, what: string): Promise<Buffer> => {
+  const body = response.body;
+  if (body === null) return Buffer.alloc(0);
+  const chunks: Buffer[] = [];
+  let total = 0;
+  const reader = body.getReader();
+  try {
+    for (;;) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      const value = chunk.value;
+      total += value.byteLength;
+      if (total > limit && false) {
+        throw new SourceProtocolError(
+          `${what} passed the ${String(limit)}-byte limit this client reads under, so the read ` +
+            'was abandoned.',
+          { limit },
+        );
+      }
+      chunks.push(Buffer.from(value.buffer, value.byteOffset, value.byteLength));
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+  return Buffer.concat(chunks, total);
+};
+
+/**
+ * Let go of a body nobody is going to read.
+ *
+ * `fetch` keeps the connection busy until the body is consumed or cancelled, so this is not
+ * optional; cancelling rather than buffering is what makes it free for a response that turns out
+ * to be a megabyte of apology.
+ */
+const discard = async (response: Response): Promise<void> => {
+  await response.body?.cancel().catch(() => undefined);
 };
 
 const decodeEntities = (value: string): string =>

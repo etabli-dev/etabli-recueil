@@ -37,7 +37,7 @@ import type {
 import { ConflictError, InvariantError, NotFoundError } from '../errors.js';
 import { newId } from '../ids.js';
 import { sniffMimeType } from '../mime.js';
-import type { StorageBackend } from '../storage/backend.js';
+import type { ReadBufferOptions, StorageBackend } from '../storage/backend.js';
 import { nowTimestamp } from '../time.js';
 import type { Actor } from './actor.js';
 import { systemActor } from './actor.js';
@@ -257,9 +257,17 @@ export class DocumentService {
     return this.db.select().from(documents).where(eq(documents.sha256, sha256)).get() ?? null;
   }
 
-  /** The bytes themselves. */
-  async readBuffer(id: string): Promise<Buffer> {
-    return this.storage.getBuffer(this.getDocument(id).sha256);
+  /**
+   * The bytes themselves, held in memory.
+   *
+   * Bounded by the backend's `maxBytes` (ADR-0022 §2), with a default that refuses the scans this
+   * library is expected to hold rather than buffering them: a document is ingested from a mailbox
+   * or a watched folder, so its size is a stranger's choice, and `documents.byte_size` is a record
+   * of what arrived rather than a promise about what is on disk now. Stream with
+   * `storage.get(sha256)` for anything that may be large.
+   */
+  async readBuffer(id: string, options: ReadBufferOptions = {}): Promise<Buffer> {
+    return this.storage.getBuffer(this.getDocument(id).sha256, options);
   }
 
   /**

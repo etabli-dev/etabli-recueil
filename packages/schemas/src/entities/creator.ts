@@ -61,7 +61,9 @@ const creatorWritableShape = {
   isni: z.string().regex(/^\d{15}[\dX]$/, 'must be a 16-character ISNI').nullish(),
   viaf: z.string().regex(/^\d{1,22}$/).nullish(),
   ror: RorSchema.nullish().meta({ description: 'Organisations only.' }),
-  wikidataId: z.string().regex(/^Q\d+$/).nullish(),
+  // Bounded like every other identifier here: `\d+` is unanchored in length, so without a maximum
+  // the match is proportional to whatever arrives (ADR-0022 §2). Q-numbers are eight digits.
+  wikidataId: z.string().max(32).regex(/^Q\d+$/).nullish(),
 } as const;
 
 const creatorServerShape = {

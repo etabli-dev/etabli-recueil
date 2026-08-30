@@ -34,6 +34,7 @@ import type { Readable } from 'node:stream';
 import { Readable as NodeReadable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 
+import { ResourceBudgetError } from '../errors.js';
 import { newId } from '../ids.js';
 import type {
   BlobSource,
@@ -41,9 +42,10 @@ import type {
   PutOptions,
   PutResult,
   PutVerification,
+  ReadBufferOptions,
   StorageBackend,
 } from './backend.js';
-import { assertSha256, storageKeyFor } from './backend.js';
+import { assertSha256, DEFAULT_MAX_BUFFER_BYTES, storageKeyFor } from './backend.js';
 
 const TEMP_DIRECTORY = '.tmp';
 
@@ -71,6 +73,15 @@ export interface StrayTempFile {
   size: number;
   /** Last modification, which is how old the interrupted write is. */
   modifiedAt: Date;
+  /**
+   * The same instant in nanoseconds, which is what `sweepTempFiles` re-checks against.
+   *
+   * `mtime` is milliseconds, and a chunk written inside the same millisecond as the listing leaves
+   * it unchanged — so a comparison over `mtime` would still authorise deleting an upload that had
+   * resumed. Kept beside it rather than replacing it because `modifiedAt` is what an operator's
+   * report prints.
+   */
+  modifiedAtNs: bigint;
 }
 
 export class LocalFsBackend implements StorageBackend {
@@ -182,9 +193,14 @@ export class LocalFsBackend implements StorageBackend {
     for (const entry of entries) {
       if (!entry.isFile() || !entry.name.endsWith('.part')) continue;
       const path = join(this.tempRoot, entry.name);
-      const found = await stat(path).catch(() => null);
+      const found = await stat(path, { bigint: true }).catch(() => null);
       if (found === null) continue;
-      stray.push({ path, size: found.size, modifiedAt: found.mtime });
+      stray.push({
+        path,
+        size: Number(found.size),
+        modifiedAt: new Date(Number(found.mtimeNs / 1_000_000n)),
+        modifiedAtNs: found.mtimeNs,
+      });
     }
     stray.sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0));
     return stray;
@@ -203,6 +219,23 @@ export class LocalFsBackend implements StorageBackend {
     let bytes = 0;
     for (const file of await this.listStrayTempFiles()) {
       if (file.modifiedAt.getTime() > cutoff) continue;
+
+      // The listing is a check, and the `rm` below is the destructive act it authorises, with a
+      // whole directory walk and one `stat` per entry in between. In that gap a `put` that had
+      // stalled for an hour can resume: it writes another chunk, and this loop then deletes the
+      // temporary file of an upload that is still running, so the `rename` at the end of `put`
+      // fails and the bytes are lost. So the decision is re-taken against the file as it is at
+      // the moment of the delete, with no `await` between the two calls — and it is re-taken over
+      // identity rather than over age. `mtimeNs` plus the length is the identity of a file *we*
+      // wrote: an ordinary writer cannot reproduce a nanosecond timestamp, and a resumed `put`
+      // necessarily changes both. `bigint: true` is what makes the comparison nanosecond-exact;
+      // the millisecond `mtime` this loop used to read cannot see a chunk written in the same
+      // millisecond.
+      const now = await stat(file.path, { bigint: true }).catch(() => null);
+      if (now === null) continue;
+      if (now.mtimeNs !== file.modifiedAtNs || now.size !== BigInt(file.size)) continue;
+      if (Number(now.mtimeNs / 1_000_000n) > cutoff) continue;
+
       await rm(file.path, { force: true });
       removed += 1;
       bytes += file.size;
@@ -226,10 +259,43 @@ export class LocalFsBackend implements StorageBackend {
     return createReadStream(this.path(sha256));
   }
 
-  async getBuffer(sha256: string): Promise<Buffer> {
+  /**
+   * The whole blob, bounded (ADR-0022 §2).
+   *
+   * Two bounds, in the order the ADR asks for. The `stat` is the fast rejection: it is metadata, so
+   * it may refuse but may never be the only guard — a file can grow between the `stat` and the
+   * read, and on this store the name is an assertion rather than a fact. The running total is the
+   * bound that holds: the stream is destroyed the moment the total passes the limit, so the
+   * refusal costs one chunk beyond it rather than the whole object.
+   */
+  async getBuffer(sha256: string, options: ReadBufferOptions = {}): Promise<Buffer> {
+    const maxBytes = options.maxBytes ?? DEFAULT_MAX_BUFFER_BYTES;
+    const declared = await this.stat(sha256);
+    if (declared !== null && declared.size > maxBytes) {
+      throw new ResourceBudgetError(
+        `Blob ${sha256} is ${declared.size} bytes; the most this call will hold in memory is ` +
+          `${maxBytes}. Stream it with get() instead.`,
+        'maxBytes',
+        { sha256, size: declared.size, limit: maxBytes },
+      );
+    }
+
+    const stream = await this.get(sha256);
     const chunks: Buffer[] = [];
-    for await (const chunk of await this.get(sha256)) {
-      chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : (chunk as Buffer));
+    let total = 0;
+    for await (const chunk of stream) {
+      const buffer = typeof chunk === 'string' ? Buffer.from(chunk) : (chunk as Buffer);
+      total += buffer.byteLength;
+      if (total > maxBytes) {
+        stream.destroy();
+        throw new ResourceBudgetError(
+          `Blob ${sha256} passed ${maxBytes} bytes while being read into memory. Stream it with ` +
+            'get() instead.',
+          'maxBytes',
+          { sha256, limit: maxBytes },
+        );
+      }
+      chunks.push(buffer);
     }
     return Buffer.concat(chunks);
   }

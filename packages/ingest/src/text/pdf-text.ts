@@ -32,6 +32,18 @@
  * (ADR-0022 §2, §3, §5). The defaults are `DEFAULT_PDF_BUDGET`; exceeding one raises a
  * `ResourceBudgetError`, which is an `IngestError`, which the pipeline routes to the review queue
  * with the reason rather than crashing or silently returning no text (P3).
+ *
+ * **Across the whole call means across the whole call.** The hardening re-attack found the clock
+ * covering only the stream loop while `countPages` ran after it, outside every budget, on a lazy
+ * `[^>]*?` that re-scanned to the end of the file for every `/Type /Pages` marker that was not
+ * followed by a `>`. A PDF with no streams at all skipped the loop, so no deadline check ran at
+ * all, and the function *returned normally*: 8 MiB cost 42 s and reported `ok`. Three things
+ * answer it, and all three are needed. The deadline is read again after the loop and inside the
+ * page scan, so the clock is a property of the call rather than of one loop. Every span this
+ * module matches lazily is written with an explicit repetition ceiling, so no single match attempt
+ * can walk the rest of the file. And the `latin1` copy is made once and handed to both readers,
+ * rather than each making its own — two full-length copies of a permitted 128 MiB input is a
+ * budget being spent twice for one file.
  */
 import { inflateSync } from 'node:zlib';
 
@@ -76,13 +88,16 @@ export const extractPdfText = (bytes: Buffer, budget: PdfBudget = DEFAULT_PDF_BU
 
   const deadline = Date.now() + budget.maxMillis;
   const ledger = new BudgetLedger(budget.maxTotalOutputBytes, 'pdf.maxTotalOutputBytes');
+  // One `latin1` copy for the whole call. `findStreams` and the page scan both need the file as a
+  // string; making it twice doubled the peak for every PDF the reader accepted.
+  const latin = bytes.toString('latin1');
   const chunks: string[] = [];
   let streamsFound = 0;
   let streamsRead = 0;
   let sawFlate = false;
   let sawOtherFilter = false;
 
-  for (const stream of findStreams(bytes)) {
+  for (const stream of findStreams(bytes, latin)) {
     streamsFound += 1;
     if (streamsFound > budget.maxStreams) {
       throw new ResourceBudgetError(
@@ -145,7 +160,23 @@ export const extractPdfText = (bytes: Buffer, budget: PdfBudget = DEFAULT_PDF_BU
   }
 
   const text = normaliseWhitespace(chunks.join('\n'));
-  const pageCount = countPages(bytes);
+
+  // Read the clock again here rather than only at the top of the loop. A PDF with zero streams
+  // never entered the loop, so without this line a file that costs nothing to inflate and
+  // everything to scan is a file no deadline was ever checked against.
+  //
+  // `>=` rather than `>`: a deadline that has been reached has been spent, and the difference
+  // makes a budget of zero milliseconds mean what it says instead of meaning "one tick".
+  if (Date.now() >= deadline) {
+    throw new ResourceBudgetError(
+      'pdf.maxMillis',
+      budget.maxMillis,
+      `Reading the PDF passed the pdf.maxMillis budget of ${budget.maxMillis} ms after ` +
+        `${streamsRead} of ${streamsFound} streams, before the page count was read.`,
+      { streamsRead, streamsFound },
+    );
+  }
+  const pageCount = countPages(latin, deadline, budget);
 
   // A file whose streams all inflated and produced text is one this reader probably read; a file
   // with filters it does not implement is one it certainly did not.
@@ -207,8 +238,19 @@ interface RawStream {
   data: Buffer;
 }
 
-function* findStreams(bytes: Buffer): Generator<RawStream> {
-  const latin = bytes.toString('latin1');
+/**
+ * How far back of a `stream` keyword the reader will look for its dictionary.
+ *
+ * `lastIndexOf('<<', here)` with no floor walks to byte 0 when the file holds no `<<` at all, and
+ * it does that once per stream: 500 streams behind an 8 MiB prefix cost 4.65 s, and the only thing
+ * that stopped 2 000 streams behind 32 MiB was the wall clock firing at 15 s. The dictionary of a
+ * stream object sits immediately before it by construction — `<< … >>\nstream` — so a window is
+ * not a heuristic here, it is the format. Sixty-four kilobytes is far more than any real stream
+ * dictionary and turns a quadratic into a constant per stream.
+ */
+const DICTIONARY_LOOKBEHIND = 64 * 1024;
+
+function* findStreams(bytes: Buffer, latin: string): Generator<RawStream> {
   STREAM_START.lastIndex = 0;
   let match: RegExpExecArray | null;
   while ((match = STREAM_START.exec(latin)) !== null) {
@@ -220,8 +262,10 @@ function* findStreams(bytes: Buffer): Generator<RawStream> {
     if (latin[dataEnd - 1] === '\n') dataEnd -= 1;
     if (latin[dataEnd - 1] === '\r') dataEnd -= 1;
 
-    const dictionaryStart = latin.lastIndexOf('<<', match.index);
-    const dictionary = dictionaryStart === -1 ? '' : latin.slice(dictionaryStart, match.index);
+    const floor = Math.max(0, match.index - DICTIONARY_LOOKBEHIND);
+    const window = latin.slice(floor, match.index);
+    const relative = window.lastIndexOf('<<');
+    const dictionary = relative === -1 ? '' : window.slice(relative);
 
     yield { dictionary, data: bytes.subarray(dataStart, dataEnd) };
     STREAM_START.lastIndex = endIndex + 'endstream'.length;
@@ -371,13 +415,75 @@ const decodeHexString = (hex: string): string => {
   return out;
 };
 
-const countPages = (bytes: Buffer): number | null => {
-  const latin = bytes.toString('latin1');
-  const counts = [...latin.matchAll(/\/Type\s*\/Pages[^>]*?\/Count\s+(\d+)/gu)]
-    .map((match) => Number.parseInt(match[1] ?? '', 10))
-    .filter((value) => Number.isInteger(value));
-  if (counts.length > 0) return Math.max(...counts);
-  const pages = [...latin.matchAll(/\/Type\s*\/Page[^s]/gu)].length;
+/**
+ * How far past `/Type /Pages` the `/Count` may sit before this reader stops looking.
+ *
+ * The unbounded `[^>]*?` this replaces is the whole of the re-attack's CRITICAL: with no `>` after
+ * the marker, one lazy span re-scans to the end of the file, once per marker, quadratically, and
+ * the caller gets `pageCount: null` and no refusal for it. A page-tree node is a dictionary of a
+ * handful of keys, so a ceiling in the low hundreds is the format speaking rather than a guess,
+ * and it makes the worst case per starting position a constant instead of the file length.
+ */
+const PAGES_DICTIONARY_SPAN = 512;
+
+/** Markers examined before the scan gives up on counting rather than keeps paying for it. */
+const MAX_PAGE_MARKERS = 65_536;
+
+const PAGES_COUNT = new RegExp(
+  String.raw`/Type\s{0,16}/Pages[^>]{0,${String(PAGES_DICTIONARY_SPAN)}}?/Count\s{1,16}(\d{1,10})`,
+  'gu',
+);
+
+const PAGE_MARKER = /\/Type\s{0,16}\/Page[^s]/gu;
+
+/**
+ * The page count, read under the same deadline as everything else in this call.
+ *
+ * Three bounds rather than one, because each covers a different way the scan can be made
+ * expensive: `PAGES_DICTIONARY_SPAN` bounds one match attempt, `MAX_PAGE_MARKERS` bounds how many
+ * attempts succeed, and the deadline bounds the wall clock over all of them. The deadline is
+ * consulted every `DEADLINE_EVERY` matches rather than every match, because `Date.now()` in the
+ * inner loop of a scan over 128 MiB is itself a cost.
+ *
+ * A page count is a nicety — it feeds the OCR gate's reporting, not a decision — so running out of
+ * markers returns what has been seen so far rather than refusing the file. Running out of *time*
+ * does refuse, because the clock is the budget the whole call is answerable to and a caller that
+ * silently absorbed it would be back where the re-attack found this function.
+ */
+const countPages = (latin: string, deadline: number, budget: PdfBudget): number | null => {
+  const DEADLINE_EVERY = 256;
+
+  const tick = (seen: number, phase: string): void => {
+    if (seen % DEADLINE_EVERY !== 0 || Date.now() < deadline) return;
+    throw new ResourceBudgetError(
+      'pdf.maxMillis',
+      budget.maxMillis,
+      `Reading the PDF passed the pdf.maxMillis budget of ${budget.maxMillis} ms while ` +
+        `${phase} (${seen} marker(s) examined).`,
+      { phase, markers: seen },
+    );
+  };
+
+  let best: number | null = null;
+  let seen = 0;
+  PAGES_COUNT.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = PAGES_COUNT.exec(latin)) !== null) {
+    seen += 1;
+    const value = Number.parseInt(match[1] ?? '', 10);
+    if (Number.isInteger(value) && (best === null || value > best)) best = value;
+    if (seen >= MAX_PAGE_MARKERS) break;
+    tick(seen, 'counting pages from the page tree');
+  }
+  if (best !== null) return best;
+
+  let pages = 0;
+  PAGE_MARKER.lastIndex = 0;
+  while (PAGE_MARKER.exec(latin) !== null) {
+    pages += 1;
+    if (pages >= MAX_PAGE_MARKERS) break;
+    tick(pages, 'counting /Type /Page markers');
+  }
   return pages > 0 ? pages : null;
 };
 

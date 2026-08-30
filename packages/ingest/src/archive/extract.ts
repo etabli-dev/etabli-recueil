@@ -22,7 +22,8 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
-import { BudgetLedger } from '../budgets.js';
+import { BudgetLedger, DEFAULT_EMAIL_BUDGET } from '../budgets.js';
+import type { EmailBudget } from '../budgets.js';
 import type { IngestConfig } from '../config.js';
 import { ArchiveLimitError } from '../errors.js';
 import type { ScratchSpace } from '../scratch.js';
@@ -206,9 +207,35 @@ const extractZip = async (options: ExtractOptions): Promise<ExtractionResult> =>
   return { kind: 'zip', members, email: null, skipped };
 };
 
+/**
+ * The parser's budget, derived from the pipeline's configuration and from what the containing
+ * archive has left.
+ *
+ * Three of the five numbers come from `IngestConfig`, so an operator who raises the archive limits
+ * for a legitimately large import raises these with them rather than hitting a second, hidden
+ * ceiling. The fourth — the whole-message total — is the container's *remaining* allowance, which
+ * is what makes a `.eml` inside a zip decode out of the zip's budget instead of opening its own
+ * (ADR-0022 §3). The input and header ceilings are this module's own, because `IngestConfig` has no
+ * opinion about how big a single message may be.
+ */
+const emailBudget = (config: IngestConfig, ledger: BudgetLedger): EmailBudget => ({
+  maxInputBytes: DEFAULT_EMAIL_BUDGET.maxInputBytes,
+  maxHeaderBytes: DEFAULT_EMAIL_BUDGET.maxHeaderBytes,
+  maxParts: config.maxArchiveEntries,
+  maxPartBytes: config.maxArchiveEntryBytes,
+  maxTotalBytes: ledger.allowance(config.maxArchiveTotalBytes),
+});
+
 const extractEmail = async (options: ExtractOptions): Promise<ExtractionResult> => {
   const { bytes, scratch, config } = options;
-  const email = parseEmail(bytes);
+  // The same ledger as the zip path, so a message carried inside an archive spends what that
+  // archive has left rather than opening a second budget of its own.
+  const ledger = containerLedger(options);
+
+  // Parsed under a budget, not parsed and then measured. The `maxArchiveEntries` check below used
+  // to be the first size comparison of any kind on this path, and by then every part of the tree
+  // had already been decoded and allocated.
+  const email = parseEmail(bytes, emailBudget(config, ledger));
 
   if (email.attachments.length > config.maxArchiveEntries) {
     throw new ArchiveLimitError(
@@ -220,9 +247,6 @@ const extractEmail = async (options: ExtractOptions): Promise<ExtractionResult> 
 
   const members: ExtractedMember[] = [];
   const skipped: Array<{ entryName: string; reason: string }> = [];
-  // The same ledger as the zip path, so a message carried inside an archive spends what that
-  // archive has left rather than opening a second budget of its own.
-  const ledger = containerLedger(options);
 
   for (const [index, part] of email.attachments.entries()) {
     if (part.bytes.length === 0) {

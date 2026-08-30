@@ -14,6 +14,7 @@
   "include": ["src/**/*.ts"],
   "exclude": ["test/**/*.ts", "vitest.config.ts", "drizzle.config.ts", "**/*.test.ts"],
   "references": [
+    { "path": "../rules/tsconfig.build.json" },
     { "path": "../schemas/tsconfig.build.json" }
   ]
 }

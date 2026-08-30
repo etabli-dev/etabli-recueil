@@ -9,7 +9,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { and, count, eq, isNull } from 'drizzle-orm';
 
-import { NotFoundError, TEXT_FILTER_CANDIDATES, VersionConflictError, schema } from '../src/index.js';
+import { ConflictError, NotFoundError, TEXT_FILTER_CANDIDATES, VersionConflictError, schema } from '../src/index.js';
 import { makeLibrary } from './helpers.js';
 import type { TestLibrary } from './helpers.js';
 
@@ -448,5 +448,80 @@ describe('LibraryService — a truncated text filter says so', () => {
     );
     expect(library.library.listItems({ text: 'hyperlactataemia' }).page.textFilterTruncated).toBeUndefined();
     expect(library.library.listItems({}).page.textFilterTruncated).toBeUndefined();
+  });
+});
+
+/**
+ * The archive serial number is unique among live items (`ux_item_office_asn`, CONCEPT §6).
+ *
+ * The index enforces it correctly and always did — the adversarial review could not defeat it. What
+ * it found is that the refusal arrived as a raw `SqliteError: UNIQUE constraint failed:
+ * item_office.asn`, which a caller cannot tell from an internal fault and which does not name the
+ * item holding the number. The review named `restoreItem`; the same driver error came out of two
+ * further paths nobody had named, because all three write the same column.
+ */
+describe('LibraryService — an ASN collision is a conflict, not a driver error', () => {
+  const withAsn = (asn: number) =>
+    library.library.createItem(
+      { itemType: 'document', office: { correspondent: 'Stadtwerke', asn } },
+      library.actor,
+    ).item;
+
+  const expectNamedConflict = (act: () => unknown, asn: number, holder: string): void => {
+    let thrown: unknown;
+    try {
+      act();
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown, 'nothing was thrown').toBeInstanceOf(ConflictError);
+    expect((thrown as Error).message).toContain(String(asn));
+    expect((thrown as Error).message).toContain(holder);
+    expect((thrown as Error).constructor.name).toBe('ConflictError');
+  };
+
+  it('refuses a restore that would bring a taken number back into the live index', () => {
+    const first = withAsn(5);
+    library.library.trashItem(first.id, library.actor);
+    const second = withAsn(5);
+
+    expectNamedConflict(() => library.library.restoreItem(first.id, library.actor), 5, second.id);
+
+    // And the index is still intact: exactly one live item holds the number.
+    const live = library.db
+      .select({ value: count() })
+      .from(schema.itemOffice)
+      .where(and(eq(schema.itemOffice.asn, 5), isNull(schema.itemOffice.itemTrashedAt)))
+      .get();
+    expect(live?.value).toBe(1);
+  });
+
+  it('refuses a second live item created with the same number', () => {
+    const holder = withAsn(7);
+    expectNamedConflict(() => withAsn(7), 7, holder.id);
+  });
+
+  it('refuses an update that moves an item onto a taken number', () => {
+    const holder = withAsn(9);
+    const other = library.library.createItem(
+      { itemType: 'document', office: { correspondent: 'Finanzamt' } },
+      library.actor,
+    ).item;
+
+    expectNamedConflict(
+      () => library.library.updateItem(other.id, { office: { correspondent: 'Finanzamt', asn: 9 } }, library.actor),
+      9,
+      holder.id,
+    );
+  });
+
+  it('lets an item keep its own number, and take one a trashed item has given up', () => {
+    const item = withAsn(11);
+    expect(() =>
+      library.library.updateItem(item.id, { office: { correspondent: 'Stadtwerke AG', asn: 11 } }, library.actor),
+    ).not.toThrow();
+
+    library.library.trashItem(item.id, library.actor);
+    expect(() => withAsn(11)).not.toThrow();
   });
 });

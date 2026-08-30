@@ -9,10 +9,22 @@
  *
  * The validator collects every problem rather than throwing on the first, because a rule set that
  * reports one error per save is a rule set nobody finishes editing.
+ *
+ * The regular expressions are checked against **the engine that will run them**, which is
+ * `@recueil/rules`' bounded matcher and no longer the native `RegExp` (ADR-0022 §4; see
+ * `engine.ts`). That matters twice over. A pattern the runtime engine cannot parse — a
+ * backreference, a lookahead — used to compile here and then refuse at ingest time, which is a
+ * rule that appears saved and never fires; now the operator is told at save time, which is the
+ * whole point of this file. And validation itself runs synchronously on an API request thread over
+ * a pattern somebody POSTed, so the compile has to be bounded too: `SafeRegex.compile` caps the
+ * pattern length, the nesting depth, the program size and the compile steps, where
+ * `new RegExp(...)` caps none of them.
  */
 import { ValidationError } from '@recueil/core';
+import { safeRegex } from '@recueil/rules';
 
 import { DETECTED_TYPES, IDENTIFIER_SCHEMES } from '../types.js';
+import { RULE_HEADER_LIMITS, RULE_TEXT_LIMITS } from './engine.js';
 import type { IngestRule, RuleMatch, RulePattern } from './types.js';
 
 export interface RuleProblem {
@@ -149,7 +161,10 @@ const validateMatch = (
   if (resolvedBy !== null) match.resolvedBy = resolvedBy;
 
   for (const key of ['path', 'filename', 'sender', 'subject', 'text'] as const) {
-    const pattern = validatePattern(source[key], `${path}.${key}`, ruleId, problems);
+    // The clause decides which budget the pattern will be compiled under at ingest time, so it
+    // decides which one it is checked against here. A pattern accepted under one and refused under
+    // the other would be a validator that does not validate what runs.
+    const pattern = validatePattern(source[key], `${path}.${key}`, ruleId, problems, key === 'text');
     if (pattern !== null) match[key] = pattern;
   }
 
@@ -256,9 +271,12 @@ const validatePattern = (
   path: string,
   ruleId: string,
   problems: RuleProblem[],
+  isText: boolean,
 ): RulePattern | null => {
   if (raw === undefined) return null;
-  if (typeof raw === 'string') return validatePattern({ pattern: raw }, path, ruleId, problems);
+  if (typeof raw === 'string') {
+    return validatePattern({ pattern: raw }, path, ruleId, problems, isText);
+  }
   if (typeof raw !== 'object' || raw === null) {
     problems.push({ ruleId, path, message: 'must be a string or a { pattern, flags } object' });
     return null;
@@ -275,11 +293,16 @@ const validatePattern = (
     return null;
   }
   try {
-    const set = new Set([...((flags as string | undefined) ?? ''), 'u']);
-    set.delete('g');
-    set.delete('y');
-    // eslint-disable-next-line no-new
-    new RegExp(pattern, [...set].join(''));
+    // `u` is implied by the engine, which works in code points; `g` and `y` are the caller's
+    // business and the engine does not take them. Dropping them here rather than refusing keeps an
+    // existing rule set loadable.
+    const engineFlags = [...new Set((flags as string | undefined) ?? '')]
+      .filter((flag) => 'ims'.includes(flag))
+      .join('');
+    safeRegex(pattern, {
+      flags: engineFlags,
+      ...(isText ? RULE_TEXT_LIMITS : RULE_HEADER_LIMITS),
+    });
   } catch (error) {
     problems.push({
       ruleId,

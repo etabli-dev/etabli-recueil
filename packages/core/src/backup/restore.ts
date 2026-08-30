@@ -25,7 +25,7 @@
  * ```
  */
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, rm } from 'node:fs/promises';
+import { mkdir, rm } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 
 import { BackupFormatError, BackupTargetError, BackupVerificationError } from './errors.js';
@@ -36,7 +36,7 @@ import {
   RESTORED_DATABASE_FILE,
   RESTORED_STORAGE_DIRECTORY,
 } from './format.js';
-import { copyFileHashing, hashFile, isEmptyDirectory, resolveWithin } from './files.js';
+import { copyFileHashing, hashFile, isEmptyDirectory, readManifestFile, resolveWithin } from './files.js';
 import { inspectDatabaseFile } from './inspect.js';
 import type { BackupFileEntry, BackupManifest } from './manifest.js';
 import { manifestFiles, parseManifest } from './manifest.js';
@@ -64,7 +64,7 @@ export const resolveSnapshotRoot = (from: string): string => {
 export const readManifest = async (from: string): Promise<{ root: string; manifest: BackupManifest }> => {
   const root = resolveSnapshotRoot(from);
   const path = join(root, MANIFEST_FILE);
-  return { root, manifest: parseManifest(await readFile(path, 'utf8'), path) };
+  return { root, manifest: parseManifest(await readManifestFile(path), path) };
 };
 
 export interface VerifyBackupResult {
@@ -74,6 +74,15 @@ export interface VerifyBackupResult {
   readonly failures: readonly BackupVerificationFailure[];
   readonly filesChecked: number;
   readonly bytesChecked: number;
+  /**
+   * Blobs whose bytes were read and matched, counted here rather than taken from the manifest.
+   *
+   * A caller comparing this with `manifest.storage.blobCount` is comparing what was checked with
+   * what is claimed, which is the only comparison that can notice a snapshot whose store went
+   * missing. `filesChecked` cannot: it counts the manifest's own list, so an empty list makes it
+   * agree with itself (ADR-0021 §1).
+   */
+  readonly blobsChecked: number;
 }
 
 /**
@@ -91,7 +100,9 @@ export const verifyBackup = async (
   const files = manifestFiles(manifest);
 
   const failures: BackupVerificationFailure[] = [];
+  const blobPaths = new Set(manifest.storage.blobs.map((blob) => blob.path));
   let bytes = 0;
+  let blobsChecked = 0;
   let index = 0;
 
   for (const entry of files) {
@@ -113,6 +124,7 @@ export const verifyBackup = async (
 
     const hashed = await hashFile(path);
     bytes += hashed.size;
+    if (hashed.sha256 === entry.sha256 && blobPaths.has(entry.path)) blobsChecked += 1;
     if (hashed.sha256 !== entry.sha256) {
       failures.push({
         path: entry.path,
@@ -125,7 +137,7 @@ export const verifyBackup = async (
     }
   }
 
-  return { root, manifest, failures, filesChecked: files.length, bytesChecked: bytes };
+  return { root, manifest, failures, filesChecked: files.length, bytesChecked: bytes, blobsChecked };
 };
 
 export type RestorePhase = 'verify' | 'database' | 'config' | 'storage' | 'check';
@@ -270,6 +282,30 @@ export const restoreBackup = async (options: RestoreBackupOptions): Promise<Rest
     // is the single most dangerous thing this function could produce.
     for (const path of written) await rm(path, { force: true });
     throw new BackupVerificationError(failures, `restoring '${root}' into '${into}'`);
+  }
+
+  // The floor under "every file the manifest names was verified" (ADR-0021 §3). `blobs` and
+  // `bytes` are counted from what this loop actually copied and hashed; `blobCount` and
+  // `totalBytes` are what the snapshot claims its store holds. Without this, a snapshot that
+  // claimed five blobs and listed none restored an empty store and reported success, because
+  // every check in the loop was a comparison of nothing against nothing. `parseManifest` refuses
+  // that manifest now, so this is the second line rather than the first: it also catches a list
+  // that shrank between the parse and here, one entry landing on another's destination, and any
+  // future `targetFor` that collapses two paths into one.
+  const storedBytes = manifest.storage.blobs.reduce((sum, blob) => sum + blob.size, 0);
+  if (manifest.storage.blobsIncluded && (blobs !== manifest.storage.blobCount || bytes < storedBytes)) {
+    for (const path of written) await rm(path, { force: true });
+    throw new BackupFormatError(
+      `The restore verified ${blobs} blob(s) totalling ${bytes} byte(s), but '${root}' claims a ` +
+        `store of ${manifest.storage.blobCount} blob(s) and ${storedBytes} byte(s). Nothing has ` +
+        'been left in the target.',
+      {
+        blobsRestored: blobs,
+        blobCount: manifest.storage.blobCount,
+        bytesRestored: bytes,
+        storedBytes,
+      },
+    );
   }
 
   /* Does the database that arrived behave like the one that left? ------------------------------ */

@@ -26,7 +26,26 @@
  * ```
  *
  * `deploy/docker-compose.yml` carries the sidecar profile that starts one.
+ *
+ * ## The budget
+ *
+ * A sidecar is not a trusted party. It is reached over the network at an address an operator
+ * configured, it can be swapped for something else, and — decisively — what it returns is derived
+ * from a PDF that arrived from a stranger's mailbox, so the strings in the TEI are the attacker's
+ * strings. ADR-0022 therefore applies here exactly as it applies to a zip:
+ *
+ *   - The response body is read with a running total and abandoned past `maxResponseBytes`, rather
+ *     than `await response.text()` materialising whatever the far side chose to send. Nothing in
+ *     this package bounded that; the re-attack listed it among the reads with no ceiling of their
+ *     own.
+ *   - `parseTeiHeader` refuses a document past `maxTeiBytes` before it scans it.
+ *   - The tag scanner is linear. It was not: a TEI holding N unclosed openers of the same name
+ *     re-scanned the gap to the closing tag once per opener, which is quadratic — 3.42 MB of TEI
+ *     cost 15.86 s of blocked event loop, synchronously, on the ingest worker. Nobody had named
+ *     this one; it is the same lazy-span-with-no-floor shape as the PDF page count, written with
+ *     `indexOf` instead of a regular expression.
  */
+import { ResourceBudgetError } from '../budgets.js';
 import { AdapterUnavailableError } from '../errors.js';
 import { extractIdentifiers, normaliseDoi } from '../resolve/identifiers.js';
 import type {
@@ -49,9 +68,21 @@ export interface GrobidOptions {
   consolidateHeader?: 0 | 1 | 2;
   /** The confidence stamped on every field this extractor writes. Never 1. */
   confidence?: number;
+  /**
+   * Ceiling on the response body this adapter will read, in bytes.
+   *
+   * A TEI header for a paper is tens of kilobytes and a full-text TEI with its reference list is a
+   * few hundred; sixteen mebibytes is far above both and far below what an unbounded read of a
+   * hostile endpoint costs.
+   */
+  maxResponseBytes?: number;
   /** Injected in tests of the parser; defaults to the global `fetch`. */
   fetchImpl?: typeof fetch;
 }
+
+/** Defaults for the two ceilings, stated once so a caller can raise them knowingly. */
+export const DEFAULT_GROBID_MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
+export const DEFAULT_TEI_MAX_BYTES = 16 * 1024 * 1024;
 
 export class GrobidExtractor implements MetadataExtractor {
   readonly id = 'grobid';
@@ -61,6 +92,7 @@ export class GrobidExtractor implements MetadataExtractor {
   private readonly timeoutMs: number;
   private readonly consolidateHeader: 0 | 1 | 2;
   private readonly confidence: number;
+  private readonly maxResponseBytes: number;
   private readonly fetchImpl: typeof fetch;
 
   constructor(options: GrobidOptions) {
@@ -69,6 +101,7 @@ export class GrobidExtractor implements MetadataExtractor {
     this.timeoutMs = options.timeoutMs ?? 120_000;
     this.consolidateHeader = options.consolidateHeader ?? 0;
     this.confidence = options.confidence ?? 0.7;
+    this.maxResponseBytes = options.maxResponseBytes ?? DEFAULT_GROBID_MAX_RESPONSE_BYTES;
     this.fetchImpl = options.fetchImpl ?? globalThis.fetch;
   }
 
@@ -118,9 +151,12 @@ export class GrobidExtractor implements MetadataExtractor {
           status: response.status,
         });
       }
-      tei = await response.text();
+      tei = await readBounded(response, this.maxResponseBytes, `${endpoint} response`);
     } catch (error) {
       if (error instanceof AdapterUnavailableError) throw error;
+      // A body past the ceiling is a budget refusal, not an unavailable adapter: the sidecar
+      // answered, it answered with more than this reader will hold, and P3 wants that named.
+      if (error instanceof ResourceBudgetError) throw error;
       throw new AdapterUnavailableError(
         'grobid',
         error instanceof Error ? error.message : String(error),
@@ -137,7 +173,9 @@ export class GrobidExtractor implements MetadataExtractor {
     const checkedAt = new Date().toISOString();
     try {
       const response = await this.fetchImpl(`${this.baseUrl}/api/isalive`, { method: 'GET' });
-      const body = (await response.text()).trim();
+      // `isalive` answers `true` or `false`. A kilobyte is generous and a health probe is not a
+      // place to accept an unbounded body from a host that may not be the one you configured.
+      const body = (await readBounded(response, 1024, 'isalive response')).trim();
       return response.ok && body === 'true'
         ? { status: 'ok', checkedAt }
         : { status: 'degraded', message: `isalive said '${body}'`, checkedAt };
@@ -150,6 +188,53 @@ export class GrobidExtractor implements MetadataExtractor {
     }
   }
 }
+
+/**
+ * Read a response body with a running total, abandoning it past `limit`.
+ *
+ * `await response.text()` is the shape ADR-0022 §2 forbids: the buffer is materialised and *then*
+ * it could be measured. This reads the stream, adds up what has arrived, and cancels the moment the
+ * total passes the ceiling, so the memory a hostile endpoint can command is the ceiling rather than
+ * whatever it decided to send. A body with no stream — some `fetch` implementations and every
+ * hand-written fake — falls back to `text()` and is measured after, which is honest for a caller
+ * that already has the whole string in memory and is stated rather than hidden.
+ */
+const readBounded = async (response: Response, limit: number, what: string): Promise<string> => {
+  const body = response.body;
+  if (body === null || typeof body.getReader !== 'function') {
+    const text = await response.text();
+    if (text.length > limit) throw responseTooBig(what, text.length, limit);
+    return text;
+  }
+
+  const reader = body.getReader();
+  const decoder = new TextDecoder('utf-8');
+  const chunks: string[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > limit) throw responseTooBig(what, total, limit);
+      chunks.push(decoder.decode(value, { stream: true }));
+    }
+  } finally {
+    // Cancel rather than leave the socket draining a body nobody will read.
+    await reader.cancel().catch(() => undefined);
+  }
+  chunks.push(decoder.decode());
+  return chunks.join('');
+};
+
+const responseTooBig = (what: string, seen: number, limit: number): ResourceBudgetError =>
+  new ResourceBudgetError(
+    'grobid.maxResponseBytes',
+    limit,
+    `The ${what} passed ${seen} bytes, over the grobid.maxResponseBytes budget of ${limit}. ` +
+      'The read was stopped at the budget rather than measured after it.',
+    { what, seen },
+  );
 
 /* ------------------------------------------------------------------------------------------ */
 /* TEI parsing                                                                                  */
@@ -169,8 +254,18 @@ export class GrobidExtractor implements MetadataExtractor {
  */
 export const parseTeiHeader = (
   tei: string,
-  options: { extractor: string; confidence: number; fetchedAt?: string },
+  options: { extractor: string; confidence: number; fetchedAt?: string; maxBytes?: number },
 ): ExtractedMetadata => {
+  const maxBytes = options.maxBytes ?? DEFAULT_TEI_MAX_BYTES;
+  if (tei.length > maxBytes) {
+    throw new ResourceBudgetError(
+      'grobid.maxTeiBytes',
+      maxBytes,
+      `The TEI document is ${tei.length} characters, over the grobid.maxTeiBytes budget of ` +
+        `${maxBytes}. It was refused before it was scanned.`,
+      { byteSize: tei.length },
+    );
+  }
   const fetchedAt = options.fetchedAt ?? new Date().toISOString();
   const provenance = (confidence = options.confidence): Provenance => ({
     source: options.extractor,
@@ -321,44 +416,79 @@ const allTags = (xml: string | null, name: string): Tag[] => {
   return out;
 };
 
+/**
+ * The two patterns for one tag name, compiled once.
+ *
+ * `new RegExp` from an interpolated string is the shape that becomes an injection the day the
+ * interpolated part stops being a literal, so the name is checked against the XML name production
+ * this reader actually uses before it is ever put into a pattern. Every caller here passes a
+ * constant, and the check is what keeps that true rather than something a reader has to verify by
+ * following every call. Compiling once per name also matters on its own: `allTags` calls `scanTag`
+ * in a loop, and two `RegExp` constructions per iteration is a cost paid per tag of the document.
+ */
+const TAG_PATTERNS = new Map<string, { any: RegExp; open: RegExp }>();
+
+const patternsFor = (name: string): { any: RegExp; open: RegExp } => {
+  const cached = TAG_PATTERNS.get(name);
+  if (cached !== undefined) return cached;
+  if (!/^[A-Za-z][A-Za-z0-9]*$/u.test(name)) {
+    throw new TypeError(`'${name}' is not a tag name this reader will build a pattern from`);
+  }
+  // `[^>]*` is a negated class under a single quantifier over a bounded document: linear, and it
+  // cannot be made to backtrack.
+  const compiled = {
+    any: new RegExp(`<${name}(\\s[^>]*)?(/)?>`, 'giu'),
+    open: new RegExp(`<${name}(\\s[^>]*)?>`, 'giu'),
+  };
+  TAG_PATTERNS.set(name, compiled);
+  return compiled;
+};
+
+/**
+ * Find `<name>…</name>` from `from`, allowing the same name to nest.
+ *
+ * Both searches move forward and neither is ever restarted, which is the whole of the fix here.
+ * The version this replaces re-ran `indexOf(closeTag, cursor)` from each nested opener, so a
+ * document holding N openers of one name before its first closer re-scanned the gap N times:
+ * quadratic, and measured at 15.86 s for 3.42 MB of TEI. The output is identical; only the number
+ * of times the same characters are read changes.
+ */
 const scanTag = (
   xml: string,
   name: string,
   from: number,
 ): { open: string; inner: string; end: number } | null => {
-  const pattern = new RegExp(`<${name}(\\s[^>]*)?(/)?>`, 'giu');
-  pattern.lastIndex = from;
-  const match = pattern.exec(xml);
+  const { any, open: openPattern } = patternsFor(name);
+  any.lastIndex = from;
+  const match = any.exec(xml);
   if (match === null) return null;
   const open = match[0];
   if (open.endsWith('/>')) {
     return { open, inner: '', end: match.index + open.length };
   }
 
-  // Find the matching close, allowing for nesting of the same tag name.
-  const openPattern = new RegExp(`<${name}(\\s[^>]*)?>`, 'giu');
   const closeTag = `</${name}>`;
+  const innerStart = match.index + open.length;
   let depth = 1;
-  let cursor = match.index + open.length;
+  let close = xml.indexOf(closeTag, innerStart);
+  openPattern.lastIndex = innerStart;
+  let nested = openPattern.exec(xml);
+
   while (depth > 0) {
-    const close = xml.indexOf(closeTag, cursor);
     if (close === -1) return null;
-    openPattern.lastIndex = cursor;
-    const nested = openPattern.exec(xml);
     if (nested !== null && nested.index < close) {
       depth += 1;
-      cursor = nested.index + nested[0].length;
+      // Only the opener search advances; `close` is still the next closer and does not move.
+      openPattern.lastIndex = nested.index + nested[0].length;
+      nested = openPattern.exec(xml);
       continue;
     }
     depth -= 1;
     if (depth === 0) {
-      return {
-        open,
-        inner: xml.slice(match.index + open.length, close),
-        end: close + closeTag.length,
-      };
+      return { open, inner: xml.slice(innerStart, close), end: close + closeTag.length };
     }
-    cursor = close + closeTag.length;
+    // Only the closer search advances, and never back over ground already read.
+    close = xml.indexOf(closeTag, close + closeTag.length);
   }
   return null;
 };
@@ -377,8 +507,19 @@ const scopeByAttribute = (
   return null;
 };
 
+/** `name="value"` readers, compiled once per name and checked the same way as the tag patterns. */
+const ATTRIBUTE_PATTERNS = new Map<string, RegExp>();
+
 const attribute = (openTag: string, name: string): string | null => {
-  const match = new RegExp(`${name}\\s*=\\s*"([^"]*)"`, 'iu').exec(openTag);
+  let pattern = ATTRIBUTE_PATTERNS.get(name);
+  if (pattern === undefined) {
+    if (!/^[A-Za-z][A-Za-z0-9]*$/u.test(name)) {
+      throw new TypeError(`'${name}' is not an attribute name this reader will build a pattern from`);
+    }
+    pattern = new RegExp(`${name}\\s*=\\s*"([^"]*)"`, 'iu');
+    ATTRIBUTE_PATTERNS.set(name, pattern);
+  }
+  const match = pattern.exec(openTag);
   return match === null ? null : (match[1] ?? null);
 };
 

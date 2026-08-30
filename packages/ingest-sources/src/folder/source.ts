@@ -21,36 +21,70 @@
  *     because a poll reads the tree rather than a queue of events, and anything whose
  *     acknowledgement was interrupted is replayed from the state table.
  *
- * **Consume is conditional on the revision the candidate was offered under** (H1,
+ * **Consume is conditional on the identity of the file, not on its name** (H1,
  * `spec/hardening-2026-08.md`). The store verification in `consume.ts` queries the library and the
  * content store; neither of them is the far side about to be destroyed, so on its own it licenses
  * deleting whatever happens to be at the path now. Before the `rm` or the `rename`, therefore, this
- * source asks two further questions of the file itself:
+ * source asks three further questions of the file itself:
  *
  *   1. Is its `(mtime, size, inode)` still the triple the candidate was offered under (`revision.ts`)?
  *   2. Do its bytes still hash to the digest the pipeline committed?
+ *   3. Was it the *same inode, unwritten to*, for the whole of that re-hash, and from then until
+ *      the last look before the destructive call?
  *
- * The second is the one that matters and it is why the check is worth its cost: **what is
- * acknowledged is the digest the pipeline committed, not the path.** A file that has been replaced
- * hashes to something else, whatever its metadata says, and the acknowledgement refuses, routes the
- * reason to the review queue (P3) and leaves the original alone. The state row is closed as
- * `refused`, which `isHandled` treats as unhandled, so the next poll offers the replacement under
- * its own revision and it is ingested rather than lost.
+ * The second is the one that makes "what is acknowledged is the digest the pipeline committed, not
+ * the path" true rather than aspirational. The third is what makes the second mean anything, and it
+ * is new, because the re-attack showed the second on its own was not load-bearing where it mattered
+ * most.
+ *
+ * **Why the third question exists.** `hashFile` streamed the original from beginning to end and
+ * compared the digest afterwards. A rewrite of a region the stream had already passed was therefore
+ * invisible to it, so the blind window for the first bytes of a file was not two syscalls but the
+ * whole duration of the re-hash: measured at 270 ms on a 128 MiB file, linear in size, seconds on
+ * the 900 MB scan ADR-0022 names. A same-length in-place rewrite with the mtime put back — which is
+ * one `open(…, 'r+')`, one `write` and one `utimensat` — left every field of the revision intact
+ * and was deleted with `verified: true`, three times out of three.
+ *
+ * The answer is `st_ctime`. The re-hash now runs over an open descriptor rather than a path, so it
+ * cannot be switched underneath by a rename, and the descriptor is `fstat`-ed before and after. A
+ * write bumps the inode's change time, and unlike `st_mtime` that stamp is not settable from user
+ * space: there is no `utimensat` field for it, and the call that restores an mtime updates the
+ * ctime as a side effect. So a rewrite that hides from the mtime does not hide from this, and the
+ * only ways to move a ctime backwards need the system clock, which needs root.
+ *
+ * **Where a consumed file goes.** `moveTarget` chose a free name with `stat` and then called
+ * `rename`, and `rename(2)` replaces its destination silently. `ConsumePolicy.to` may be absolute,
+ * so two watched folders sharing one processed directory is a supported configuration; two
+ * acknowledgements interleave at their `await`s long before either renames, and an archived
+ * original was destroyed ten times out of ten. The name is now *claimed* with `open(…, 'wx')`,
+ * which is `O_CREAT|O_EXCL` — one atomic syscall that either reserves the name or says somebody
+ * else has it — and the claim is held until the rename lands on top of it. A claim that is not
+ * used, because the acknowledgement refused after taking it, is released.
+ *
+ * **A move the kernel cannot make.** An absolute `to` may name another mount, and `rename(2)`
+ * cannot cross one; the call threw a raw `EXDEV` `Error` out of `acknowledge`, which is not a
+ * `SourceError`, so it bypassed the review path entirely and left the state row `pending` for ever
+ * while the file was re-offered and re-ingested on every poll. `EXDEV` now falls back to a copy
+ * into the claimed destination, a re-hash of the copy against the digest the pipeline committed,
+ * and only then the `unlink`; and every other failure of the destructive step is turned into a
+ * refusal with a review entry, so the state row closes and the next poll can try again.
  *
  * **What remains open, stated rather than implied.** `stat`-then-`unlink` and `stat`-then-`rename`
  * are two syscalls, and POSIX has no "unlink only if the inode is still this one": there is no
  * `funlink`, and `unlinkat` has no such flag. A writer that replaces the file in the microseconds
- * between the last check and the destructive call still loses that file. What the checks above
- * close is the window that was actually costing documents — the one spanning a pipeline run, an OCR
- * pass, a poll interval or, after a crash, the whole downtime until the next process replays the
- * acknowledgement. They narrow the residual window to two adjacent syscalls with no `await` between
- * them. They do not close it, and a `move` policy is the safer configuration for a folder a writer
- * is actively racing, because a wrongly moved file still exists.
+ * between the last `stat` and the destructive call still loses that file. Measured on this
+ * codebase over two hundred runs, that window is 15 µs at the median, 48 µs at the 95th percentile
+ * and 143 µs at the worst — and, which is the point of the third check, it no longer grows with the
+ * size of the file. What the checks above close is everything larger: the
+ * window spanning a pipeline run, an OCR pass, a poll interval, a re-hash of a 900 MB scan or,
+ * after a crash, the whole downtime until the next process replays the acknowledgement. A `move`
+ * policy remains the safer configuration for a folder a writer is actively racing, because a
+ * wrongly moved file still exists.
  */
 import { createHash } from 'node:crypto';
 import type { Stats } from 'node:fs';
-import { createReadStream } from 'node:fs';
-import { mkdir, readFile, realpath, rename, rm, stat } from 'node:fs/promises';
+import { copyFile, mkdir, open, realpath, rename, rm, stat } from 'node:fs/promises';
+import type { FileHandle } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 import { ReviewQueueService, ensureIngestSchema, isInside } from '@recueil/ingest';
@@ -58,8 +92,10 @@ import type { DocumentSourceKind, HealthReport, IngestCandidate, IngestOutcome, 
 
 import { decideConsume } from '../consume.js';
 import { SourceError, SourceUnavailableError, UnsafeSourcePathError } from '../errors.js';
+import { subjectDocumentId } from '../verify.js';
 import { sourceState } from '../state.js';
 import type { SourceStateStore } from '../state.js';
+import { DEFAULT_MAX_SOURCE_BYTES } from '../types.js';
 import type {
   Acknowledgement,
   CommonSourceOptions,
@@ -99,8 +135,21 @@ const revisionOf = (entry: { byteSize: number; mtimeMs: number; inode: string })
  */
 export const SOURCE_CHANGED_BEFORE_CONSUME = 'source_changed_before_consume';
 
+/**
+ * The reason code for a consume that could not be carried out at all.
+ *
+ * Distinct from the one above, because they ask different things of a person: `source_changed…`
+ * means the world moved and the next poll will pick the file up again, while this one means the
+ * policy itself cannot work here — a processed directory on another mount, a read-only filesystem,
+ * a full disk — and somebody has to change the configuration.
+ */
+export const SOURCE_CONSUME_FAILED = 'source_consume_failed';
+
 /** How many times a short read is retried before the candidate is refused (ADR-0022: bounded). */
 const READ_ATTEMPTS = 2;
+
+/** How many alternative names a consumed file may be offered before the move is refused. */
+const MOVE_NAME_ATTEMPTS = 1_000;
 
 export class FolderSource implements IngestSource {
   readonly kind = 'watch' as const;
@@ -110,6 +159,8 @@ export class FolderSource implements IngestSource {
 
   private readonly options: FolderSourceOptions;
   private readonly policy: ConsumePolicy;
+  /** ADR-0022: every source reads under a bound, and the bound has a default (see `types.ts`). */
+  private readonly maxBytes: number;
   private root: string | null = null;
   private destination: string | null = null;
   private watcher: FolderWatcher | null = null;
@@ -122,6 +173,7 @@ export class FolderSource implements IngestSource {
     this.sourceKind = options.sourceKind ?? 'folder';
     this.rules = options.rules ?? [];
     this.policy = options.consume ?? { mode: 'leave' };
+    this.maxBytes = options.maxBytes ?? DEFAULT_MAX_SOURCE_BYTES;
   }
 
   async start(ctx: SourceContext): Promise<void> {
@@ -190,7 +242,7 @@ export class FolderSource implements IngestSource {
     const scan = await scanFolder(root, {
       ...(this.options.recursive === undefined ? {} : { recursive: this.options.recursive }),
       ...(this.options.skipHidden === undefined ? {} : { skipHidden: this.options.skipHidden }),
-      ...(this.options.maxBytes === undefined ? {} : { maxBytes: this.options.maxBytes }),
+      maxBytes: this.maxBytes,
       excludeDirectories: exclude.filter((name) => name.length > 0),
     });
 
@@ -246,6 +298,11 @@ export class FolderSource implements IngestSource {
    * A mismatch is retried a bounded number of times, because the common cause is a writer that
    * finished during the read and whose next attempt will succeed; after that it is refused, and the
    * next poll offers the file again under its new revision.
+   *
+   * The read itself is bounded by the call rather than checked afterwards (ADR-0022 §2): the
+   * descriptor is read in chunks against a running total and abandoned the moment it passes the
+   * limit, so a file that grew between the `stat` and the read cannot buy an allocation the limit
+   * was meant to forbid.
    */
   async fetch(ref: IngestRef, _ctx: SourceContext): Promise<{ bytes: Buffer; mediaType?: string }> {
     const path = await this.resolveInside(ref.externalId);
@@ -257,15 +314,13 @@ export class FolderSource implements IngestSource {
         throw new SourceError('source_vanished', `'${ref.externalId}' is no longer in the watched folder.`);
       }
 
-      // ADR-0022: the read is bounded by the call, not checked after the buffer exists. The scan
-      // applies the same limit, but a ref also arrives from the state table and from a caller, so
-      // the bound is enforced where the allocation happens rather than only where it was decided.
-      if (this.options.maxBytes !== undefined && before.size > this.options.maxBytes) {
+      // The declared size informs a fast rejection; it never bounds the read (ADR-0022 §1).
+      if (before.size > this.maxBytes) {
         throw new SourceError(
           'source_too_large',
           `'${ref.externalId}' is ${String(before.size)} bytes, over the ` +
-            `${String(this.options.maxBytes)}-byte limit this source reads under.`,
-          { externalId: ref.externalId, byteSize: before.size, limit: this.options.maxBytes },
+            `${String(this.maxBytes)}-byte limit this source reads under.`,
+          { externalId: ref.externalId, byteSize: before.size, limit: this.maxBytes },
         );
       }
 
@@ -279,18 +334,26 @@ export class FolderSource implements IngestSource {
         );
       }
 
-      const bytes = await readFile(path);
+      const read = await readWithin(path, this.maxBytes);
+      if (read === 'over-limit') {
+        throw new SourceError(
+          'source_too_large',
+          `'${ref.externalId}' passed the ${String(this.maxBytes)}-byte limit this source reads ` +
+            'under while it was being read, so the read was abandoned.',
+          { externalId: ref.externalId, limit: this.maxBytes },
+        );
+      }
       const after = await stat(path).catch(() => null);
 
-      if (bytes.byteLength !== before.size) {
+      if (read.byteLength !== before.size) {
         last =
-          `the read returned ${String(bytes.byteLength)} of the ${String(before.size)} bytes ` +
+          `the read returned ${String(read.byteLength)} of the ${String(before.size)} bytes ` +
           'the file held when it was stat-ed, so it was truncated while it was being read';
       } else if (after === null) {
         last = 'it was removed while it was being read';
       } else {
         const readDrift = revisionDrift(formatRevision(fileRevision(before)), fileRevision(after));
-        if (readDrift === null) return { bytes };
+        if (readDrift === null) return { bytes: read };
         last = `it changed while it was being read (${readDrift})`;
       }
     }
@@ -332,60 +395,82 @@ export class FolderSource implements IngestSource {
       };
     }
 
-    const objection = await this.stillTheFileThatWasRead(ref, outcome, path, present);
-    if (objection !== null) {
-      this.flagForReview(ctx, ref, outcome, objection);
+    const proof = await this.stillTheFileThatWasRead(ref, outcome, path, present);
+    if (proof.objection !== null) {
+      this.flagForReview(ctx, ref, outcome, proof.objection, SOURCE_CHANGED_BEFORE_CONSUME);
       return {
         action: 'refused',
         detail:
-          `the original was kept: ${objection}. The store verification passed ` +
+          `the original was kept: ${proof.objection}. The store verification passed ` +
           `(${decision.detail}), but it is about the bytes already in the library, not about the ` +
           'file at this path; it will be offered again under its own revision on the next poll',
         verified: false,
       };
     }
+    const identity = proof.identity;
 
-    // The destination is chosen and its parent created *before* the last look, so that nothing
-    // awaits between that look and the `rename` — `moveTarget` alone is several `stat`s wide, and
-    // every one of them is window.
-    const destination = this.policy.mode === 'move' ? await this.moveTarget(ref.externalId) : null;
-    if (destination !== null) await mkdir(dirname(destination), { recursive: true });
+    // Everything from here can fail, and every one of those failures used to leave the runner
+    // holding a raw errno: `EXDEV` out of `rename` was the case the re-attack found, and `EACCES`
+    // out of the destination claim is the same shape. A raw throw leaves the state row `pending`
+    // for ever with nothing in the review queue, so every later run replays it, throws again and
+    // reports `ok: false` while the file is re-offered and re-ingested as a duplicate on each
+    // poll. A consume that cannot be carried out is a refusal (P3): the original is untouched, the
+    // reason is in front of a person, and the row closes so the next poll can try again.
+    let destination: string | null = null;
+    try {
+      // The destination is claimed — atomically, with `O_CREAT|O_EXCL` — *before* the last look,
+      // so that nothing awaits between that look and the `rename`, and so that no second source
+      // can take the same name in the meantime. `claimMoveTarget` is several syscalls wide, and
+      // every one of them was window while the name was merely being looked at rather than held.
+      destination = this.policy.mode === 'move' ? await this.claimMoveTarget(ref.externalId) : null;
 
-    // The last look before the destructive call, with no `await` between it and the call itself.
-    // The header says what this narrows and what it leaves open.
-    const final = await stat(path).catch(() => null);
-    if (final === null) {
+      // The last look before the destructive call, with no `await` between it and the call itself.
+      // It is compared against the identity the re-hash proved, not against the earlier `stat`, so
+      // that anything written to the file since the hash finished is caught here.
+      const final = await stat(path).catch(() => null);
+      if (final === null) {
+        await releaseClaim(destination);
+        return {
+          action: 'vanished',
+          detail: `'${ref.externalId}' was removed while its acknowledgement was being decided`,
+          verified: true,
+        };
+      }
+      const lateDrift = identityDrift(identity, identityOf(final));
+      if (lateDrift !== null) {
+        await releaseClaim(destination);
+        const reason = `it was replaced while its acknowledgement was being decided (${lateDrift})`;
+        this.flagForReview(ctx, ref, outcome, reason, SOURCE_CHANGED_BEFORE_CONSUME);
+        return { action: 'refused', detail: `the original was kept: ${reason}`, verified: false };
+      }
+
+      if (this.policy.mode === 'delete') {
+        await rm(path, { force: true });
+        return {
+          action: 'deleted',
+          detail: `deleted after verification: ${decision.detail}`,
+          verified: true,
+        };
+      }
+
+      if (destination === null) {
+        throw new SourceError('source_misconfigured', 'The consume policy is `move` with no destination.');
+      }
+      const note = await this.completeMove(ctx, ref, outcome, path, destination, identity, proof.sha256);
       return {
-        action: 'vanished',
-        detail: `'${ref.externalId}' was removed while its acknowledgement was being decided`,
+        action: 'moved',
+        detail: `moved to '${destination}' after verification: ${decision.detail}${note}`,
         verified: true,
       };
-    }
-    const lateDrift = revisionDrift(formatRevision(fileRevision(present)), fileRevision(final));
-    if (lateDrift !== null) {
-      const reason = `it was replaced while its acknowledgement was being decided (${lateDrift})`;
-      this.flagForReview(ctx, ref, outcome, reason);
+    } catch (error) {
+      await releaseClaim(destination);
+      const message = error instanceof Error ? error.message : String(error);
+      const reason =
+        `the '${this.policy.mode}' consume policy could not be carried out for ` +
+        `'${ref.externalId}': ${message}`;
+      this.flagForReview(ctx, ref, outcome, reason, SOURCE_CONSUME_FAILED);
       return { action: 'refused', detail: `the original was kept: ${reason}`, verified: false };
     }
-
-    if (this.policy.mode === 'delete') {
-      await rm(path, { force: true });
-      return {
-        action: 'deleted',
-        detail: `deleted after verification: ${decision.detail}`,
-        verified: true,
-      };
-    }
-
-    if (destination === null) {
-      throw new SourceError('source_misconfigured', 'The consume policy is `move` with no destination.');
-    }
-    await rename(path, destination);
-    return {
-      action: 'moved',
-      detail: `moved to '${destination}' after verification: ${decision.detail}`,
-      verified: true,
-    };
   }
 
   async stop(_ctx: SourceContext): Promise<void> {
@@ -417,6 +502,7 @@ export class FolderSource implements IngestSource {
         watching: this.watcher !== null,
         recursiveWatch: this.watcher?.recursive ?? false,
         consume: this.policy.mode,
+        maxBytes: this.maxBytes,
       },
     };
   }
@@ -453,8 +539,8 @@ export class FolderSource implements IngestSource {
   /**
    * Is the file about to be destroyed still the file the pipeline read?
    *
-   * Null when it is, and the sentence that says why not when it is not. Two questions, cheapest
-   * first:
+   * `objection` is null when it is, and the sentence that says why not when it is not. Three
+   * questions, cheapest first:
    *
    *   - The `(mtime, size, inode)` triple, which costs one `stat` and catches every ordinary
    *     replacement — a new upload, a `mv` over the name, a rewrite in place.
@@ -464,44 +550,173 @@ export class FolderSource implements IngestSource {
    *     on disk. This is the check that makes the sentence "what is acknowledged is the digest
    *     the pipeline committed, not the path" true rather than aspirational, so it is not
    *     optional and there is no configuration to turn it off.
+   *   - The stability of the inode across that re-read. See the module header: a streamed hash is
+   *     blind to a rewrite behind its own cursor, so the descriptor is `fstat`-ed before and after
+   *     and `st_ctime` — which a write bumps and user space cannot set — has to be unchanged.
    *
    * The file is streamed rather than read into memory: the acknowledgement path must not need a
-   * buffer the size of the largest scan the operator owns.
+   * buffer the size of the largest scan the operator owns. It is streamed from an open descriptor
+   * rather than from the path, so a rename during the hash cannot swap the file underneath it, and
+   * `identity` is what the caller compares its last look against.
    */
   private async stillTheFileThatWasRead(
     ref: IngestRef,
     outcome: IngestOutcome,
     path: string,
     present: Stats,
-  ): Promise<string | null> {
+  ): Promise<{ objection: string | null; identity: FileIdentity; sha256: string | null }> {
+    const fallback = identityOf(present);
     const drift = revisionDrift(ref.revision, fileRevision(present));
     if (drift !== null) {
-      return `'${ref.externalId}' is not the file that was ingested (${drift})`;
+      return {
+        objection: `'${ref.externalId}' is not the file that was ingested (${drift})`,
+        identity: fallback,
+        sha256: null,
+      };
     }
 
     const committed = 'sha256' in outcome ? outcome.sha256 : undefined;
     if (committed === undefined) {
-      return (
-        `the '${outcome.status}' outcome names no digest, so '${ref.externalId}' cannot be shown ` +
-        'to be the file the pipeline committed'
-      );
+      return {
+        objection:
+          `the '${outcome.status}' outcome names no digest, so '${ref.externalId}' cannot be shown ` +
+          'to be the file the pipeline committed',
+        identity: fallback,
+        sha256: null,
+      };
     }
 
-    let digest: { sha256: string; byteSize: number };
+    let digest: HashedFile;
     try {
       digest = await hashFile(path);
     } catch (error) {
-      return (
-        `'${ref.externalId}' could not be re-read to confirm its identity: ` +
-        `${error instanceof Error ? error.message : String(error)}`
+      return {
+        objection:
+          `'${ref.externalId}' could not be re-read to confirm its identity: ` +
+          `${error instanceof Error ? error.message : String(error)}`,
+        identity: fallback,
+        sha256: null,
+      };
+    }
+
+    // The descriptor was written to, or replaced, while it was being hashed. The digest below is
+    // then a hash of a mixture of two versions and proves nothing about either.
+    const duringDrift = identityDrift(digest.before, digest.after);
+    if (duringDrift !== null) {
+      return {
+        objection:
+          `'${ref.externalId}' was written to while it was being re-read to confirm its ` +
+          `identity (${duringDrift}), so the digest that came out of the re-read describes ` +
+          'neither the file that was ingested nor the file that is there now',
+        identity: digest.after,
+        sha256: null,
+      };
+    }
+
+    // The path may name a different inode from the one that was just hashed: a rename can have
+    // landed on it while the descriptor stayed open on the original.
+    const stillHere = await stat(path).catch(() => null);
+    if (stillHere === null) {
+      return {
+        objection: `'${ref.externalId}' was removed while it was being re-read`,
+        identity: digest.after,
+        sha256: null,
+      };
+    }
+    const pathDrift = identityDrift(digest.after, identityOf(stillHere));
+    if (pathDrift !== null) {
+      return {
+        objection:
+          `'${ref.externalId}' does not name the file that was just re-read (${pathDrift})`,
+        identity: identityOf(stillHere),
+        sha256: null,
+      };
+    }
+
+    if (digest.sha256 !== committed) {
+      return {
+        objection:
+          `'${ref.externalId}' now holds ${String(digest.byteSize)} bytes hashing to ` +
+          `${digest.sha256}, and the pipeline committed ${committed}`,
+        identity: digest.after,
+        sha256: digest.sha256,
+      };
+    }
+
+    return { objection: null, identity: digest.after, sha256: digest.sha256 };
+  }
+
+  /**
+   * Carry out a `move`, including the one the kernel will not do for us.
+   *
+   * `rename(2)` is the whole of it where source and destination share a filesystem: one atomic
+   * call onto a name this source already holds. Across a mount boundary it answers `EXDEV`, and
+   * there is no syscall that will do it — so the fallback is the only thing that can be done
+   * safely: copy into the claimed destination, prove the copy hashes to the digest the pipeline
+   * committed, prove the original is still the file that was verified, and only then unlink it.
+   * A failure anywhere in that sequence leaves the original where it is, which is the direction
+   * that cannot lose a document.
+   *
+   * Returns a sentence to append to the acknowledgement detail, empty for the ordinary case.
+   */
+  private async completeMove(
+    ctx: SourceContext,
+    ref: IngestRef,
+    outcome: IngestOutcome,
+    path: string,
+    destination: string,
+    identity: FileIdentity,
+    committed: string | null,
+  ): Promise<string> {
+    try {
+      await rename(path, destination);
+      return '';
+    } catch (error) {
+      if ((error as { code?: string }).code !== 'EXDEV') throw error;
+    }
+
+    // The destination is on another mount. The claim is already ours, so the copy lands on top of
+    // a placeholder nobody else can have taken.
+    await copyFile(path, destination);
+    const copied = await hashFile(destination);
+    if (committed !== null && copied.sha256 !== committed) {
+      await rm(destination, { force: true });
+      throw new SourceError(
+        'source_move_failed',
+        `the copy to '${destination}' hashes to ${copied.sha256} and the pipeline committed ` +
+          `${committed}, so the original was left where it is`,
+        { externalId: ref.externalId, destination },
       );
     }
-    if (digest.sha256 === committed) return null;
 
-    return (
-      `'${ref.externalId}' now holds ${String(digest.byteSize)} bytes hashing to ` +
-      `${digest.sha256}, and the pipeline committed ${committed}`
-    );
+    // The copy is right. Is the thing we are about to unlink still the thing it is a copy of?
+    const stillHere = await stat(path).catch(() => null);
+    if (stillHere === null) {
+      return ' (the original had already gone by the time the copy was complete)';
+    }
+    const drift = identityDrift(identity, identityOf(stillHere));
+    if (drift !== null) {
+      const reason =
+        `'${ref.externalId}' was replaced while it was being copied across a filesystem ` +
+        `boundary (${drift}); the copy is the file that was ingested and the replacement was left ` +
+        'in the watched folder to be offered again';
+      this.flagForReview(ctx, ref, outcome, reason, SOURCE_CHANGED_BEFORE_CONSUME);
+      return ` (copied across a filesystem boundary; ${reason})`;
+    }
+
+    try {
+      await rm(path, { force: true });
+    } catch (error) {
+      // The bytes are safely at the destination and the original is also still there. Nothing is
+      // lost, but a person has to know, because the next poll will offer it again.
+      const message = error instanceof Error ? error.message : String(error);
+      const reason =
+        `the copy to '${destination}' succeeded and was verified, but '${ref.externalId}' could ` +
+        `not then be removed from the watched folder: ${message}`;
+      this.flagForReview(ctx, ref, outcome, reason, SOURCE_CONSUME_FAILED);
+      return ` (copied across a filesystem boundary; ${reason})`;
+    }
+    return ' (copied across a filesystem boundary, then verified against the committed digest)';
   }
 
   /**
@@ -518,15 +733,16 @@ export class FolderSource implements IngestSource {
     ref: IngestRef,
     outcome: IngestOutcome,
     reason: string,
+    reasonCode: string = SOURCE_CHANGED_BEFORE_CONSUME,
   ): void {
-    const documentId = 'documentId' in outcome ? outcome.documentId : undefined;
-    if (documentId === undefined) return;
+    const documentId = subjectDocumentId(outcome);
+    if (documentId === null) return;
     try {
       ensureIngestSchema(ctx.recueil.connection);
       new ReviewQueueService(ctx.recueil.db, ctx.recueil.audit).raise({
         subjectType: 'document',
         subjectId: documentId,
-        reasonCode: SOURCE_CHANGED_BEFORE_CONSUME,
+        reasonCode,
         explanation:
           `The '${this.policy.mode}' consume policy was refused for '${ref.externalId}' in ` +
           `'${this.root ?? '?'}' because ${reason}. Nothing was deleted or moved. The file at ` +
@@ -577,8 +793,20 @@ export class FolderSource implements IngestSource {
     return real;
   }
 
-  /** Where a consumed file goes, without ever overwriting something already there. */
-  private async moveTarget(externalId: string): Promise<string> {
+  /**
+   * Claim a name in the processed directory, atomically, and hold it until the move lands.
+   *
+   * `stat`-then-`rename` was a check and a destructive act separated by several `await`s, and
+   * `rename(2)` overwrites its destination without a word: two watched folders sharing one
+   * absolute `to` destroyed an archived original ten times out of ten. `open(…, 'wx')` is
+   * `O_CREAT|O_EXCL`, which the kernel resolves atomically — either this call created the name or
+   * somebody else holds it — so the choice and the reservation are one operation and the name
+   * cannot be taken between them.
+   *
+   * The placeholder is empty and is overwritten by the `rename` (or the `copyFile`) that follows.
+   * `releaseClaim` removes it on every path that decides not to move after all.
+   */
+  private async claimMoveTarget(externalId: string): Promise<string> {
     if (this.destination === null) {
       throw new SourceError('source_misconfigured', 'The consume policy is `move` with no destination.');
     }
@@ -589,17 +817,25 @@ export class FolderSource implements IngestSource {
         { externalId, base },
       );
     }
-    if ((await stat(base).catch(() => null)) === null) return base;
+    await mkdir(dirname(base), { recursive: true });
 
     const extension = extname(base);
     const stem = base.slice(0, base.length - extension.length);
-    for (let index = 2; index < 1_000; index += 1) {
-      const attempt = `${stem} (${String(index)})${extension}`;
-      if ((await stat(attempt).catch(() => null)) === null) return attempt;
+    for (let index = 1; index < MOVE_NAME_ATTEMPTS; index += 1) {
+      const attempt = index === 1 ? base : `${stem} (${String(index)})${extension}`;
+      let handle: FileHandle;
+      try {
+        handle = await open(attempt, 'wx');
+      } catch (error) {
+        if ((error as { code?: string }).code === 'EEXIST') continue;
+        throw error;
+      }
+      await handle.close();
+      return attempt;
     }
     throw new SourceError(
       'source_move_failed',
-      `A thousand files are already called '${basename(base)}' in the processed directory.`,
+      `${String(MOVE_NAME_ATTEMPTS)} files are already called '${basename(base)}' in the processed directory.`,
     );
   }
 
@@ -609,19 +845,119 @@ export class FolderSource implements IngestSource {
   }
 }
 
+/* --------------------------------------------------------------------------------------------- */
+/* Identity                                                                                        */
+/* --------------------------------------------------------------------------------------------- */
+
+/**
+ * What a file *is*, as opposed to what it is called or when it says it was written.
+ *
+ * `ctimeMs` is the one that earns its place. `st_mtime` is a claim the writer makes and can put
+ * back with `utimensat`; `st_ctime` is the kernel's own record of when the inode last changed, it
+ * is bumped by every write — including the `utimensat` that restores an mtime — and there is no
+ * interface for setting it. So a same-length in-place rewrite that leaves size, mtime and inode
+ * looking untouched still moves this, which is exactly the attack the re-attack demonstrated.
+ */
+interface FileIdentity {
+  inode: string;
+  size: number;
+  mtimeMs: number;
+  ctimeMs: number;
+}
+
+const identityOf = (info: Pick<Stats, 'dev' | 'ino' | 'size' | 'mtimeMs' | 'ctimeMs'>): FileIdentity => ({
+  inode: `${String(info.dev)}/${String(info.ino)}`,
+  size: info.size,
+  mtimeMs: info.mtimeMs,
+  ctimeMs: info.ctimeMs,
+});
+
+/** Null when the two describe the same unchanged file; a sentence naming every difference if not. */
+const identityDrift = (was: FileIdentity, now: FileIdentity): string | null => {
+  const differences: string[] = [];
+  if (was.inode !== now.inode) {
+    differences.push(`a different file altogether: inode ${was.inode} then, ${now.inode} now`);
+  }
+  if (was.size !== now.size) {
+    differences.push(`${String(was.size)} bytes then, ${String(now.size)} now`);
+  }
+  if (was.mtimeMs !== now.mtimeMs) {
+    differences.push(
+      `last written ${new Date(was.mtimeMs).toISOString()} then, ${new Date(now.mtimeMs).toISOString()} now`,
+    );
+  }
+  if (was.ctimeMs !== now.ctimeMs) {
+    differences.push(
+      `the inode changed at ${new Date(was.ctimeMs).toISOString()} then, ` +
+        `${new Date(now.ctimeMs).toISOString()} now, which a write does and a restored mtime cannot hide`,
+    );
+  }
+  return differences.length === 0 ? null : differences.join('; ');
+};
+
+interface HashedFile {
+  sha256: string;
+  byteSize: number;
+  /** The descriptor's own identity before the first byte was read. */
+  before: FileIdentity;
+  /** And after the last one. Equal to `before` exactly when nothing wrote to it in between. */
+  after: FileIdentity;
+}
+
 /**
  * Hash a file as it is now, streaming, counting the bytes on the way through.
  *
  * Streamed rather than `readFile`d because this runs on the acknowledgement path for every
- * consumed file, and a 900 MB scan must not need 900 MB of heap to be deleted safely.
+ * consumed file, and a 900 MB scan must not need 900 MB of heap to be deleted safely. Streamed
+ * from an open descriptor rather than from the path so that the answer is about one inode from
+ * beginning to end, and `fstat`-ed either side of the read so that the caller can tell a digest
+ * that describes a file from a digest that describes a file being edited (see `FileIdentity`).
  */
-const hashFile = async (path: string): Promise<{ sha256: string; byteSize: number }> => {
-  const hash = createHash('sha256');
-  let byteSize = 0;
-  for await (const chunk of createReadStream(path)) {
-    const buffer = chunk as Buffer;
-    byteSize += buffer.byteLength;
-    hash.update(buffer);
+const hashFile = async (path: string): Promise<HashedFile> => {
+  const handle = await open(path, 'r');
+  try {
+    const before = identityOf(await handle.stat());
+    const hash = createHash('sha256');
+    let byteSize = 0;
+    for await (const chunk of handle.createReadStream({ autoClose: false, start: 0 })) {
+      const buffer = chunk as Buffer;
+      byteSize += buffer.byteLength;
+      hash.update(buffer);
+    }
+    const after = identityOf(await handle.stat());
+    return { sha256: hash.digest('hex'), byteSize, before, after };
+  } finally {
+    await handle.close();
   }
-  return { sha256: hash.digest('hex'), byteSize };
+};
+
+/**
+ * Read a whole file, bounded by the call.
+ *
+ * `fs.readFile` decides how much to allocate from its own `stat` and then reads to the end
+ * regardless, so a file that grows under it buys an allocation nothing authorised. This reads in
+ * chunks against a running total and gives up the moment the total passes the limit — ADR-0022 §2,
+ * "bound the operation, not the result".
+ */
+const readWithin = async (path: string, limit: number): Promise<Buffer | 'over-limit'> => {
+  const handle = await open(path, 'r');
+  try {
+    const chunks: Buffer[] = [];
+    let total = 0;
+    for await (const chunk of handle.createReadStream({ autoClose: false, start: 0 })) {
+      const buffer = chunk as Buffer;
+      total += buffer.byteLength;
+      if (total > limit) return 'over-limit';
+      chunks.push(buffer);
+    }
+    return Buffer.concat(chunks, total);
+  } finally {
+    await handle.close();
+  }
+};
+
+/** Give back a claimed destination name that is not going to be used after all. */
+const releaseClaim = async (destination: string | null): Promise<void> => {
+  if (destination === null) return;
+  await rm(destination, { force: true }).catch(() => undefined);
 };

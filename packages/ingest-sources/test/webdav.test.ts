@@ -8,6 +8,8 @@
  * `MOVE` with 501.
  */
 import { createHash } from 'node:crypto';
+import { statSync, utimesSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -588,5 +590,221 @@ describe('WebDavClient credentials in the URL (H4)', () => {
       username: 'carol@example.org',
       password: 'p:ss@word',
     });
+  });
+});
+
+describe('WebDavSource, when the revision cannot tell the object apart (re-attack)', () => {
+  const openReviews = (
+    target: TestLibrary,
+  ): Array<{ reason_code: string; explanation: string }> =>
+    target.connection
+      .prepare("select reason_code, explanation from review_queue where status = 'open'")
+      .all() as Array<{ reason_code: string; explanation: string }>;
+
+  const ingestOne = async (source: WebDavSource, context: ReturnType<typeof makeContext>) => {
+    const page = await source.poll({ limit: 10 }, context);
+    const candidate = page.candidates[0];
+    expect(candidate).toBeDefined();
+    const report = await makePipeline(library).run([candidate!], {
+      runLabel: 'reattack-webdav',
+      sourceId: source.id,
+      total: 1,
+    });
+    return { ref: candidate!.ref, outcome: report.outcomes[0]!.outcome };
+  };
+
+  /**
+   * The acknowledgement compared a *revision*, and on a share that sends no ETag the revision is
+   * `mtime:<Last-Modified>:<size>` — an HTTP-date, whole seconds by RFC 9110, and a byte count.
+   * A replacement of the same length inside the same second is therefore indistinguishable from
+   * the original, and the object was deleted with `verified: true` having never been read: three
+   * runs out of three, no timestamp manipulation, 617 different bytes written 75 ms later.
+   *
+   * Nothing here is raced. The replacement is written and its modification time put back to the
+   * original's, so the two revisions are asserted to be identical before the acknowledgement runs:
+   * the metadata check is *given* the answer it would have got in the race, deterministically.
+   */
+  it('refuses to delete a same-length replacement that the no-ETag revision cannot see', async () => {
+    const plain = await startFakeWebDav({ omitEtags: true });
+    try {
+      const ingested = makePdf({ lines: ['the version that was read'], salt: 'aaaa' });
+      const replacement = makePdf({ lines: ['a version nobody has read'], salt: 'bbbb' });
+      const padded = Buffer.concat([
+        replacement,
+        Buffer.alloc(Math.max(0, ingested.byteLength - replacement.byteLength), 0x20),
+      ]);
+      expect(padded.byteLength).toBe(ingested.byteLength);
+      expect(sha256(padded)).not.toBe(sha256(ingested));
+
+      await plain.put('scan.pdf', ingested);
+      const source = new WebDavSource({ url: plain.url, consume: { mode: 'delete' } });
+      const context = makeContext(library);
+      await source.start(context);
+      const { ref, outcome } = await ingestOne(source, context);
+
+      const object = join(plain.root, 'scan.pdf');
+      const stamp = statSync(object);
+      writeFileSync(object, padded);
+      utimesSync(object, stamp.atime, stamp.mtime);
+
+      // The premise: the share now reports exactly the revision the candidate was offered under.
+      const listing = await new WebDavClient({ url: plain.url }).list('');
+      const entry = listing.find((row) => row.path === 'scan.pdf');
+      expect(entry?.etag).toBeNull();
+      expect(`mtime:${entry?.lastModified ?? ''}:${String(entry?.byteSize ?? -1)}`).toBe(ref.revision);
+
+      const acknowledgement = await source.acknowledge(ref, outcome, context);
+      await source.stop(context);
+
+      expect(acknowledgement.action).toBe('refused');
+      expect(acknowledgement.verified).toBe(false);
+      expect(acknowledgement.detail).toContain('hashing to');
+      expect(await plain.read('scan.pdf')).toEqual(padded);
+      expect(openReviews(library).map((row) => row.reason_code)).toContain(
+        'source_changed_before_consume',
+      );
+    } finally {
+      await plain.close();
+    }
+  }, 60_000);
+
+  /**
+   * The other ordinary configuration: an ETag derived from metadata rather than content, which is
+   * Apache's shipped default (`FileETag INode MTime Size`) against a client that preserves mtimes.
+   * The fake computes its ETag from the bytes *and* the mtime, so restoring the mtime and keeping
+   * the length is not enough to reproduce that here; what is reproduced instead is the case the
+   * re-attack called worse — the share evaluates `If-Match`, agrees, and endorses the deletion —
+   * by having the share ignore preconditions and injecting the writer inside the window rather
+   * than racing for it. Either way the only check that can answer is the digest.
+   */
+  it('refuses on a share that ignores If-Match, because the bytes are read again', async () => {
+    const lax = await startFakeWebDav({ ignoreIfMatch: true });
+    try {
+      const ingested = makePdf({ lines: ['the version that was read'], salt: 'x' });
+      const replacement = makePdf({ lines: ['the version that was not'], salt: 'y' });
+      await lax.put('scan.pdf', ingested);
+
+      const source = new WebDavSource({ url: lax.url, consume: { mode: 'delete' } });
+      const context = makeContext(library);
+      await source.start(context);
+      const { ref, outcome } = await ingestOne(source, context);
+
+      await lax.put('scan.pdf', replacement);
+      const acknowledgement = await source.acknowledge(ref, outcome, context);
+      await source.stop(context);
+
+      expect(acknowledgement.action).toBe('refused');
+      expect(await lax.read('scan.pdf')).toEqual(replacement);
+    } finally {
+      await lax.close();
+    }
+  }, 60_000);
+
+  it('never claims the share honoured a precondition it cannot observe', async () => {
+    const bytes = makePdf({ lines: ['consumed normally'] });
+    await server.put('scan.pdf', bytes);
+    const source = new WebDavSource({ url: server.url, auth, consume: { mode: 'delete' } });
+    const runner = new SourceRunner({ source, pipeline: makePipeline(library), recueil: library });
+    await runner.start();
+    const report = await runner.runOnce();
+    await runner.stop();
+
+    const detail = report.acknowledgements[0]?.detail ?? '';
+    expect(report.acknowledgements[0]?.action).toBe('deleted');
+    expect(detail).toContain('the request carried If-Match');
+    // "Conditional on" asserted a guarantee that was never obtained: a share that ignores
+    // preconditions answers 204 exactly like one that honours them (ADR-0021 §1).
+    expect(detail).not.toContain('conditional on If-Match');
+  });
+});
+
+describe('WebDavClient budgets (ADR-0022)', () => {
+  it('abandons a PROPFIND answer that passes the listing limit, naming the number', async () => {
+    const chunk = Buffer.alloc(1024 * 1024, 0x20);
+    const client = new WebDavClient({
+      url: 'http://share.invalid/dav/',
+      maxListingBytes: 4 * 1024 * 1024,
+      fetch: async () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            pull(controller) {
+              controller.enqueue(new Uint8Array(chunk));
+            },
+          }),
+          { status: 207, headers: { 'content-type': 'application/xml' } },
+        ),
+    });
+
+    await expect(client.list('', '1')).rejects.toThrow(/passed the 4194304-byte limit/u);
+  }, 30_000);
+
+  it('abandons a GET that passes the object limit rather than buffering it', async () => {
+    const chunk = Buffer.alloc(1024 * 1024, 0x41);
+    const client = new WebDavClient({
+      url: 'http://share.invalid/dav/',
+      maxObjectBytes: 2 * 1024 * 1024,
+      fetch: async () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            pull(controller) {
+              controller.enqueue(new Uint8Array(chunk));
+            },
+          }),
+          { status: 200 },
+        ),
+    });
+
+    await expect(client.get('big.pdf')).rejects.toThrow(/passed the 2097152-byte limit/u);
+  }, 30_000);
+
+  /**
+   * The reader used a lazy `[\s\S]*?` bounded by a closing tag, which is quadratic in the body
+   * when the closing tag is absent: 8 MiB of unclosed `<d:response>` cost 14.6 seconds of blocked
+   * event loop and returned nothing. The budget here is generous by two orders of magnitude
+   * against the linear reader and impossible for the quadratic one.
+   */
+  it('reads a listing of unclosed elements in linear time', async () => {
+    const body =
+      '<?xml version="1.0"?><d:multistatus xmlns:d="DAV:">' +
+      '<d:response>'.padEnd(1024, ' ').repeat(8000) +
+      '</d:multistatus>';
+    expect(body.length).toBeGreaterThan(8_000_000);
+
+    const client = new WebDavClient({
+      url: 'http://share.invalid/dav/',
+      maxListingBytes: 64 * 1024 * 1024,
+      fetch: async () =>
+        new Response(body, { status: 207, headers: { 'content-type': 'application/xml' } }),
+    });
+
+    const started = Date.now();
+    expect(await client.list('', '1')).toEqual([]);
+    expect(Date.now() - started).toBeLessThan(3_000);
+  }, 30_000);
+
+  it('reads the same shape a namespace-prefixed, commented, nested listing has', async () => {
+    const body =
+      '<?xml version="1.0"?><D:multistatus xmlns:D="DAV:">' +
+      '<!-- a comment containing a > and a </D:response> that must not be read as markup -->' +
+      '<D:response><D:href>/dav/a.pdf</D:href><D:propstat><D:prop>' +
+      '<D:resourcetype/><D:getcontentlength>7</D:getcontentlength>' +
+      '<D:getetag>&quot;abc&quot;</D:getetag>' +
+      '</D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat></D:response>' +
+      '<lp1:response xmlns:lp1="DAV:"><lp1:href>/dav/sub/</lp1:href><lp1:propstat><lp1:prop>' +
+      '<lp1:resourcetype><lp1:collection/></lp1:resourcetype>' +
+      '</lp1:prop><lp1:status>HTTP/1.1 200 OK</lp1:status></lp1:propstat></lp1:response>' +
+      '</D:multistatus>';
+
+    const client = new WebDavClient({
+      url: 'http://share.invalid/dav/',
+      fetch: async () =>
+        new Response(body, { status: 207, headers: { 'content-type': 'application/xml' } }),
+    });
+
+    const entries = await client.list('', '1');
+    expect(entries.map((entry) => entry.path).sort()).toEqual(['a.pdf', 'sub']);
+    expect(entries.find((entry) => entry.path === 'a.pdf')?.byteSize).toBe(7);
+    expect(entries.find((entry) => entry.path === 'a.pdf')?.etag).toBe('abc');
+    expect(entries.find((entry) => entry.path === 'sub')?.isCollection).toBe(true);
   });
 });

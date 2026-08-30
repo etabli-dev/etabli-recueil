@@ -31,6 +31,7 @@
   },
   "dependencies": {
     "@recueil/core": "workspace:*",
+    "@recueil/rules": "workspace:*",
     "@recueil/schemas": "workspace:*",
     "better-sqlite3": "^12.4.1",
     "drizzle-orm": "^0.44.6"

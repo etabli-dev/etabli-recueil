@@ -142,8 +142,14 @@ describe('the budget and the clock', () => {
 
   it('the wall-clock allowance fires on work that outlasts it', () => {
     // Linear does not mean instant: a few million code points against a pattern that keeps a dozen
-    // threads alive is real work, and one millisecond is not enough of it.
-    const compiled = SafeRegex.compile('(?:[a-z]|[0-9])*!', { timeoutMs: 1, maxSteps: DEFAULT_MAX_STEPS * 20 });
+    // threads alive is real work, and one millisecond is not enough of it. `maxInputLength` is
+    // raised above the default here on purpose — this test is about the clock, and an input the
+    // length limit refuses first would test the wrong limit.
+    const compiled = SafeRegex.compile('(?:[a-z]|[0-9])*!', {
+      timeoutMs: 1,
+      maxSteps: DEFAULT_MAX_STEPS * 20,
+      maxInputLength: 8 * 1024 * 1024,
+    });
     expect(() => compiled.test('a1b2c3'.repeat(400_000))).toThrowError(RegexTimeoutError);
     try {
       compiled.test('a1b2c3'.repeat(400_000));
@@ -155,7 +161,11 @@ describe('the budget and the clock', () => {
   }, 20_000);
 
   it('a generous budget completes the same work', () => {
-    const compiled = SafeRegex.compile('(?:[a-z]|[0-9])*!', { timeoutMs: 30_000, maxSteps: 50_000_000 });
+    const compiled = SafeRegex.compile('(?:[a-z]|[0-9])*!', {
+      timeoutMs: 30_000,
+      maxSteps: 50_000_000,
+      maxInputLength: 8 * 1024 * 1024,
+    });
     expect(compiled.test('a1b2c3'.repeat(10_000))).toBe(false);
   }, 20_000);
 });

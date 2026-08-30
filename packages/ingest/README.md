@@ -67,12 +67,15 @@ answering.
 
 **Scratch cleaned after hashing, even on failure.** Extraction happens in a directory the run owns
 and deletes in a `finally`. `report.scratchClean` states whether the root ended up empty rather than
-assuming it.
+assuming it. A `finally` does not run after `SIGKILL`, so the start of every run also sweeps
+abandoned roots left by processes that are no longer running — by owner, never by age, so a
+concurrent run's scratch is never mistaken for a crashed one's (`sweepAbandonedScratch`).
 
 ## Flag, never guess (P3)
 
 Stage 9 compares the running confidence against `confidenceThreshold` (0.75 by default). Above it,
-the item is created. Below it — or when two rules disagree, or when a plugin stage asks — a
+the item is created. Below it — or when two rules disagree, or when a rule could not be evaluated at
+all because its pattern ran out of budget, or when a plugin stage asks — a
 `review_queue` row is written carrying the machine-readable reason, a sentence a person can read,
 and `proposed_payload`: exactly the request body that accepting the entry will execute
 ([`spec/data-model.md` §6.1](../../spec/data-model.md), RQ1).

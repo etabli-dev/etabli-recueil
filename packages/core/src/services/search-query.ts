@@ -36,7 +36,7 @@
  * Facet filtering — item type, year, collection, tag — is done with SQL predicates alongside the
  * `MATCH`, not inside the query string (`spec/data-model.md` §9).
  */
-import { ValidationError } from '../errors.js';
+import { ResourceBudgetError, ValidationError } from '../errors.js';
 
 /** The fields a query may name, and the FTS5 column each maps to. */
 export const SEARCH_FIELDS = {
@@ -187,14 +187,60 @@ const tokenise = (input: string): Token[] => {
 /* -------------------------------------------------------------------------------------------- */
 
 /**
+ * The longest query this compiler will read (ADR-0022 §2).
+ *
+ * The tokeniser is linear in the input, but `parseOr`/`parseAnd`/`parsePrimary` recurse once per
+ * open bracket, so a query that is nothing but `(` overflows the stack — a `RangeError` out of a
+ * search box rather than a refusal naming a limit. The bound is here rather than in the route
+ * because a saved search, the CLI and `LibraryService.listItems({ text })` all reach this function
+ * without passing through the server's own 2 048-character schema, and ADR-0022 puts the budget on
+ * the call. Generous next to any query a person types: it is half a page of prose.
+ */
+export const MAX_QUERY_LENGTH = 4_096;
+
+/**
+ * How deeply a query may nest before it is refused (ADR-0022 §2, §5).
+ *
+ * `parsePrimary` recurses once per `(` and `parseUnary` once per leading `-`, so nesting is
+ * recursion and recursion is the JavaScript stack. Measured against the shipped build, 5 000 open
+ * brackets threw `RangeError: Maximum call stack size exceeded` out of `parseSearchQuery` — not a
+ * refusal a caller can render, and not a limit anybody named. The length bound above is not enough
+ * on its own: it leaves 4 096 possible frames, which is the same order as the overflow. This one
+ * bounds the recursion itself, and sixty-four is far past any query a person writes.
+ */
+export const MAX_QUERY_DEPTH = 64;
+
+/**
  * Parse a query into a tree. `null` for an empty query — the caller decides whether that means
  * "everything" or "nothing"; here it just means the user typed no terms.
  */
 export const parseSearchQuery = (input: string): QueryNode | null => {
+  if (input.length > MAX_QUERY_LENGTH) {
+    throw new ResourceBudgetError(
+      `That query is ${input.length} characters; the most this index will read is ` +
+        `${MAX_QUERY_LENGTH}. Search for fewer words at a time.`,
+      'MAX_QUERY_LENGTH',
+      { length: input.length, limit: MAX_QUERY_LENGTH },
+    );
+  }
+
   const tokens = tokenise(input);
   let position = 0;
+  let depth = 0;
 
   const peek = (): Token | undefined => tokens[position];
+
+  /** Charged at each recursion, so the stack is bounded by a number rather than by the platform. */
+  const descend = (): void => {
+    depth += 1;
+    if (depth > MAX_QUERY_DEPTH) {
+      throw new ResourceBudgetError(
+        `That query nests more than ${MAX_QUERY_DEPTH} levels deep. Use fewer brackets.`,
+        'MAX_QUERY_DEPTH',
+        { limit: MAX_QUERY_DEPTH },
+      );
+    }
+  };
 
   /** `a OR b OR c` — the loosest binding. */
   const parseOr = (): QueryNode | null => {
@@ -232,7 +278,9 @@ export const parseSearchQuery = (input: string): QueryNode | null => {
     if (next === undefined) return null;
     if (next.type === 'not') {
       position += 1;
+      descend();
       const operand = parseUnary();
+      depth -= 1;
       if (operand === null) return null;
       return { kind: 'not', operand };
     }
@@ -245,7 +293,9 @@ export const parseSearchQuery = (input: string): QueryNode | null => {
 
     if (next.type === 'lparen') {
       position += 1;
+      descend();
       const inner = parseOr();
+      depth -= 1;
       if (peek()?.type === 'rparen') position += 1;
       return inner;
     }

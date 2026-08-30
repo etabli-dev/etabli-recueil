@@ -61,5 +61,5 @@ export type {
 export { inspectDatabaseFile, tableCounts } from './inspect.js';
 export type { DatabaseFacts } from './inspect.js';
 
-export { listStoredBlobs, resolveWithin } from './files.js';
+export { listStoredBlobs, MAX_MANIFEST_BYTES, readManifestFile, resolveWithin } from './files.js';
 export type { StoredBlob } from './files.js';

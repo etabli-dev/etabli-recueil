@@ -336,13 +336,44 @@ export const readTitle = (text: string): string | null => {
   return first ?? null;
 };
 
+/**
+ * How much of an envelope sender this reader will look at.
+ *
+ * A display name is a person's or an organisation's name. Anything past this is not one, and the
+ * value would be refused as a field long before anybody read it — but the cost of *deciding* that
+ * is what has to be bounded, which is what this number does.
+ */
+const MAX_SENDER_LENGTH = 1_024;
+
+/**
+ * `Jane Doe <jane@example.org>` becomes `Jane Doe`; a bare address is kept as written, which is the
+ * best available answer without an address book.
+ *
+ * Read with `lastIndexOf` rather than with the regular expression this replaces. That pattern was
+ * `/^\s*"?([^"<]+?)"?\s*<[^>]+>\s*$/u`, and its lazy `([^"<]+?)` followed by `\s*<` backtracks
+ * quadratically on a value with no `<` in it: measured at 0.07 s for 8 000 trailing spaces, 0.30 s
+ * for 16 000 and 1.23 s for 32 000, from a `From:` header a stranger wrote. Nobody had named it.
+ * The linear reading is also the clearer one — the address is the last `<…>` on the line, and
+ * everything before it is the display name.
+ */
 const readSender = (metadata: Record<string, unknown> | undefined): { name: string } | null => {
   const raw = pickString(metadata, ['from', 'sender', 'correspondent']);
   if (raw === null) return null;
-  // `Jane Doe <jane@example.org>` becomes `Jane Doe`; a bare address becomes the domain's owner as
-  // written, which is the best available answer without an address book.
-  const named = /^\s*"?([^"<]+?)"?\s*<[^>]+>\s*$/u.exec(raw);
-  const name = (named?.[1] ?? raw).trim();
+  if (raw.length > MAX_SENDER_LENGTH) return null;
+
+  const close = raw.lastIndexOf('>');
+  const open = close === -1 ? -1 : raw.lastIndexOf('<', close);
+  const display =
+    open > 0 && close > open + 1 && raw.slice(close + 1).trim().length === 0
+      ? raw.slice(0, open)
+      : raw;
+
+  const trimmed = display.trim();
+  const unquoted =
+    trimmed.length >= 2 && trimmed.startsWith('"') && trimmed.endsWith('"')
+      ? trimmed.slice(1, -1).trim()
+      : trimmed;
+  const name = unquoted.length === 0 ? raw.trim() : unquoted;
   return name.length === 0 ? null : { name };
 };
 

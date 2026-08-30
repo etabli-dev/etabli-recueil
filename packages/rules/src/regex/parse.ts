@@ -12,6 +12,18 @@
  * class escapes `\d \D \w \W \s \S`, the anchors `^` and `$`, the word boundaries `\b` and `\B`,
  * grouping (capturing, non-capturing and named), alternation, and the quantifiers `*`, `+`, `?`
  * and `{n,m}` in greedy and lazy form. Flags: `i`, `m`, `s`.
+ *
+ * A *pattern* is untrusted too. It is typed into a rule editor, POSTed to the API and validated
+ * synchronously on the request thread, so the parser has to be linear in the pattern and has to
+ * refuse a pattern it cannot parse within its own stack rather than let a `RangeError` escape.
+ * Two things here are that, and both were measured before they were written:
+ *
+ * - Nothing scans the tail of the pattern. The rejected-construct probes and the `{n,m}` reader
+ *   used to build `chars.slice(at).join('')` — a fresh copy of the remainder — once per atom, which
+ *   is quadratic: a 20 000-character run of literals cost 14.9 s and a 40 000-character one 60.7 s,
+ *   *before* the instruction cap could refuse them. They read the character array in place now.
+ * - `MAX_DEPTH` bounds group nesting. `'('.repeat(3000)` overflowed the call stack and threw a
+ *   `RangeError` — not a `RegexSyntaxError` — straight out of `SafeRegex.compile`.
  */
 import { RegexSyntaxError } from './errors.js';
 
@@ -41,7 +53,16 @@ export interface ParsedPattern {
 }
 
 /** `{n,m}` is expanded by copying, so an unbounded `n` would be an unbounded program. */
-const MAX_REPEAT = 1000;
+export const MAX_REPEAT = 1000;
+
+/**
+ * How deep groups and alternations may nest.
+ *
+ * Every level is four recursive frames (alternation → concat → repeat → atom), so this is the cap
+ * that turns a stack overflow into a refusal the rule author can read. Far deeper than any pattern
+ * a person writes; shallow enough that the parser cannot exhaust the stack of whatever called it.
+ */
+export const MAX_DEPTH = 300;
 
 const DIGIT_RANGES: readonly CodeRange[] = [{ lo: 0x30, hi: 0x39 }];
 const WORD_RANGES: readonly CodeRange[] = [
@@ -123,11 +144,18 @@ const CLASS_ESCAPES: ReadonlyMap<string, { readonly negated: boolean; readonly r
   ['S', { negated: true, ranges: SPACE_RANGES }],
 ]);
 
-const REJECTED: readonly { readonly probe: RegExp; readonly what: string }[] = [
-  { probe: /^\(\?=/u, what: 'lookahead' },
-  { probe: /^\(\?!/u, what: 'negative lookahead' },
-  { probe: /^\(\?<=/u, what: 'lookbehind' },
-  { probe: /^\(\?<!/u, what: 'negative lookbehind' },
+/**
+ * The constructs a linear simulation cannot run, recognised by their opening characters.
+ *
+ * Written as literal character comparisons rather than as anchored `RegExp`s over the remainder of
+ * the pattern: the probes themselves were harmless, but producing the remainder to run them against
+ * was a fresh string per atom and therefore quadratic in the pattern length.
+ */
+const REJECTED: readonly { readonly prefix: readonly string[]; readonly what: string }[] = [
+  { prefix: ['(', '?', '='], what: 'lookahead' },
+  { prefix: ['(', '?', '!'], what: 'negative lookahead' },
+  { prefix: ['(', '?', '<', '='], what: 'lookbehind' },
+  { prefix: ['(', '?', '<', '!'], what: 'negative lookbehind' },
 ];
 
 /**
@@ -139,6 +167,7 @@ const REJECTED: readonly { readonly probe: RegExp; readonly what: string }[] = [
 export const parsePattern = (pattern: string, options: { readonly dotAll?: boolean } = {}): ParsedPattern => {
   const chars = Array.from(pattern);
   let at = 0;
+  let depth = 0;
   let groupCount = 0;
   const groupNames = new Map<string, number>();
 
@@ -147,7 +176,6 @@ export const parsePattern = (pattern: string, options: { readonly dotAll?: boole
   };
 
   const peek = (offset = 0): string | undefined => chars[at + offset];
-  const rest = (): string => chars.slice(at).join('');
 
   const parseHex = (digits: number): number => {
     let value = 0;
@@ -260,8 +288,10 @@ export const parsePattern = (pattern: string, options: { readonly dotAll?: boole
   };
 
   const parseAtom = (): RegexNode => {
-    for (const { probe, what } of REJECTED) {
-      if (probe.test(rest())) return fail(`${what} is not supported by the linear engine`);
+    for (const { prefix, what } of REJECTED) {
+      if (prefix.every((char, offset) => peek(offset) === char)) {
+        return fail(`${what} is not supported by the linear engine`);
+      }
     }
 
     const char = peek();
@@ -297,7 +327,13 @@ export const parsePattern = (pattern: string, options: { readonly dotAll?: boole
         groupCount += 1;
         index = groupCount;
       }
+      depth += 1;
+      if (depth > MAX_DEPTH) {
+        depth -= 1;
+        return fail(`groups nested more than ${MAX_DEPTH} deep`);
+      }
       const inner = parseAlternation();
+      depth -= 1;
       if (peek() !== ')') return fail('unterminated group');
       at += 1;
       return name === undefined ? { kind: 'group', node: inner, index } : { kind: 'group', node: inner, index, name };
@@ -349,17 +385,49 @@ export const parsePattern = (pattern: string, options: { readonly dotAll?: boole
     return literal(char.codePointAt(0)!);
   };
 
-  /** `{n}`, `{n,}` or `{n,m}` — and, as in JavaScript, a literal `{` when it is none of those. */
+  /**
+   * `{n}`, `{n,}` or `{n,m}` — and, as in JavaScript, a literal `{` when it is none of those.
+   *
+   * Read straight out of `chars`, in at most twenty characters, so that a `{` in the middle of a
+   * long pattern costs the same as one at the end. The digit runs are capped at seven characters,
+   * as the equivalent pattern was, so an absurd count is a non-quantifier rather than a big number.
+   */
   const parseBraceQuantifier = (): { readonly min: number; readonly max: number } | undefined => {
-    const match = /^\{(\d{1,7})(,(\d{1,7})?)?\}/u.exec(rest());
-    if (match === null) return undefined;
-    const min = Number.parseInt(match[1]!, 10);
-    const max = match[2] === undefined ? min : match[3] === undefined ? Number.POSITIVE_INFINITY : Number.parseInt(match[3], 10);
+    if (peek() !== '{') return undefined;
+    let cursor = at + 1;
+    const digits = (): string | undefined => {
+      let text = '';
+      while (text.length <= 7) {
+        const char = chars[cursor];
+        if (char === undefined || char < '0' || char > '9') break;
+        text += char;
+        cursor += 1;
+      }
+      return text.length === 0 || text.length > 7 ? undefined : text;
+    };
+
+    const low = digits();
+    if (low === undefined) return undefined;
+    let high: string | undefined;
+    let open = false;
+    if (chars[cursor] === ',') {
+      cursor += 1;
+      open = true;
+      if (chars[cursor] !== '}') {
+        high = digits();
+        if (high === undefined) return undefined;
+      }
+    }
+    if (chars[cursor] !== '}') return undefined;
+    cursor += 1;
+
+    const min = Number.parseInt(low, 10);
+    const max = !open ? min : high === undefined ? Number.POSITIVE_INFINITY : Number.parseInt(high, 10);
     if (max < min) fail('quantifier is out of order');
     if (min > MAX_REPEAT || (Number.isFinite(max) && max > MAX_REPEAT)) {
       fail(`a repetition count above ${MAX_REPEAT} would not compile to a bounded program`);
     }
-    at += Array.from(match[0]).length;
+    at = cursor;
     return { min, max };
   };
 

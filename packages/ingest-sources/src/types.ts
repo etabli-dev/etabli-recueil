@@ -106,6 +106,26 @@ export const DEFAULT_CONSUME_ON = ['ingested', 'duplicate', 'review', 'container
 
 export type ConsumableStatus = IngestOutcome['status'];
 
+/**
+ * How many bytes a source will pull into memory for one candidate, unless told otherwise.
+ *
+ * ADR-0022 asks for budgets that are "configuration with conservative defaults, surfaced in one
+ * place rather than scattered as literals". `maxBytes` was the budget that had no default at all:
+ * every enforcement site was guarded by `!== undefined`, and no caller in the tree set it — not
+ * `apps/server/src/ingestion/sources.ts`, which is the only production caller there is. So a
+ * server-configured IMAP source would fetch a stranger's arbitrarily large message whole into a
+ * `Buffer` before `parseEmail` decoded it at roughly seven times that again, and a WebDAV share
+ * could hand back as many bytes as it liked. An unset budget is not a generous budget; it is an
+ * absent one.
+ *
+ * 256 MiB is chosen against the largest thing a person legitimately drops into a watched folder — a
+ * long duplex colour scan is tens of megabytes, and ADR-0022's own worked example of a large
+ * legitimate file is 900 MB, which is above this on purpose so that raising it is a knowing act.
+ * A candidate over the limit is skipped by name with the number in the message (ADR-0022 §6), not
+ * silently dropped.
+ */
+export const DEFAULT_MAX_SOURCE_BYTES = 256 * 1024 * 1024;
+
 /** The options every source shares. */
 export interface CommonSourceOptions {
   /** Defaults per source: the resolved root, the collection URL, `imap://user@host/mailbox`. */
@@ -124,7 +144,7 @@ export interface CommonSourceOptions {
   sourceMetadata?: JsonObject;
   /** Rules the source contributes to stage 8. Passed to the pipeline by the runner. */
   rules?: readonly IngestRule[];
-  /** Refuse anything larger rather than reading it into memory. */
+  /** Refuse anything larger rather than reading it into memory. Defaults to `DEFAULT_MAX_SOURCE_BYTES`. */
   maxBytes?: number;
 }
 

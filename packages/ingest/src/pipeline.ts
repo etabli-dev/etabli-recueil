@@ -43,6 +43,7 @@ import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 
 import { archiveKind, emailMetadata, extractArchive } from './archive/extract.js';
 import type { ExtractedMember } from './archive/extract.js';
+import { BudgetLedger } from './budgets.js';
 import { DocumentAlreadyFiledError, commitProposal } from './commit.js';
 import type { CommitResult } from './commit.js';
 import { CONFIDENCE_WEIGHTS, ConfidenceLedger } from './confidence.js';
@@ -247,6 +248,24 @@ export interface IngestVerification {
     documentsFiledByRun: number;
     /** Open `review_queue` rows the run can name, out of the entries it says it raised. */
     namedReviewEntriesOpen: number;
+    /**
+     * Of the `(item, document)` pairs the run says it filed, how many the `attachments` table
+     * actually holds — *as pairs*.
+     *
+     * The number a count comparison cannot produce. Exchange the documents of two items and
+     * `attachmentsCreated`, `documentsFiledByRun`, `itemsWithAttachment` and `documentsPresent` are
+     * all unchanged, because every one of them counts. This one asks which document is on which
+     * item, which is the claim the run actually made (ADR-0021: correspondence, not cardinality).
+     */
+    filedPairsHeld: number;
+    /**
+     * Of the `(document, sha256)` claims the run made, how many the `documents` table agrees with.
+     *
+     * The same shape one level down: a run that files the right number of documents carrying the
+     * wrong bytes is exactly what content-addressed identity exists to make impossible, so it is
+     * the thing to check rather than the count.
+     */
+    digestsAgreeing: number;
   };
   checks: Array<{ id: string; ok: boolean; detail: string }>;
   /** True when every check passed. */
@@ -378,6 +397,19 @@ interface CandidateContext {
    * nowhere else.
    */
   heldDigests: Set<string>;
+  /**
+   * The archive output budget this line of descent spends from, or null at the top level.
+   *
+   * ADR-0022 §3: "a nested container inherits the remaining budget rather than a fresh one."
+   * `BudgetLedger.child()` was written for that in the hardening round and then had no production
+   * caller at all — `expandArchive` called `extractArchive` with no `budget` property, so every
+   * container in a tree minted a brand-new ledger at the full `maxArchiveTotalBytes` and the only
+   * thing bounding the aggregate was `maxArchiveDepth` deciding how many times to re-grant it. The
+   * re-attack turned a 357 KB file into 40.6 MiB against a 4 MiB ceiling that way. This field is
+   * what carries one ledger down the chain; it is set by `expandArchive` on the contexts it gives
+   * its members and by nothing else.
+   */
+  archiveBudget: BudgetLedger | null;
 }
 
 /** What stage 1 knows before the gate closes. */
@@ -412,6 +444,8 @@ export class IngestPipeline {
   private readonly actor: Actor;
   private readonly storeContainers: { zip: boolean; eml: boolean };
   private readonly digestLockTimeoutMs: number;
+  /** One sweep per pipeline; see `sweepScratchOnce`. */
+  private sweptScratch = false;
   /**
    * The in-flight set of CONCEPT §5.3's idempotence promise, keyed by sha256.
    *
@@ -465,6 +499,7 @@ export class IngestPipeline {
 
     const startedAt = nowTimestamp();
     const scratch = new ScratchManager(this.config.scratchRoot);
+    await this.sweepScratchOnce(scratch, handle.id);
     const controller = new AbortController();
     options.signal?.addEventListener('abort', () => controller.abort(), { once: true });
 
@@ -510,6 +545,9 @@ export class IngestPipeline {
           // Fresh per top-level candidate: the set records this line of descent's own leases, and
           // two candidates must never see each other's.
           heldDigests: new Set<string>(),
+          // Null, not a ledger: a top-level file that turns out to be an archive is where the
+          // budget is opened, and a file that is not an archive never opens one at all.
+          archiveBudget: null,
         });
 
         outcomes.push({ ref: candidate.ref, outcome });
@@ -594,6 +632,41 @@ export class IngestPipeline {
       sourceId: candidate.ref.sourceId,
     });
     return report.outcomes[0]?.outcome ?? { status: 'failed', code: 'no_outcome', message: 'the run produced no outcome' };
+  }
+
+  /**
+   * Reclaim scratch roots left behind by runs that are no longer running, once per pipeline.
+   *
+   * A `finally` cannot run after `SIGKILL`, so a hard kill leaks one `recueil-ingest-XXXXXX`
+   * directory per crashed run under `scratchRoot`, for ever, with a fresh random name each time.
+   * The Phase 2 review raised that and the re-attack found it still open with the reason stated
+   * plainly: "no sweep exists and no start-up caller exists". A sweep nothing calls is the same
+   * defect as no sweep, so the caller is here — at the start of a run, which is the moment a
+   * long-lived server has a pipeline in its hands and the moment a CLI invocation exists at all.
+   *
+   * Once per pipeline rather than once per run, because the directories it reclaims were left by
+   * *other* processes and a second look in the same process finds nothing new. It never throws and
+   * never fails a run: a disk that could not be tidied is a log line, not a lost document.
+   */
+  private async sweepScratchOnce(scratch: ScratchManager, runId: string): Promise<void> {
+    if (this.sweptScratch) return;
+    this.sweptScratch = true;
+    try {
+      const report = await scratch.sweep();
+      if (report.removed.length === 0 && report.failed.length === 0) return;
+      logRun(this.recueil, runId, {
+        level: report.failed.length > 0 ? 'warn' : 'info',
+        message:
+          `swept ${String(report.removed.length)} abandoned scratch root(s) under ` +
+          `${report.root}${report.failed.length > 0 ? `, ${String(report.failed.length)} could not be removed` : ''}`,
+        data: { removed: report.removed, failed: report.failed, kept: report.kept.length },
+      });
+    } catch (error) {
+      logRun(this.recueil, runId, {
+        level: 'warn',
+        message: `the scratch sweep failed: ${message(error)}`,
+      });
+    }
   }
 
   /* ---------------------------------------------------------------------------------------- */
@@ -970,13 +1043,18 @@ export class IngestPipeline {
         hasTextLayer: boolean | null;
         pageCount: number | null;
         text: string | null;
+        textOmitted?: number;
       }>('type_detection');
 
     let detected: DetectedType;
     let hasTextLayer: boolean | null;
     let pageCount: number | null;
 
-    if (stage4 !== null) {
+    // A checkpoint whose text was too big to store is a checkpoint that cannot answer the question
+    // it is consulted for, so the probe is run again rather than the run continuing with no text.
+    // Re-deriving costs what it cost the first time; carrying on without it would silently file the
+    // document as though nothing could be read from it.
+    if (stage4 !== null && stage4.textOmitted === undefined) {
       detected = stage4.type;
       hasTextLayer = stage4.hasTextLayer;
       pageCount = stage4.pageCount;
@@ -1023,7 +1101,14 @@ export class IngestPipeline {
       text = probeText;
       journal.write(
         'type_detection',
-        { type: detected, confidence: result.confidence, signals: result.signals, hasTextLayer, pageCount, text },
+        {
+          type: detected,
+          confidence: result.confidence,
+          signals: result.signals,
+          hasTextLayer,
+          pageCount,
+          ...this.checkpointText(text),
+        },
         sha256,
       );
       notes.push(...result.signals);
@@ -1055,9 +1140,16 @@ export class IngestPipeline {
     /* ---- Stage 5: OCR --------------------------------------------------------------------- */
 
     let ocrStatus: (typeof schema.OCR_STATUSES)[number] = 'not_applicable';
-    const stage5 = journal.read<{ text: string | null; status: typeof ocrStatus; confidence: number }>('ocr');
+    const stage5 = journal.read<{
+      text: string | null;
+      status: (typeof schema.OCR_STATUSES)[number];
+      confidence: number;
+      textOmitted?: number;
+    }>('ocr');
 
-    if (stage5 !== null) {
+    // Same reasoning as stage 4: a `done` checkpoint whose recognised text was not stored has to be
+    // recognised again, because the text is the entire product of the stage.
+    if (stage5 !== null && !(stage5.status === 'done' && stage5.textOmitted !== undefined)) {
       ocrStatus = stage5.status;
       if (stage5.text !== null && stage5.text.length > 0) text = stage5.text;
       if (stage5.confidence > 0) {
@@ -1102,7 +1194,11 @@ export class IngestPipeline {
           notes.push(...(result.warnings ?? []));
           journal.write(
             'ocr',
-            { text: ocrStatus === 'done' ? text : null, status: ocrStatus, confidence: result.confidence },
+            {
+              ...this.checkpointText(ocrStatus === 'done' ? text : null),
+              status: ocrStatus,
+              confidence: result.confidence,
+            },
             sha256,
           );
         } catch (error) {
@@ -1332,8 +1428,22 @@ export class IngestPipeline {
       });
     }
     if (evaluation.matched.length > 0) notes.push(`rules matched: ${evaluation.matched.join(', ')}`);
+    const refusals = evaluation.refusals ?? [];
+    for (const refusal of refusals) {
+      notes.push(
+        `rule '${refusal.ruleId}' could not be evaluated against ${refusal.clause}: ${refusal.reason}`,
+      );
+    }
     previousStages.push('rules');
-    journal.write('rules', { matched: evaluation.matched, conflicts: evaluation.conflicts }, sha256);
+    journal.write(
+      'rules',
+      {
+        matched: evaluation.matched,
+        conflicts: evaluation.conflicts,
+        refusals,
+      },
+      sha256,
+    );
 
     if (evaluation.stop !== null) {
       const outcome: IngestOutcome = {
@@ -1390,7 +1500,25 @@ export class IngestPipeline {
                   .join('; ') +
                 '. Nothing was applied unseen.',
             }
-          : null;
+          : // A clause that ran out of its regular-expression budget has no verdict, and a document
+            // filed on the strength of rules that were never evaluated is a document filed on a
+            // guess. ADR-0022 §6 makes exceeding a budget a review outcome rather than a silent
+            // skip, so it goes to a person with the rule and the limit named.
+            refusals.length > 0
+            ? {
+                reasonCode: INGEST_REASON_CODES.ruleUnevaluable,
+                explanation:
+                  'A rule could not be evaluated against this document, so it was not filed on the ' +
+                  'strength of the rules: ' +
+                  refusals
+                    .map(
+                      (refusal) =>
+                        `'${refusal.ruleId}' on ${refusal.clause} (${refusal.pattern}) — ${refusal.reason}`,
+                    )
+                    .join('; ') +
+                  '.',
+              }
+            : null;
 
     if (forcedReview !== null || ledger.score < this.config.confidenceThreshold) {
       const reason = forcedReview ?? {
@@ -1576,6 +1704,21 @@ export class IngestPipeline {
     const { journal } = context;
     const archiveBytes = await input.readBytes();
 
+    /*
+     * The one budget this archive tree spends from.
+     *
+     * At the top level there is nothing to inherit, so a ledger is opened at the configured
+     * ceiling. Below it, `child()` returns a ledger that starts at what the container has left and
+     * charges every byte back to it, so forty inner archives at one level share one 4 MiB budget
+     * instead of taking forty. The ledger — not a child of it — is what goes onto the members'
+     * contexts, so that each nested container takes its own child of the shared parent rather than
+     * all of them sharing one.
+     */
+    const containerBudget =
+      context.archiveBudget === null
+        ? new BudgetLedger(this.config.maxArchiveTotalBytes, 'maxArchiveTotalBytes')
+        : context.archiveBudget.child('maxArchiveTotalBytes');
+
     interface Expanded {
       members: ExtractedMember[];
       memberBuffers: Buffer[];
@@ -1593,6 +1736,7 @@ export class IngestPipeline {
             kind: input.kind,
             scratch: space,
             config: this.config,
+            budget: containerBudget,
           });
           for (const entry of extraction.skipped) {
             input.notes.push(`archive member '${entry.entryName}' was skipped: ${entry.reason}`);
@@ -1700,6 +1844,7 @@ export class IngestPipeline {
           journal: new CandidateJournal(this.recueil, context.runId, candidateKey(innerRef)),
           attempt: 1,
           depth: context.depth + 1,
+          archiveBudget: containerBudget,
           parent: {
             documentId: containerDocumentId,
             sha256: input.sha256,
@@ -1906,6 +2051,25 @@ export class IngestPipeline {
   /* Queries                                                                                    */
   /* ---------------------------------------------------------------------------------------- */
 
+  /**
+   * How extracted text goes into a checkpoint (`maxCheckpointTextBytes`).
+   *
+   * The config field said "above this, extracted text is summarised in the checkpoint rather than
+   * stored whole" and had no reader anywhere in the tree — a documented budget with zero callers,
+   * which is the shape this round exists to remove. Meanwhile the OCR output of a large scan was
+   * being JSON-encoded into a `checkpoints` row twice per candidate, at whatever size the extractor
+   * produced, with `pdf.maxTotalOutputBytes` permitting 128 MiB of it.
+   *
+   * A summary rather than a prefix. Storing the first four mebibytes would make a resumed run
+   * continue with *different text* and no way to tell; recording that the text was omitted, and how
+   * long it was, makes the resume re-derive it, which is what it would have done had the checkpoint
+   * not existed at all.
+   */
+  private checkpointText(text: string | null): { text: string | null; textOmitted?: number } {
+    if (text === null || text.length <= this.config.maxCheckpointTextBytes) return { text };
+    return { text: null, textOmitted: text.length };
+  }
+
   private needsOcr(detected: DetectedType, hasTextLayer: boolean | null, text: string | null): boolean {
     if (detected === 'archive' || detected === 'email' || detected === 'text') return false;
     if (detected === 'image') return true;
@@ -1975,9 +2139,30 @@ export class IngestPipeline {
     // not evidence: each one is used to *address* a query, never as the answer to one.
     const claimedItemIds = new Set<string>();
     const claimedReviewEntryIds = new Set<string>();
+    /** `itemId → documentId`: which document the run says it put on which item. */
+    const claimedPairs = new Map<string, string>();
+    /** `documentId → sha256`: which bytes the run says a document holds. */
+    const claimedDigests = new Map<string, Sha256>();
+    /** Every document the outcomes name, whatever the run's own `documentIds` set says. */
+    const documentsNamed = new Set<string>();
     const walk = (outcome: IngestOutcome): void => {
-      if (outcome.status === 'ingested') claimedItemIds.add(outcome.itemId);
+      if (outcome.status === 'ingested') {
+        claimedItemIds.add(outcome.itemId);
+        claimedPairs.set(outcome.itemId, outcome.documentId);
+      }
       if (outcome.status === 'review') claimedReviewEntryIds.add(outcome.reviewQueueEntryId);
+      // A container the deployment chose not to store carries `documentId: ''`, which names no
+      // row; everything else that names a document also names the digest it was filed under.
+      if (
+        'documentId' in outcome &&
+        typeof outcome.documentId === 'string' &&
+        outcome.documentId.length > 0
+      ) {
+        documentsNamed.add(outcome.documentId);
+        if ('sha256' in outcome && typeof outcome.sha256 === 'string') {
+          claimedDigests.set(outcome.documentId, outcome.sha256);
+        }
+      }
       if ('members' in outcome && outcome.members !== undefined) outcome.members.forEach(walk);
     };
     outcomes.forEach(walk);
@@ -2106,6 +2291,47 @@ export class IngestPipeline {
     const attachmentsCreated = filedRow?.rows ?? 0;
     const documentsFiledByRun = filedRow?.documents ?? 0;
 
+    /*
+     * The two correspondence queries.
+     *
+     * Both pull rows rather than counts, and both are compared against what the run *claimed about
+     * which*, not about how many. ADR-0021 §3 asks a check to assert what it says it asserts, and
+     * the re-attack showed the gap that remains once both sides are queried: exchanging the tags of
+     * two documents leaves every count identical and passes. The equivalent here is exchanging the
+     * documents of two items, or the digests of two documents, and no count can see either.
+     */
+    const heldPairs =
+      itemIds.length === 0
+        ? []
+        : this.recueil.db
+            .select({
+              itemId: schema.attachments.itemId,
+              documentId: schema.attachments.documentId,
+            })
+            .from(schema.attachments)
+            .where(
+              and(inArray(schema.attachments.itemId, itemIds), isNull(schema.attachments.trashedAt)),
+            )
+            .all();
+    const heldPairSet = new Set(heldPairs.map((row) => `${row.itemId}\u001f${row.documentId}`));
+    const filedPairsHeld = [...claimedPairs].filter(([itemId, documentId]) =>
+      heldPairSet.has(`${itemId}\u001f${documentId}`),
+    ).length;
+
+    const digestIds = [...claimedDigests.keys()];
+    const heldDigests =
+      digestIds.length === 0
+        ? []
+        : this.recueil.db
+            .select({ id: schema.documents.id, sha256: schema.documents.sha256 })
+            .from(schema.documents)
+            .where(inArray(schema.documents.id, digestIds))
+            .all();
+    const heldDigestMap = new Map(heldDigests.map((row) => [row.id, row.sha256]));
+    const digestsAgreeing = [...claimedDigests].filter(
+      ([documentId, sha256]) => heldDigestMap.get(documentId) === sha256,
+    ).length;
+
     const openReviewEntries = count(
       this.recueil.db
         .select({ n: sql<number>`count(*)` })
@@ -2204,6 +2430,39 @@ export class IngestPipeline {
           `of those are open, out of ${String(openReviewEntries)} open entry(ies) for this job`,
       },
       {
+        // Correspondence, not cardinality. `documents_filed_once` above compares three counts and
+        // is defeated by any mutation that preserves them — swap the documents of two items and it
+        // is still one attachment per item and one document under each. This one asks, of every
+        // pair the run named, whether *that item* holds *that document*, which is the sentence the
+        // run's own outcome makes.
+        id: 'items_hold_the_documents_named',
+        ok: filedPairsHeld === claimedPairs.size && claimedPairs.size === claimed.ingested,
+        detail:
+          `the run says it filed ${String(claimed.ingested)} document(s) and named ` +
+          `${String(claimedPairs.size)} (item, document) pair(s); ` +
+          `${String(filedPairsHeld)} of those pairs are live attachments`,
+      },
+      {
+        /*
+         * The same shape one level down, and the floor ADR-0021 asks for.
+         *
+         * Two things make it a floor rather than another count. First, the source side is read
+         * from the run's own **outcomes**, not from the `documentIds` set the run narrates — every
+         * other check on this list is addressed by that set, so an empty one collapses nine
+         * queries to a literal `0` and lets the whole list compare zero with zero. ADR-0021 §2 is
+         * exactly that: a filter on the target side must never be allowed to redefine the source
+         * side. Second, the number of digest claims is asserted against the number of documents
+         * the outcomes name, so a run that named documents and made no claims about their bytes
+         * cannot pass by having nothing to compare.
+         */
+        id: 'documents_hold_the_bytes_named',
+        ok: digestsAgreeing === claimedDigests.size && claimedDigests.size === documentsNamed.size,
+        detail:
+          `the run's outcomes name ${String(documentsNamed.size)} document(s) and make ` +
+          `${String(claimedDigests.size)} (document, sha256) claim(s); the documents table agrees ` +
+          `with ${String(digestsAgreeing)} of them`,
+      },
+      {
         // An inequality on purpose. The failure is *more* unfiled documents than the run admits to:
         // documents the run put in the library and then left attached to nothing without saying so.
         // The other direction — fewer — is reachable without a defect, because a document this run
@@ -2236,6 +2495,8 @@ export class IngestPipeline {
         attachmentsCreated,
         documentsFiledByRun,
         namedReviewEntriesOpen,
+        filedPairsHeld,
+        digestsAgreeing,
       },
       checks,
       pass: checks.every((check) => check.ok),

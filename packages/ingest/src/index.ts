@@ -144,7 +144,12 @@ export type { FakeOcrOptions } from './ocr/fake.js';
 /* Metadata extraction (stage 6) ------------------------------------------------------------------ */
 export { noMetadata } from './metadata/extractor.js';
 export type { ExtractedMetadata, MetadataExtractor, MetadataRequest } from './metadata/extractor.js';
-export { GrobidExtractor, parseTeiHeader } from './metadata/grobid.js';
+export {
+  DEFAULT_GROBID_MAX_RESPONSE_BYTES,
+  DEFAULT_TEI_MAX_BYTES,
+  GrobidExtractor,
+  parseTeiHeader,
+} from './metadata/grobid.js';
 export type { GrobidOptions } from './metadata/grobid.js';
 export {
   OfficeHeuristicExtractor,
@@ -204,7 +209,14 @@ export { isInside, resolveMemberPath } from './archive/safe-path.js';
 export type { SafeMemberPath } from './archive/safe-path.js';
 
 /* Scratch ------------------------------------------------------------------------------------------- */
-export { ScratchManager, ScratchSpace } from './scratch.js';
+export {
+  DEFAULT_SWEEP_GRACE_MS,
+  SCRATCH_ROOT_PREFIX,
+  ScratchManager,
+  ScratchSpace,
+  sweepAbandonedScratch,
+} from './scratch.js';
+export type { ScratchSweepReport } from './scratch.js';
 
 /* Type detection (stage 4) --------------------------------------------------------------------------- */
 export { detectType } from './detect/type.js';

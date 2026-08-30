@@ -13,7 +13,7 @@ import { createHash } from 'node:crypto';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { ImapSource, SourceRunner, sourceState } from '../src/index.js';
+import { ImapClient, ImapSource, SourceRunner, sourceState } from '../src/index.js';
 import type { IngestOutcome, MailRule } from '../src/index.js';
 import {
   countDocuments,
@@ -365,4 +365,136 @@ describe('ImapSource', () => {
 
     expect(health.status).toBe('unavailable');
   });
+});
+
+describe('ImapSource, when the reference can never be resolved again (re-attack)', () => {
+  const openReviews = (
+    target: TestLibrary,
+  ): Array<{ reason_code: string; explanation: string }> =>
+    target.connection
+      .prepare("select reason_code, explanation from review_queue where status = 'open'")
+      .all() as Array<{ reason_code: string; explanation: string }>;
+
+  /**
+   * A UID means nothing without the UIDVALIDITY it was issued under (RFC 3501 §2.3.1.1). `uidOf`
+   * refuses a stale one, and it refused it by throwing out of `acknowledge` — which the runner
+   * records as an errno while the state row stays `pending` for ever, so every later run replays
+   * it, throws again, and reports `ok: false` with nothing in the review queue and no way out.
+   * It is a permanent condition, so it belongs in front of a person as a refusal (P3), with the
+   * row closed.
+   */
+  it('refuses rather than throwing when the UID was issued under another UIDVALIDITY', async () => {
+    const bytes = makePdf({ lines: ['an attachment worth keeping'] });
+    server.append(
+      'INBOX',
+      makeEmail({
+        from: 'post@amt.example',
+        subject: 'Bescheid',
+        body: 'Anbei.',
+        attachments: [{ filename: 'b.pdf', mediaType: 'application/pdf', bytes }],
+      }),
+    );
+
+    const source = sourceFor({ consume: { mode: 'delete' } });
+    const context = makeContext(library);
+    await source.start(context);
+    const page = await source.poll({ limit: 10 }, context);
+    const candidate = page.candidates[0]!;
+    const report = await makePipeline(library).run([candidate], {
+      runLabel: 'imap-validity',
+      sourceId: source.id,
+      total: 1,
+    });
+
+    // The same message, named under the validity a recreated mailbox would have issued.
+    const stale = {
+      ...candidate.ref,
+      externalId: `999/${candidate.ref.externalId.split('/').pop() ?? '1'}`,
+    };
+    const acknowledgement = await source.acknowledge(stale, report.outcomes[0]!.outcome, context);
+    await source.stop(context);
+
+    expect(acknowledgement.action).toBe('refused');
+    expect(acknowledgement.verified).toBe(false);
+    expect(acknowledgement.detail).toContain('UIDVALIDITY');
+    // The mailbox was not touched: nothing flagged, nothing expunged.
+    expect(server.mailboxes.get('INBOX')).toHaveLength(1);
+    expect(openReviews(library).map((row) => row.reason_code)).toContain(
+      'source_changed_before_consume',
+    );
+  }, 30_000);
+
+  it('refuses rather than throwing when the server cannot expunge one message', async () => {
+    const plain = await startFakeImap({ uidplus: false, move: false });
+    try {
+      const bytes = makePdf({ lines: ['an attachment worth keeping'] });
+      plain.append(
+        'INBOX',
+        makeEmail({
+          from: 'post@amt.example',
+          subject: 'Bescheid',
+          body: 'Anbei.',
+          attachments: [{ filename: 'b.pdf', mediaType: 'application/pdf', bytes }],
+        }),
+      );
+
+      const source = new ImapSource({
+        host: plain.host,
+        port: plain.port,
+        secure: false,
+        username: 'rh',
+        password: 'secret',
+        timeoutMillis: 10_000,
+        consume: { mode: 'delete' },
+      });
+      const runner = new SourceRunner({ source, pipeline: makePipeline(library), recueil: library });
+      await runner.start();
+      const report = await runner.runOnce();
+      await runner.stop();
+
+      expect(report.acknowledgements[0]?.action).toBe('refused');
+      expect(report.acknowledgements[0]?.error).toBeUndefined();
+      expect(report.acknowledgements[0]?.detail).toContain('UIDPLUS');
+      expect(report.ok).toBe(false);
+      expect(plain.mailboxes.get('INBOX')).toHaveLength(1);
+      // The row closes as `refused` rather than staying `pending` for ever.
+      expect(
+        sourceState(library)
+          .all(source.id)
+          .map((row) => row.acknowledgement),
+      ).toEqual(['refused']);
+    } finally {
+      await plain.close();
+    }
+  }, 30_000);
+});
+
+describe('ImapClient budgets (ADR-0022)', () => {
+  it('refuses a declared literal over the limit before reading a byte of it', async () => {
+    const client = new ImapClient({
+      host: server.host,
+      port: server.port,
+      secure: false,
+      username: 'rh',
+      password: 'secret',
+      timeoutMillis: 10_000,
+      maxResponseBytes: 4096,
+    });
+    await client.connect();
+    await client.login();
+    await client.select('INBOX');
+
+    server.append(
+      'INBOX',
+      makeEmail({
+        from: 'a@example.org',
+        subject: 'A message larger than the budget',
+        body: 'x'.repeat(64 * 1024),
+      }),
+    );
+
+    // The FETCH answer carries the message as a literal, and the literal is over the ceiling.
+    await expect(client.fetchMessage(1)).rejects.toThrow(/limit this client reads under/u);
+    client.close();
+  }, 30_000);
 });

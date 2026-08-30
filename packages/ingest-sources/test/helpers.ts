@@ -16,6 +16,7 @@
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { crc32, deflateRawSync } from 'node:zlib';
 
 import { createRecueil } from '@recueil/core';
 import type { CreateRecueilOptions, Recueil } from '@recueil/core';
@@ -318,3 +319,62 @@ export const noteBodies = (library: TestLibrary): string[] =>
       .prepare('select content_markdown as body from notes where trashed_at is null')
       .all() as Array<{ body: string }>
   ).map((row) => row.body);
+
+/* ------------------------------------------------------------------------------------------ */
+/* Archives                                                                                     */
+/* ------------------------------------------------------------------------------------------ */
+
+/**
+ * A minimal, structurally valid zip, built here rather than shelled out to.
+ *
+ * Deflate members with a real CRC and a real central directory, which is all `@recueil/ingest`'s
+ * reader looks at. It exists because the consume policy has to be tested against a *container*
+ * outcome, and a container is the one outcome whose own bytes the deployment may deliberately not
+ * store — the case that made every zip permanently unconsumable.
+ */
+export const makeZip = (members: ReadonlyArray<{ name: string; bytes: Buffer }>): Buffer => {
+  const locals: Buffer[] = [];
+  const central: Buffer[] = [];
+  let offset = 0;
+
+  for (const member of members) {
+    const compressed = deflateRawSync(member.bytes);
+    const name = Buffer.from(member.name, 'utf8');
+    const crc = crc32(member.bytes);
+
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x0403_4b50, 0);
+    local.writeUInt16LE(20, 4);
+    local.writeUInt16LE(8, 8);
+    local.writeUInt32LE(crc, 14);
+    local.writeUInt32LE(compressed.length, 18);
+    local.writeUInt32LE(member.bytes.length, 22);
+    local.writeUInt16LE(name.length, 26);
+    const block = Buffer.concat([local, name, compressed]);
+
+    const entry = Buffer.alloc(46);
+    entry.writeUInt32LE(0x0201_4b50, 0);
+    entry.writeUInt16LE(20, 4);
+    entry.writeUInt16LE(20, 6);
+    entry.writeUInt16LE(8, 10);
+    entry.writeUInt32LE(crc, 16);
+    entry.writeUInt32LE(compressed.length, 20);
+    entry.writeUInt32LE(member.bytes.length, 24);
+    entry.writeUInt16LE(name.length, 28);
+    entry.writeUInt32LE(offset, 42);
+
+    locals.push(block);
+    central.push(Buffer.concat([entry, name]));
+    offset += block.length;
+  }
+
+  const directory = Buffer.concat(central);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x0605_4b50, 0);
+  end.writeUInt16LE(members.length, 8);
+  end.writeUInt16LE(members.length, 10);
+  end.writeUInt32LE(directory.length, 12);
+  end.writeUInt32LE(offset, 16);
+
+  return Buffer.concat([...locals, directory, end]);
+};

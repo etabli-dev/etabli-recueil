@@ -89,6 +89,15 @@ export interface SourceRunReport {
   error?: { code: string; message: string; consecutiveFailures: number };
 }
 
+/**
+ * The acknowledgements that did not complete: refused, or thrown out of.
+ *
+ * One function, called from every `return` in `runOnce`, because the defect it replaces was a
+ * second copy of this rule written as a literal `true` on the path nobody looked at.
+ */
+const unresolved = (records: readonly AcknowledgementRecord[]): AcknowledgementRecord[] =>
+  records.filter((record) => record.error !== undefined || record.action === 'refused');
+
 export class SourceRunner {
   readonly source: IngestSource;
   private readonly pipeline: IngestPipeline;
@@ -226,6 +235,13 @@ export class SourceRunner {
 
     if (page.candidates.length === 0) {
       if (page.cursor !== undefined) this.state.setCursor(sourceId, page.cursor);
+      // `ok` is a statement about the acknowledgements, not about the poll. Hard-coding `true`
+      // here narrated the *shape* of the run — "nothing was offered, so nothing went wrong" —
+      // while `recovered` sat beside it holding a replay that had been refused. That is the H1
+      // crash window with its alarm disconnected: the process dies between the commit and the
+      // acknowledgement, the next process replays, the replay refuses because the file changed
+      // while nothing was running (the fix working), and the run reports clean. So the same
+      // computation runs on every exit from this method (ADR-0021 §1: query, do not narrate).
       return {
         sourceId,
         startedAt,
@@ -235,7 +251,7 @@ export class SourceRunner {
         skipped: page.skipped,
         pipeline: null,
         acknowledgements: [],
-        ok: true,
+        ok: unresolved(recovered).length === 0,
       };
     }
 
@@ -266,9 +282,7 @@ export class SourceRunner {
     // A refusal is not an error — it is the verification doing its job — but it is emphatically not
     // a clean run either, and a report that called it one would be the kind of check the Phase 1
     // review found and condemned.
-    const failedAcks = [...recovered, ...acknowledgements].filter(
-      (record) => record.error !== undefined || record.action === 'refused',
-    );
+    const failedAcks = unresolved([...recovered, ...acknowledgements]);
     return {
       sourceId,
       startedAt,

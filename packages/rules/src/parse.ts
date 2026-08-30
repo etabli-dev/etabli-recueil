@@ -9,6 +9,21 @@
  *
  * The YAML parser is given an explicit alias budget. An anchor expanded a thousand times is the
  * classic YAML denial of service, and a rule set arrives over the API.
+ *
+ * The document itself is bounded twice, and neither bound is the alias budget. An alias budget stops
+ * one document from *expanding* without limit; it says nothing about one that arrives enormous, and
+ * nothing at all about one that arrives deep.
+ *
+ * - `maxLength` bounds the text before either parser sees it. `JSON.parse` and the YAML reader both
+ *   build the whole tree synchronously with no ceiling of their own.
+ * - `MAX_DOCUMENT_DEPTH` bounds the nesting before the schema sees it. A condition is recursive —
+ *   `all`, `any` and `not` take conditions — so `{"not":{"not":…}}` three thousand deep is a
+ *   24 KB document, inside every other limit, that made `RuleSetSchema.safeParse` throw a bare
+ *   `RangeError: Maximum call stack size exceeded` out of a function whose whole contract is to
+ *   return the issues instead of throwing. The check is an iterative walk, so it cannot be the
+ *   thing that overflows, and a depth cap also terminates on a cyclic value.
+ *
+ * ADR-0022 §2: the operation is bounded by the call, not inspected afterwards.
  */
 import { LineCounter, parse as parseYaml, YAMLParseError } from 'yaml';
 import * as z from 'zod';
@@ -61,6 +76,38 @@ export const flattenIssues = (issues: readonly z.core.$ZodIssue[], prefix: reado
 export const formatIssues = (issues: readonly RuleSetIssue[]): string =>
   issues.map((issue) => `  ${issue.path === '' ? '(root)' : issue.path}: ${issue.message}`).join('\n');
 
+/**
+ * How deeply a rule-set document may nest.
+ *
+ * A `when` in a rule a person wrote is three or four levels; sixty-four is far past the point at
+ * which a condition tree is comprehensible, and far short of the stack. It is checked over the
+ * decoded value rather than over the text so that it covers YAML, JSON and a row read back out of
+ * the database alike.
+ */
+export const MAX_DOCUMENT_DEPTH = 64;
+
+/**
+ * The nesting depth of a decoded value, walked iteratively and abandoned at `limit`.
+ *
+ * Iterative on purpose: a recursive depth check on a value deep enough to overflow the stack
+ * overflows the stack. The return is the depth reached, capped, so the caller can name the limit.
+ */
+const depthOf = (value: unknown, limit: number): number => {
+  const stack: { readonly node: unknown; readonly depth: number }[] = [{ node: value, depth: 1 }];
+  let deepest = 0;
+  while (stack.length > 0) {
+    const { node, depth } = stack.pop()!;
+    if (depth > deepest) deepest = depth;
+    if (depth > limit) return depth;
+    if (Array.isArray(node)) {
+      for (const child of node) stack.push({ node: child, depth: depth + 1 });
+    } else if (typeof node === 'object' && node !== null) {
+      for (const child of Object.values(node)) stack.push({ node: child, depth: depth + 1 });
+    }
+  }
+  return deepest;
+};
+
 /** Check the two fields that decide how the rest is read, so their errors are not buried in a union. */
 const checkEnvelope = (value: unknown): readonly RuleSetIssue[] => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -86,6 +133,20 @@ const checkEnvelope = (value: unknown): readonly RuleSetIssue[] => {
 export const loadRuleSet = (value: unknown): RuleSetParse => {
   const envelope = checkEnvelope(value);
   if (envelope.length > 0) return { ok: false, issues: envelope };
+  const depth = depthOf(value, MAX_DOCUMENT_DEPTH);
+  if (depth > MAX_DOCUMENT_DEPTH) {
+    return {
+      ok: false,
+      issues: [
+        {
+          path: '',
+          message:
+            `the document nests more than ${MAX_DOCUMENT_DEPTH} levels deep (MAX_DOCUMENT_DEPTH); ` +
+            'a condition tree that deep is not one a person wrote',
+        },
+      ],
+    };
+  }
   const parsed = RuleSetSchema.safeParse(value);
   return parsed.success ? { ok: true, ruleSet: parsed.data } : { ok: false, issues: flattenIssues(parsed.error.issues) };
 };
@@ -95,10 +156,35 @@ export interface ParseRuleSetOptions {
   readonly format?: 'yaml' | 'json' | 'auto';
   /** How many times one YAML anchor may be expanded. Low on purpose; a rule set needs none. */
   readonly maxAliasCount?: number;
+  /** Longest document, in characters, that will be parsed at all. Default `MAX_RULE_SET_CHARS`. */
+  readonly maxLength?: number;
 }
+
+/**
+ * One mebibyte of rule-set source.
+ *
+ * The largest plausible real rule set — a few hundred rules with descriptions — is tens of
+ * kilobytes, so this is two orders of magnitude of headroom and still a refusal rather than a
+ * synchronous parse of whatever arrived. The schema's own caps (64 rules of actions each, 4 096
+ * characters per pattern, 1 000 members per `equalsAny`) bound a *valid* document; this bounds an
+ * invalid one, which is the one an attacker sends.
+ */
+export const MAX_RULE_SET_CHARS = 1024 * 1024;
 
 /** Read a rule set from text. YAML is a superset of JSON, but a JSON error message is better on JSON. */
 export const parseRuleSet = (text: string, options: ParseRuleSetOptions = {}): RuleSetParse => {
+  const maxLength = options.maxLength ?? MAX_RULE_SET_CHARS;
+  if (text.length > maxLength) {
+    return {
+      ok: false,
+      issues: [
+        {
+          path: '',
+          message: `the document is ${text.length} characters; the limit is ${maxLength} (maxLength)`,
+        },
+      ],
+    };
+  }
   const format = options.format ?? 'auto';
   const looksJson = text.trimStart().startsWith('{');
   let document: unknown;

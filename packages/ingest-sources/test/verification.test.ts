@@ -17,6 +17,7 @@ import {
   decideConsume,
   outcomeDigests,
   sourceState,
+  subjectDocumentId,
   verifyOutcome,
   verifyStoredDocument,
 } from '../src/index.js';
@@ -205,6 +206,117 @@ describe('decideConsume', () => {
     expect(verification.ok).toBe(false);
     expect(verification.digests).toHaveLength(2);
     expect(verification.digests.filter((digest) => digest.ok)).toHaveLength(1);
+  });
+
+  /**
+   * `storeArchiveContainers.zip` is false by default, so a zip container has no `documents` row —
+   * `pipeline.ts` writes an empty `documentId` on the outcome to say so. The check demanded one
+   * anyway, so every zip refused verification for ever: with a `delete` policy the watched folder
+   * never drained, `SourceRunner.runOnce` returned `ok: false` permanently, and the refusal blamed
+   * the store ("the library does not know these bytes") for a file the deployment had deliberately
+   * chosen not to store. Two shipped defaults contradicting each other.
+   */
+  it('verifies a container the deployment does not store, on its members, and says so', async () => {
+    const memberBytes = makePdf({ lines: ['the only member'] });
+    const member = await ingest(memberBytes);
+    const outcome: IngestOutcome = {
+      status: 'container',
+      // Empty: the pipeline is telling the check it did not file the container as a document.
+      documentId: '',
+      sha256: sha256(Buffer.from('a zip nobody stored')),
+      members: [member],
+    };
+
+    const verification = await verifyOutcome(library, outcome);
+
+    expect(verification.ok).toBe(true);
+    expect(verification.notStored).toEqual([sha256(Buffer.from('a zip nobody stored'))]);
+    // ADR-0021 §2: the exclusion is stated in the evidence rather than applied quietly.
+    expect(verification.summary).toContain('not filed as a document');
+    expect(verification.digests.map((digest) => digest.sha256)).toEqual([sha256(memberBytes)]);
+  });
+
+  it('still verifies an unstored container in full when the library turns out to hold it', async () => {
+    const bytes = makePdf({ lines: ['a container that was stored after all'] });
+    const stored = await ingest(bytes);
+    const outcome: IngestOutcome = {
+      status: 'container',
+      documentId: '',
+      sha256: 'sha256' in stored ? stored.sha256! : '',
+      members: [],
+    };
+
+    const verification = await verifyOutcome(library, outcome);
+
+    expect(verification.notStored).toEqual([]);
+    expect(verification.digests.map((digest) => digest.sha256)).toEqual([sha256(bytes)]);
+    expect(verification.ok).toBe(true);
+  });
+
+  /**
+   * The walk collected whatever carried a `sha256` and said nothing about the nodes that carried
+   * none, so a container whose member ingest FAILED — bytes that three attempts could not file —
+   * verified clean on the strength of its other members, and the archive that was their only copy
+   * was licensed for deletion. The right number of blobs, not the right ones (ADR-0021).
+   */
+  it('refuses a container with a member the pipeline could not file at all', async () => {
+    const memberBytes = makePdf({ lines: ['the member that made it'] });
+    const member = await ingest(memberBytes);
+    const outcome: IngestOutcome = {
+      status: 'container',
+      documentId: '',
+      sha256: sha256(Buffer.from('the archive')),
+      members: [
+        member,
+        { status: 'failed', code: 'archive_member_unreadable', message: 'the second member never arrived' },
+      ],
+    };
+
+    const verification = await verifyOutcome(library, outcome);
+    const decision = await decideConsume({ recueil: library, outcome, policy: { mode: 'delete' } });
+
+    expect(verification.ok).toBe(false);
+    expect(verification.unaccounted).toHaveLength(1);
+    expect(verification.summary).toContain('does not account for');
+    expect(decision.consume).toBe(false);
+    expect(decision.action).toBe('refused');
+  });
+
+  /**
+   * The floor. A comparison of nothing with nothing must not read as evidence: an outcome whose
+   * every digest is excused has had nothing shown to be in the library, so nothing on the far side
+   * may be touched.
+   */
+  it('refuses when every digest it named was excused and none was found', async () => {
+    const outcome: IngestOutcome = {
+      status: 'container',
+      documentId: '',
+      sha256: sha256(Buffer.from('a container of nothing')),
+      members: [],
+    };
+
+    const verification = await verifyOutcome(library, outcome);
+
+    expect(verification.ok).toBe(false);
+    expect(verification.summary).toContain('the library holds none of them');
+  });
+});
+
+describe('subjectDocumentId', () => {
+  it('falls back to the first member when the container itself is not a library record', () => {
+    expect(
+      subjectDocumentId({
+        status: 'container',
+        documentId: '',
+        sha256: 'a'.repeat(64),
+        members: [
+          { status: 'failed', code: 'x', message: 'y' },
+          { status: 'ingested', documentId: 'doc_member', itemId: 'itm', sha256: 'b'.repeat(64), confidence: 1 },
+        ],
+      }),
+    ).toBe('doc_member');
+    // Nothing to hang a review-queue entry off is null, not an empty string pointing at nothing.
+    expect(subjectDocumentId({ status: 'failed', code: 'x', message: 'y' })).toBeNull();
   });
 });
 

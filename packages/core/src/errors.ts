@@ -75,3 +75,22 @@ export class InvariantError extends RecueilError {
     super('recueil:invariant-violated', 409, `${invariant}: ${message}`, { invariant, ...detail });
   }
 }
+
+/**
+ * A resource budget refused the work (ADR-0022 §6).
+ *
+ * A `ValidationError` at heart — the caller offered something this build will not spend that much
+ * on, and the refusal names the limit so an operator can raise it knowingly — but a distinct class,
+ * because "the value is the wrong shape" and "the value is too big to check" are different facts
+ * and only one of them is fixed by editing the value. Every budget refusal in `@recueil/core`
+ * throws this, so the set of them is greppable rather than a scattering of literals.
+ */
+export class ResourceBudgetError extends ValidationError {
+  constructor(
+    message: string,
+    readonly limitName: string,
+    detail?: Record<string, unknown>,
+  ) {
+    super(message, { limit: limitName, ...detail });
+  }
+}

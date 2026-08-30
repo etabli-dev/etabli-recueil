@@ -10,7 +10,7 @@
  * contract promises. It is opaque by contract, not by encryption: a client that unpacks one and
  * relies on its innards will break, and that is the client's fault.
  */
-import { ValidationError } from '../errors.js';
+import { ResourceBudgetError, ValidationError } from '../errors.js';
 
 export interface CursorPayload {
   /** The sort key of the last row on the previous page. */
@@ -22,7 +22,28 @@ export interface CursorPayload {
 export const encodeCursor = (payload: CursorPayload): string =>
   Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
 
+/**
+ * The most a continuation token may weigh (ADR-0022 §2).
+ *
+ * A real one is a base64url JSON object holding a sort key and a ULID — under two hundred
+ * characters. The token arrives from a query string, so the decode is over input a stranger chose:
+ * `Buffer.from(cursor, 'base64url')` allocates three quarters of whatever it is given and
+ * `JSON.parse` then walks it, both before anything looks at the shape. The bound is on the call,
+ * not on the caller — `@recueil/core` is reached by the CLI, the importers and the plugin host as
+ * well as by the server, and only the server's route schema bounds a query parameter.
+ */
+export const MAX_CURSOR_LENGTH = 4_096;
+
 export const decodeCursor = (cursor: string): CursorPayload => {
+  if (cursor.length > MAX_CURSOR_LENGTH) {
+    throw new ResourceBudgetError(
+      `That continuation token is ${cursor.length} characters; the limit is ${MAX_CURSOR_LENGTH}. ` +
+        'Pass back the token you were given, verbatim.',
+      'MAX_CURSOR_LENGTH',
+      { length: cursor.length, limit: MAX_CURSOR_LENGTH },
+    );
+  }
+
   let parsed: unknown;
   try {
     parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));

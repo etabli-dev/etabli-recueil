@@ -32,7 +32,7 @@
  * then finds the unchanged pages. And because the same output path can be written again, a
  * snapshot taken over yesterday's re-copies only what changed.
  */
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
@@ -56,6 +56,7 @@ import {
   isEmptyDirectory,
   listFilesRecursively,
   listStoredBlobs,
+  readManifestFile,
 } from './files.js';
 import { inspectDatabaseFile } from './inspect.js';
 import type { BackupBlobEntry, BackupFileEntry, BackupManifest } from './manifest.js';
@@ -155,7 +156,7 @@ const prepareTarget = async (out: string, force: boolean): Promise<{ replacing: 
 
   let existing: BackupManifest;
   try {
-    existing = parseManifest(await readFile(join(out, MANIFEST_FILE), 'utf8'), join(out, MANIFEST_FILE));
+    existing = parseManifest(await readManifestFile(join(out, MANIFEST_FILE)), join(out, MANIFEST_FILE));
   } catch (cause) {
     throw new BackupTargetError(
       `'${out}' holds a '${MANIFEST_FILE}' that is not a readable Recueil snapshot, so it is not ` +

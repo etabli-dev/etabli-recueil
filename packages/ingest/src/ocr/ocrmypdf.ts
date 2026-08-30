@@ -30,13 +30,28 @@
  * documented arguments on `argv` and the PDF on stdin.
  */
 import { spawn } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { ResourceBudgetError } from '../budgets.js';
 import { AdapterUnavailableError } from '../errors.js';
 import type { HealthReport } from '../types.js';
 import type { OcrEngine, OcrRequest, OcrResult } from './engine.js';
+
+/**
+ * Defaults for what this adapter will read back out of the workspace.
+ *
+ * A sidecar's output is derived from a PDF a stranger sent, so it is untrusted in the ADR-0022
+ * sense even though the process itself is one the operator chose to run. Both reads were
+ * unbounded `readFile`s; a page of text is kilobytes and an OCR'd scan is tens of megabytes, so
+ * these are generous and still a bound.
+ */
+export const DEFAULT_OCR_MAX_TEXT_BYTES = 64 * 1024 * 1024;
+export const DEFAULT_OCR_MAX_PDF_BYTES = 512 * 1024 * 1024;
+
+/** How much of the child's stdout and stderr is kept. Only 500 characters are ever read. */
+const MAX_CAPTURE = 64 * 1024;
 
 export interface OcrMyPdfOptions {
   /** The executable. A path, a name on `PATH`, or a wrapper around `docker run`. */
@@ -53,6 +68,10 @@ export interface OcrMyPdfOptions {
   timeoutMs?: number;
   /** The confidence recorded for text this engine produced. Never 1 (`spec/hooks.md` §3). */
   confidence?: number;
+  /** Ceiling on the sidecar text file this adapter will read back. */
+  maxTextBytes?: number;
+  /** Ceiling on the OCR'd PDF this adapter will read back. */
+  maxOutputBytes?: number;
 }
 
 export class OcrMyPdfEngine implements OcrEngine {
@@ -65,6 +84,8 @@ export class OcrMyPdfEngine implements OcrEngine {
   private readonly scratchRoot: string;
   private readonly timeoutMs: number;
   private readonly confidence: number;
+  private readonly maxTextBytes: number;
+  private readonly maxOutputBytes: number;
 
   constructor(options: OcrMyPdfOptions = {}) {
     this.binary = options.binary ?? 'ocrmypdf';
@@ -74,6 +95,8 @@ export class OcrMyPdfEngine implements OcrEngine {
     this.scratchRoot = options.scratchRoot ?? tmpdir();
     this.timeoutMs = options.timeoutMs ?? 30 * 60 * 1000;
     this.confidence = options.confidence ?? 0.6;
+    this.maxTextBytes = options.maxTextBytes ?? DEFAULT_OCR_MAX_TEXT_BYTES;
+    this.maxOutputBytes = options.maxOutputBytes ?? DEFAULT_OCR_MAX_PDF_BYTES;
   }
 
   supports(mediaType: string): boolean {
@@ -82,6 +105,9 @@ export class OcrMyPdfEngine implements OcrEngine {
 
   async recognise(request: OcrRequest): Promise<OcrResult> {
     const languages = request.languages ?? this.languages;
+    // `mkdtemp` does not create its parent, and a configured `scratchRoot` that does not exist yet
+    // is an ordinary state on a fresh deployment — the same defect `ScratchManager` carried.
+    await mkdir(this.scratchRoot, { recursive: true });
     const workspace = await mkdtemp(join(this.scratchRoot, 'recueil-ocr-'));
     const input = join(workspace, 'in.pdf');
     const output = join(workspace, 'out.pdf');
@@ -120,8 +146,8 @@ export class OcrMyPdfEngine implements OcrEngine {
         );
       }
 
-      const text = await readFile(sidecar, 'utf8').catch(() => '');
-      const pdf = await readFile(output).catch(() => undefined);
+      const text = (await readBounded(sidecar, this.maxTextBytes, 'ocr.maxTextBytes'))?.toString('utf8') ?? '';
+      const pdf = (await readBounded(output, this.maxOutputBytes, 'ocr.maxOutputBytes')) ?? undefined;
 
       const warnings: string[] = [];
       if (run.code === 6) warnings.push('OCRmyPDF found an existing text layer and skipped the page');
@@ -168,13 +194,22 @@ export class OcrMyPdfEngine implements OcrEngine {
         ...(signal === undefined ? {} : { signal }),
       });
 
+      /*
+       * Bounded accumulation.
+       *
+       * Only the first five hundred characters of either stream are ever used — they go into an
+       * `AdapterUnavailableError` message or a warning — and a `+=` with no ceiling holds however
+       * much a chatty sidecar, or a wrapper script in a loop, decides to print. `MAX_CAPTURE`
+       * keeps that a constant. It is far more than any real diagnostic and far less than a stream
+       * nobody is reading can grow to.
+       */
       let stdout = '';
       let stderr = '';
       child.stdout.on('data', (chunk: Buffer) => {
-        stdout += chunk.toString('utf8');
+        if (stdout.length < MAX_CAPTURE) stdout += chunk.toString('utf8').slice(0, MAX_CAPTURE);
       });
       child.stderr.on('data', (chunk: Buffer) => {
-        stderr += chunk.toString('utf8');
+        if (stderr.length < MAX_CAPTURE) stderr += chunk.toString('utf8').slice(0, MAX_CAPTURE);
       });
 
       const timer = setTimeout(() => {
@@ -200,3 +235,39 @@ export class OcrMyPdfEngine implements OcrEngine {
     });
   }
 }
+
+/**
+ * Read a file the sidecar wrote, under a ceiling.
+ *
+ * The size is taken from a `stat` of a path inside a directory this process created with `mkdtemp`
+ * and is about to delete, so the check and the read are not racing an outsider — which is the one
+ * thing that makes a stat-then-read acceptable here rather than the shape ADR-0022 §2 forbids. A
+ * file the sidecar did not write is `null` rather than an error, exactly as the `.catch(() => …)`
+ * this replaces intended; a file it wrote and that is too big is a named refusal, because a silent
+ * empty result would look like "OCR found no text".
+ */
+const readBounded = async (
+  path: string,
+  limit: number,
+  limitName: string,
+): Promise<Buffer | null> => {
+  let size: number;
+  try {
+    size = (await stat(path)).size;
+  } catch {
+    return null;
+  }
+  if (size > limit) {
+    throw new ResourceBudgetError(
+      limitName,
+      limit,
+      `OCRmyPDF wrote ${size} bytes to '${path}', over the ${limitName} budget of ${limit}.`,
+      { path, byteSize: size },
+    );
+  }
+  try {
+    return await readFile(path);
+  } catch {
+    return null;
+  }
+};

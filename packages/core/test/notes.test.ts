@@ -185,3 +185,77 @@ describe('NoteService — trash and restore (P5)', () => {
     expect(library.notes.get(note.id).trashedAt).toBeNull();
   });
 });
+
+/**
+ * `htmlToMarkdown` used to be six chained `String.replace` calls over lazy `([\s\S]*?)` patterns
+ * bounded by a closing tag, two of them with a backreference. Every opener without its closer cost
+ * a scan to the end of the note, so the conversion was quadratic in the note size: measured against
+ * the shipped build, 500 unclosed `<strong>` in 260 KB took 0.04 s, 2 000 in 1 MB took 0.67 s,
+ * 4 000 in 2 MB took 2.58 s, and 30 000 in 16 MB — the server's own body limit — took 219 s of
+ * fully synchronous work. Note bodies arrive from `POST /api/v1/notes`, from the Zotero connector
+ * and from imported libraries (ADR-0022).
+ */
+describe('htmlToMarkdown is linear in the note (ADR-0022)', () => {
+  const timed = (html: string): number => {
+    const started = performance.now();
+    htmlToMarkdown(html);
+    return performance.now() - started;
+  };
+
+  it('converts a megabyte and a half of unclosed opening tags in milliseconds', () => {
+    // 3 000 openers over 1.5 MB cost about 1.5 s through the replacement chain, and cost single
+    // milliseconds now. The threshold is deliberately far below the old figure and far above the
+    // new one, so the test is about the shape of the growth rather than about this machine.
+    const html = '<strong>'.repeat(3_000) + 'x'.repeat(1_500_000);
+    const elapsed = timed(html);
+    expect(elapsed, `${(html.length / 1024).toFixed(0)} KB took ${elapsed.toFixed(0)} ms`).toBeLessThan(400);
+  }, 20_000);
+
+  it('is not quadratic in closing tags with no opener either', () => {
+    // The obvious way to write the replacement — search the element stack on every closing tag —
+    // reintroduces the same shape from the other end. The counter in `htmlToMarkdown` is what
+    // makes "there is no such opener" a constant-time answer.
+    const elapsed = timed('<b>'.repeat(100_000) + '</i>'.repeat(100_000));
+    expect(elapsed, `orphan closers took ${elapsed.toFixed(0)} ms`).toBeLessThan(500);
+  }, 20_000);
+
+  it('does not run away on an unterminated attribute, tag or comment', () => {
+    expect(timed(`<a href="${'x'.repeat(500_000)}`)).toBeLessThan(400);
+    expect(timed(`<p class=${'y'.repeat(500_000)}`)).toBeLessThan(400);
+    expect(timed(`<!--${'z'.repeat(500_000)}`)).toBeLessThan(400);
+  }, 20_000);
+
+  it('trims trailing whitespace without going quadratic on an interior run of it', () => {
+    // The final normalisation pass was `line.replace(/[ \t]+$/u, '')`, which is anchored only at
+    // the end: the engine restarts inside the run and backtracks through every length from every
+    // position. `<p>a<100 000 spaces>b</p>` cost 17.8 s through the shipped build — a note body a
+    // stranger can post, and a regular expression that survived the rewrite of everything around
+    // it because it is not a tag pattern.
+    const elapsed = timed(`<p>a${' '.repeat(200_000)}b</p>`);
+    expect(elapsed, `an interior run of 200 000 spaces took ${elapsed.toFixed(0)} ms`).toBeLessThan(400);
+
+    expect(htmlToMarkdown('<p>trailing   \t</p><p>kept  here</p>')).toBe('trailing\nkept  here');
+  }, 20_000);
+
+  it('treats a numeric reference beyond the last code point as data, not a crash', () => {
+    // `String.fromCodePoint(99999999)` throws a RangeError, which used to escape the converter and
+    // reach the request handler as a 500 rather than as anything a caller could act on.
+    expect(htmlToMarkdown('<p>a&#99999999;b</p>')).toBe('a&#99999999;b');
+    expect(htmlToMarkdown('<p>a&#8212;b</p>')).toBe('a—b');
+  });
+
+  it('keeps the tag vocabulary it always had', () => {
+    expect(htmlToMarkdown('<h2>Findings</h2><p>Mortality was <strong>lower</strong>.</p><ul><li>One</li></ul>'))
+      .toBe('## Findings\nMortality was **lower**.\n\n- One');
+    expect(htmlToMarkdown('<p>Use <code>rm -rf</code> carefully.</p>')).toBe('Use `rm -rf` carefully.');
+    expect(htmlToMarkdown('<strong><em>both</em></strong>')).toBe('***both***');
+    expect(htmlToMarkdown('<p>Unclosed <strong>bold')).toBe('Unclosed bold');
+    // Every line of a blockquote is quoted, which the replacement chain could not do: its `\n`s
+    // were produced by later passes, so only the first line ever got a `>`.
+    expect(htmlToMarkdown('<blockquote><p>one</p><p>two</p></blockquote>')).toBe('> one\n> two');
+    // A `>` inside an attribute value no longer ends the tag.
+    expect(htmlToMarkdown('<a title="a > b" href="https://example.org">link</a>')).toBe(
+      '[link](https://example.org)',
+    );
+  });
+});

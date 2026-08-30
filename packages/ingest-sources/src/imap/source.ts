@@ -33,10 +33,14 @@ import type {
   JsonObject,
 } from '@recueil/ingest';
 
+import { ReviewQueueService, ensureIngestSchema } from '@recueil/ingest';
+
 import { evidenceForConsume } from '../consume.js';
 import { SourceError, SourceProtocolError } from '../errors.js';
 import { sourceState } from '../state.js';
 import type { SourceStateStore } from '../state.js';
+import { DEFAULT_MAX_SOURCE_BYTES } from '../types.js';
+import { subjectDocumentId } from '../verify.js';
 import type {
   Acknowledgement,
   CommonSourceOptions,
@@ -72,9 +76,37 @@ export interface ImapSourceOptions extends CommonSourceOptions, ImapClientOption
   markSeen?: boolean;
   /** How many messages to take in one poll. Default 25. */
   batchSize?: number;
+  /**
+   * Most bytes of header block this source will decode for one message. Default 1 MiB.
+   *
+   * The header block is fetched before the body precisely so that a newsletter costs nothing to
+   * ignore, and `parseHeaderBlock` decodes the whole of it into a string to do that. RFC 5322 caps
+   * a header *line*, not the block, so a message with a hundred thousand `Received:` lines is
+   * legal and a hostile one is unbounded; a megabyte is far above anything a mail server produces
+   * and far below anything worth stalling a poll for (ADR-0022 §2).
+   */
+  maxHeaderBytes?: number;
 }
 
 const DEFAULT_BATCH = 25;
+const DEFAULT_MAX_HEADER_BYTES = 1024 * 1024;
+
+/**
+ * Failures of `uidOf` that replaying will never fix.
+ *
+ * A UIDVALIDITY change or an unreadable reference means the message this row names does not exist
+ * and cannot be made to; retrying for ever is not resilience, it is a stuck source.
+ */
+const PERMANENT_REFERENCE_FAILURES = new Set(['source_changed', 'source_bad_reference']);
+
+/**
+ * The reason code a refused acknowledgement raises (P3, `spec/data-model.md` §6.1).
+ *
+ * The same string the other two sources use, because it is the same failure — the far side is not
+ * what it was when the candidate was offered — and an operator filtering the queue should not have
+ * to know which source raised it.
+ */
+export const SOURCE_CHANGED_BEFORE_CONSUME = 'source_changed_before_consume';
 
 export class ImapSource implements IngestSource {
   readonly kind = 'poll' as const;
@@ -86,6 +118,8 @@ export class ImapSource implements IngestSource {
   private readonly options: ImapSourceOptions;
   private readonly policy: ConsumePolicy;
   private readonly mailRules: readonly MailRule[];
+  /** ADR-0022: every source reads under a bound, and the bound has a default (see `types.ts`). */
+  private readonly maxBytes: number;
   private client: ImapClient | null = null;
   private status: ImapMailboxStatus | null = null;
   private state: SourceStateStore | null = null;
@@ -97,6 +131,7 @@ export class ImapSource implements IngestSource {
     this.sourceKind = options.sourceKind ?? 'imap';
     this.policy = options.consume ?? { mode: 'leave' };
     this.mailRules = options.mailRules ?? [];
+    this.maxBytes = options.maxBytes ?? DEFAULT_MAX_SOURCE_BYTES;
     this.rules = [...toIngestRules(this.id, this.mailRules), ...(options.rules ?? [])];
   }
 
@@ -129,10 +164,22 @@ export class ImapSource implements IngestSource {
         skipped.push({ externalId, reason: 'already ingested, per the source state table' });
         continue;
       }
-      if (this.options.maxBytes !== undefined && (head.byteSize ?? 0) > this.options.maxBytes) {
+      // `RFC822.SIZE` is the server's declaration, so it is a fast rejection and never the bound;
+      // `ImapClient`'s own running total is what actually stops an oversized FETCH (ADR-0022 §1).
+      if ((head.byteSize ?? 0) > this.maxBytes) {
         skipped.push({
           externalId,
-          reason: `the message is ${String(head.byteSize)} bytes, over the ${String(this.options.maxBytes)}-byte limit`,
+          reason: `the message is ${String(head.byteSize)} bytes, over the ${String(this.maxBytes)}-byte limit`,
+        });
+        continue;
+      }
+      const maxHeaderBytes = this.options.maxHeaderBytes ?? DEFAULT_MAX_HEADER_BYTES;
+      if (head.headers.byteLength > maxHeaderBytes) {
+        skipped.push({
+          externalId,
+          reason:
+            `its header block is ${String(head.headers.byteLength)} bytes, over the ` +
+            `${String(maxHeaderBytes)}-byte limit this source decodes under`,
         });
         continue;
       }
@@ -217,7 +264,25 @@ export class ImapSource implements IngestSource {
     }
 
     const client = await this.ensure(ctx);
-    const uid = this.uidOf(ref.externalId);
+
+    // A UID is only a name inside the UIDVALIDITY it was issued under (RFC 3501 §2.3.1.1), and a
+    // mailbox that has been recreated has renumbered everything. `uidOf` refuses that, and it used
+    // to refuse it by throwing out of `acknowledge` — which the runner records as an errno and
+    // leaves the state row `pending` for ever, so every later run replays it, throws again and
+    // reports `ok: false`, with nothing in the review queue and no way out. It is a permanent
+    // condition, not a transient one, so it is a refusal (P3): the mailbox is untouched, the row
+    // closes, and a person is told which message can no longer be identified. A network failure
+    // from `ensure` above still throws, because that one *is* worth retrying.
+    let uid: number;
+    try {
+      uid = this.uidOf(ref.externalId);
+    } catch (error) {
+      if (error instanceof SourceError && PERMANENT_REFERENCE_FAILURES.has(error.code)) {
+        this.flagForReview(ctx, ref, outcome, error.message);
+        return { action: 'refused', detail: `the mailbox was left alone: ${error.message}`, verified: false };
+      }
+      throw error;
+    }
 
     // The flag first: a message that is moved and then fails to be flagged is at least in the right
     // place, whereas a message flagged and then not moved is merely read. Both orders are safe to
@@ -252,11 +317,13 @@ export class ImapSource implements IngestSource {
     }
 
     if (!client.has('UIDPLUS')) {
-      throw new SourceError(
-        'source_unsupported',
-        'The server has no UIDPLUS, so a single message cannot be expunged without expunging ' +
-          "every other message flagged \\Deleted in the mailbox. Use consume `move` instead.",
-      );
+      // Also permanent, and also previously a throw that left the row pending for ever. The
+      // deployment has to change the policy; replaying the same call every minute will not help.
+      const reason =
+        'the server has no UIDPLUS, so a single message cannot be expunged without expunging ' +
+        'every other message flagged \\Deleted in the mailbox; use consume `move` instead';
+      this.flagForReview(ctx, ref, outcome, reason);
+      return { action: 'refused', detail: `the mailbox was left alone: ${reason}`, verified: false };
     }
     await client.addFlags(uid, ['\\Deleted']);
     const expunged = await client.command(`UID EXPUNGE ${String(uid)}`);
@@ -352,6 +419,46 @@ export class ImapSource implements IngestSource {
     };
   }
 
+  /**
+   * Route a refusal to the review queue (P3).
+   *
+   * The same shape as the other two sources: the subject is the document that *was* filed, because
+   * that is the library record an operator can act from, and a failure to raise is logged and
+   * swallowed so that a data-safe refusal never becomes a throw.
+   */
+  private flagForReview(
+    ctx: SourceContext,
+    ref: IngestRef,
+    outcome: IngestOutcome,
+    reason: string,
+  ): void {
+    const documentId = subjectDocumentId(outcome);
+    if (documentId === null) return;
+    try {
+      ensureIngestSchema(ctx.recueil.connection);
+      new ReviewQueueService(ctx.recueil.db, ctx.recueil.audit).raise({
+        subjectType: 'document',
+        subjectId: documentId,
+        reasonCode: SOURCE_CHANGED_BEFORE_CONSUME,
+        explanation:
+          `The '${this.policy.mode}' consume policy was refused for '${ref.externalId}' in ` +
+          `'${this.mailbox}' on ${this.options.host} because ${reason}. Nothing was flagged, ` +
+          'moved or expunged. This entry is here because a source that had to refuse is worth a ' +
+          'person knowing about.',
+        proposedAction: 'none',
+        severity: 'warning',
+        sourceStage: 'source.acknowledge',
+        actor: ctx.recueil.actor,
+      });
+    } catch (error) {
+      ctx.log({
+        level: 'warn',
+        message: `the refusal could not be queued for review: ${error instanceof Error ? error.message : String(error)}`,
+        externalId: ref.externalId,
+      });
+    }
+  }
+
   private async ensure(ctx: SourceContext): Promise<ImapClient> {
     if (this.client !== null && this.client.connected) return this.client;
 
@@ -360,7 +467,12 @@ export class ImapSource implements IngestSource {
     this.client?.close();
     this.client = null;
 
-    const client = new ImapClient(this.options);
+    const client = new ImapClient({
+      ...this.options,
+      // One number rather than two that can disagree: the client's ceiling is this source's, plus
+      // the margin `ImapClient` documents for the response text around a message.
+      maxResponseBytes: this.options.maxResponseBytes ?? this.maxBytes + 32 * 1024 * 1024,
+    });
     await client.connect();
     await client.login();
     const status = await client.select(this.mailbox);

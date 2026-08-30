@@ -19,8 +19,13 @@
  * | `{a,b}` | alternation, nestable |
  *
  * The match is always anchored: a glob describes the whole path, not part of it.
+ *
+ * Translation is an expansion — every metacharacter becomes several, and `**` becomes eleven — so
+ * the *glob* is bounded here rather than only the pattern it becomes. `SafeRegex.compile` would
+ * refuse the result at `MAX_PATTERN_LENGTH`, but only after the expanded string had been built,
+ * which is checking after the allocation rather than bounding it (ADR-0022 §2).
  */
-import { RegexSyntaxError, SafeRegex, safeRegex } from './regex/index.js';
+import { MAX_PATTERN_LENGTH, RegexSyntaxError, SafeRegex, safeRegex } from './regex/index.js';
 import type { SafeRegexOptions } from './regex/index.js';
 
 /** How deep `{…}` may nest. Deep enough for any real rule, shallow enough to bound the program. */
@@ -43,6 +48,13 @@ const escapeLiteral = (char: string): string => {
  * much faster when the reader can see what the glob became.
  */
 export const globToPattern = (glob: string): string => {
+  if (glob.length > MAX_PATTERN_LENGTH) {
+    throw new RegexSyntaxError(
+      `glob is ${glob.length} characters; the limit is ${MAX_PATTERN_LENGTH} (MAX_PATTERN_LENGTH)`,
+      `${glob.slice(0, 60)}…`,
+      0,
+    );
+  }
   const chars = Array.from(glob);
   let out = '^';
   let depth = 0;

@@ -9,8 +9,11 @@
  *   and that it climbed above its own root. A rule engine that globbed the raw string would let a
  *   crafted archive entry file itself wherever it liked.
  * - **Long text is truncated with the truncation on the record.** A `text` condition against a
- *   200 MB OCR dump is bounded by `limits.maxTextLength`; when that bites, the trace says so, so a
- *   "did not match" is never mistaken for "is not in the document".
+ *   200 MB OCR dump is bounded by the smaller of `limits.maxTextLength` and `limits.maxInputLength`;
+ *   when that bites, the trace says so, so a "did not match" is never mistaken for "is not in the
+ *   document". Truncating rather than refusing is deliberate here and only here: every other
+ *   condition reads a value that is short by nature, so an over-long one is a fact worth refusing,
+ *   whereas an over-long extracted text is the ordinary case.
  */
 import { applyMatcher, applyMatcherToAny, describeMatcher } from '../match.js';
 import { basename, normalisePath } from '../path.js';
@@ -26,6 +29,7 @@ import type { IngestionSubject } from './subject.js';
 const limitsFor = (context: EvaluationContext) => ({
   maxSteps: context.limits.maxSteps,
   timeoutMs: context.limits.timeoutMs,
+  maxInputLength: context.limits.maxInputLength,
 });
 
 /** Turn a `MatchResult` into a trace node, and harvest its captures when we are allowed to. */
@@ -47,13 +51,37 @@ const leaf = (
   };
 };
 
-/** The extracted text a `text` condition sees, bounded, with a warning when the bound bit. */
+/**
+ * Refuse a value the facet would otherwise rewrite before the matcher ever sees it.
+ *
+ * `normalisePath` is linear but it is three copies of the string — a `replace`, a `split` and a
+ * `join` — and it runs *before* `applyMatcher` gets its chance to refuse. Bounding the matcher and
+ * leaving the normalisation unbounded would be a bound with a hole in it at exactly the place an
+ * archive entry name arrives.
+ */
+const tooLongToRead = (type: string, value: string, context: EvaluationContext): ConditionTrace | undefined => {
+  if (value.length <= context.limits.maxInputLength) return undefined;
+  const detail = `${type} is ${value.length} characters; the limit is ${context.limits.maxInputLength} (maxInputLength)`;
+  return { type, matched: false, detail, error: detail };
+};
+
+/**
+ * The extracted text a `text` condition sees, bounded, with a warning when the bound bit.
+ *
+ * The effective ceiling is the smaller of the rule set's `maxTextLength` and the matcher's own
+ * `maxInputLength`. Taking the smaller is what keeps the two from contradicting each other: without
+ * it a rule set asking for sixteen megabytes of text would hand the matcher more than the matcher
+ * is allowed to read, and every rule on every long document would come back as an undecidable
+ * refusal — a review entry for a reason that is not true of the document.
+ */
 const boundedText = (subject: IngestionSubject, context: EvaluationContext): { text: string | undefined; note?: string } => {
   if (subject.text === undefined) return { text: undefined };
-  if (subject.text.length <= context.limits.maxTextLength) return { text: subject.text };
-  const note = `text truncated to ${context.limits.maxTextLength} of ${subject.text.length} characters`;
+  const ceiling = Math.min(context.limits.maxTextLength, context.limits.maxInputLength);
+  if (subject.text.length <= ceiling) return { text: subject.text };
+  const which = ceiling === context.limits.maxInputLength ? 'maxInputLength' : 'maxTextLength';
+  const note = `text truncated to ${ceiling} of ${subject.text.length} characters (${which})`;
   context.warnings.push(`${subject.id}: ${note}; a text condition saw only the beginning of the document`);
-  return { text: subject.text.slice(0, context.limits.maxTextLength), note };
+  return { text: subject.text.slice(0, ceiling), note };
 };
 
 const evaluateLeaf = (condition: IngestionCondition, subject: IngestionSubject, context: EvaluationContext): ConditionTrace => {
@@ -95,6 +123,8 @@ const evaluateLeaf = (condition: IngestionCondition, subject: IngestionSubject, 
       if (subject.path === undefined) {
         return { type: 'path', matched: false, detail: `no path on this subject; the rule wanted one that ${describeMatcher(condition.match)}` };
       }
+      const oversize = tooLongToRead('path', subject.path, context);
+      if (oversize !== undefined) return oversize;
       const normalised = normalisePath(subject.path);
       const notes: string[] = [];
       if (normalised.changed) notes.push(`normalised from ${JSON.stringify(subject.path)}`);
@@ -106,6 +136,10 @@ const evaluateLeaf = (condition: IngestionCondition, subject: IngestionSubject, 
     }
 
     case 'filename': {
+      if (subject.path !== undefined && subject.filename === undefined) {
+        const oversize = tooLongToRead('filename', subject.path, context);
+        if (oversize !== undefined) return oversize;
+      }
       const name = subject.filename ?? (subject.path === undefined ? undefined : basename(subject.path));
       return leaf('filename', match(name, condition.match), context);
     }
@@ -159,6 +193,12 @@ const resolveTemplate = (
 ): { readonly ok: true; readonly value: string } | { readonly ok: false; readonly detail: string } => {
   const result = interpolate(template, context.captures);
   if (result.ok) return { ok: true, value: result.value };
+  if ('tooLong' in result) {
+    return {
+      ok: false,
+      detail: `skipped: ${JSON.stringify(template)} would substitute to ${result.tooLong} characters; the limit is ${result.limit}`,
+    };
+  }
   return {
     ok: false,
     detail: `skipped: ${JSON.stringify(template)} needs ${result.missing.map((name) => `\${${name}}`).join(', ')}, which no condition in this rule captured`,

@@ -35,7 +35,7 @@
  */
 
 /* The contract ------------------------------------------------------------------------------- */
-export { DEFAULT_CONSUME_ON } from './types.js';
+export { DEFAULT_CONSUME_ON, DEFAULT_MAX_SOURCE_BYTES } from './types.js';
 export type {
   Acknowledgement,
   AcknowledgementAction,
@@ -61,8 +61,14 @@ export {
 } from './errors.js';
 
 /* The verification that gates every consume policy ------------------------------------------- */
-export { outcomeDigests, verifyOutcome, verifyStoredDocument } from './verify.js';
-export type { DigestVerification, StoreVerification } from './verify.js';
+export {
+  outcomeDigests,
+  subjectDocumentId,
+  verifyOutcome,
+  verifyStoredDocument,
+  walkOutcome,
+} from './verify.js';
+export type { DigestVerification, OutcomeDigestRef, StoreVerification } from './verify.js';
 export { consumeStatuses, decideConsume, evidenceForConsume } from './consume.js';
 export type { ConsumeDecision, ConsumeEvidence } from './consume.js';
 
@@ -75,7 +81,11 @@ export { SourceRunner } from './runner.js';
 export type { AcknowledgementRecord, SourceRunReport, SourceRunnerOptions } from './runner.js';
 
 /* Watched folders -------------------------------------------------------------------------------- */
-export { FolderSource } from './folder/source.js';
+export {
+  FolderSource,
+  SOURCE_CHANGED_BEFORE_CONSUME,
+  SOURCE_CONSUME_FAILED,
+} from './folder/source.js';
 export type { FolderSourceOptions } from './folder/source.js';
 export { PARTIAL_SUFFIXES, looksPartial, scanFolder } from './folder/scan.js';
 export type { FolderEntry, FolderScanOptions, FolderScanResult } from './folder/scan.js';

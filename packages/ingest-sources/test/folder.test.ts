@@ -13,11 +13,15 @@
 import { createHash } from 'node:crypto';
 import {
   appendFileSync,
+  chmodSync,
   closeSync,
   existsSync,
   mkdirSync,
+  mkdtempSync,
   openSync,
   readFileSync,
+  readdirSync,
+  rmSync,
   statSync,
   symlinkSync,
   utimesSync,
@@ -29,7 +33,14 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { FolderSource, SourceRunner, scanFolder, selectStable, sourceState } from '../src/index.js';
+import {
+  DEFAULT_MAX_SOURCE_BYTES,
+  FolderSource,
+  SourceRunner,
+  scanFolder,
+  selectStable,
+  sourceState,
+} from '../src/index.js';
 import type { IngestOutcome } from '../src/index.js';
 import {
   countDocuments,
@@ -41,6 +52,7 @@ import {
   makePdf,
   makePipeline,
   makeTempDir,
+  makeZip,
   sleep,
 } from './helpers.js';
 import type { TestLibrary } from './helpers.js';
@@ -786,4 +798,383 @@ describe('FolderSource consume destinations', () => {
     ]);
     expect(page.skipped.map((entry) => entry.externalId)).toContain('archive/processed');
   });
+});
+
+describe('FolderSource, when the original changes *during* the re-hash (re-attack)', () => {
+  /**
+   * The re-hash used to stream the whole original and compare the digest afterwards, so a rewrite
+   * of a region the stream had already passed was invisible to it: the blind window for the first
+   * bytes of a file was not two syscalls but the entire duration of the re-hash, and it grew with
+   * the file. Measured at 270 ms on 128 MiB, with the file deleted and `verified: true` three
+   * consecutive times.
+   *
+   * The test has to land a write inside that window, so it calibrates: it hashes the file once to
+   * learn what one pass costs on this machine, then schedules its writes across the stretch of
+   * `acknowledge` where the second pass runs. `acknowledge` pays for two passes of roughly equal
+   * cost — the store verification re-reads the blob, then the original is re-hashed — so the
+   * fractions below sit inside the second one with room either side. Every write restores the
+   * mtime and leaves the length and the inode alone, which is exactly the writer the metadata
+   * check cannot see, and is one `open(…, 'r+')`, one `write` and one `utimensat`.
+   */
+  it('refuses a same-length rewrite that lands behind the cursor of the re-hash', async () => {
+    const size = 64 * 1024 * 1024;
+    const original = Buffer.alloc(size, 0x41);
+    Buffer.from('%PDF-1.4\n', 'latin1').copy(original, 0);
+    const path = join(watched.path, 'scan.pdf');
+    writeFileSync(path, original);
+    await sleep(40);
+
+    // Calibration: one streaming pass over this file, on this machine, right now.
+    const started = Date.now();
+    createHash('sha256').update(readFileSync(path)).digest('hex');
+    const onePass = Math.max(20, Date.now() - started);
+
+    const source = new FolderSource({
+      root: watched.path,
+      consume: { mode: 'delete' },
+      stability: { quietMillis: 0, pollMillis: 20 },
+      watch: { enabled: false },
+    });
+    const context = makeContext(library);
+    await source.start(context);
+    const candidate = (await source.poll({ limit: 10 }, context)).candidates[0]!;
+    const report = await makePipeline(library).run([candidate], {
+      runLabel: 'reattack-hash-window',
+      sourceId: source.id,
+      total: 1,
+    });
+    const committed = report.outcomes[0]!.outcome;
+    expect(committed.status).toBe('ingested');
+
+    const landed: number[] = [];
+    const rewrite = (): void => {
+      try {
+        const stamp = statSync(path);
+        const handle = openSync(path, 'r+');
+        writeSync(handle, Buffer.alloc(64 * 1024, 0x5a), 0, 64 * 1024, 0);
+        closeSync(handle);
+        utimesSync(path, stamp.atime, stamp.mtime);
+        landed.push(Date.now());
+      } catch {
+        // The file has already gone, which the assertions below will report far better.
+      }
+    };
+    const timers = [1.25, 1.4, 1.55, 1.7].map((fraction) =>
+      setTimeout(rewrite, Math.round(onePass * fraction)),
+    );
+
+    const acknowledgement = await source.acknowledge(candidate.ref, committed, context);
+    for (const timer of timers) clearTimeout(timer);
+    await source.stop(context);
+
+    // The premise of the test: at least one write reached a file that still existed.
+    expect(landed.length).toBeGreaterThan(0);
+
+    expect(acknowledgement.action).toBe('refused');
+    expect(acknowledgement.verified).toBe(false);
+    expect(existsSync(path)).toBe(true);
+    // And the refusal is in front of a person, not only in the run report (P3).
+    expect(openReviews(library).map((row) => row.reason_code)).toContain(
+      'source_changed_before_consume',
+    );
+  }, 60_000);
+});
+
+describe('FolderSource consume destination (re-attack)', () => {
+  /**
+   * `moveTarget` chose a free name with `stat` and then called `rename`, and `rename(2)` replaces
+   * its destination silently. `ConsumePolicy.to` may be absolute, so two watched folders sharing
+   * one processed directory is a supported configuration; the two acknowledgements interleave at
+   * their awaits long before either renames, and an archived original was destroyed ten times out
+   * of ten while both runs reported `moved / verified: true` naming the same path.
+   */
+  it('never overwrites an archived original when two sources share one processed directory', async () => {
+    const archive = makeTempDir('recueil-shared-archive-');
+    const otherRoot = makeTempDir('recueil-watched-b-');
+    try {
+      // Same name, different documents, the same length so the two re-hashes finish together.
+      const a = Buffer.concat([makePdf({ lines: ['folder A'], salt: 'A' }), Buffer.alloc(1024, 0x41)]);
+      const b = Buffer.concat([makePdf({ lines: ['folder B'], salt: 'B' }), Buffer.alloc(1024, 0x42)]);
+      const padded = (bytes: Buffer): Buffer =>
+        Buffer.concat([bytes, Buffer.alloc(Math.max(a.length, b.length) - bytes.length, 0x20)]);
+      const bytesA = padded(a);
+      const bytesB = padded(b);
+      writeFileSync(join(watched.path, 'scan.pdf'), bytesA);
+      writeFileSync(join(otherRoot.path, 'scan.pdf'), bytesB);
+      await sleep(40);
+
+      const make = (root: string): FolderSource =>
+        new FolderSource({
+          root,
+          consume: { mode: 'move', to: archive.path },
+          stability: { quietMillis: 0, pollMillis: 20 },
+          watch: { enabled: false },
+        });
+      const sourceA = make(watched.path);
+      const sourceB = make(otherRoot.path);
+      const context = makeContext(library);
+      await sourceA.start(context);
+      await sourceB.start(context);
+
+      const pipeline = makePipeline(library);
+      const candidateA = (await sourceA.poll({ limit: 10 }, context)).candidates[0]!;
+      const candidateB = (await sourceB.poll({ limit: 10 }, context)).candidates[0]!;
+      const outcomeA = (
+        await pipeline.run([candidateA], { runLabel: 'shared-a', sourceId: sourceA.id, total: 1 })
+      ).outcomes[0]!.outcome;
+      const outcomeB = (
+        await pipeline.run([candidateB], { runLabel: 'shared-b', sourceId: sourceB.id, total: 1 })
+      ).outcomes[0]!.outcome;
+
+      const [ackA, ackB] = await Promise.all([
+        sourceA.acknowledge(candidateA.ref, outcomeA, context),
+        sourceB.acknowledge(candidateB.ref, outcomeB, context),
+      ]);
+      await sourceA.stop(context);
+      await sourceB.stop(context);
+
+      expect([ackA.action, ackB.action]).toEqual(['moved', 'moved']);
+      // Both originals are in the archive, under two names. Queried off the disk, not from the
+      // acknowledgement, because it was the acknowledgement that was wrong.
+      const archived = readdirSync(archive.path).sort();
+      expect(archived).toHaveLength(2);
+      const digests = archived.map((name) => sha256(readFileSync(join(archive.path, name))));
+      expect(digests).toContain(sha256(bytesA));
+      expect(digests).toContain(sha256(bytesB));
+    } finally {
+      otherRoot.dispose();
+      archive.dispose();
+    }
+  }, 60_000);
+
+  const secondFilesystem = (): string | null => {
+    // `rename(2)` cannot cross a mount, and an absolute `to` may name one. `/dev/shm` is a
+    // separate tmpfs on Linux; where there is no second filesystem to hand there is no way to
+    // provoke EXDEV, and the test says so rather than pretending.
+    for (const candidate of ['/dev/shm', `/run/user/${String(process.getuid?.() ?? 0)}`]) {
+      try {
+        if (statSync(candidate).dev !== statSync(watched.path).dev) return candidate;
+      } catch {
+        continue;
+      }
+    }
+    return null;
+  };
+
+  it('copies, verifies and only then unlinks when the processed directory is on another mount', async () => {
+    const other = secondFilesystem();
+    if (other === null) {
+      // Recorded rather than silently passed: this machine has one filesystem under the
+      // temporary directory, so EXDEV cannot be provoked here.
+      expect(other).toBeNull();
+      return;
+    }
+    const processed = mkdtempSync(join(other, 'recueil-exdev-'));
+    try {
+      const bytes = makePdf({ lines: ['a scan bound for another mount'] });
+      writeFileSync(join(watched.path, 'scan.pdf'), bytes);
+      await sleep(40);
+
+      const source = new FolderSource({
+        root: watched.path,
+        consume: { mode: 'move', to: processed },
+        stability: { quietMillis: 0, pollMillis: 20 },
+        watch: { enabled: false },
+      });
+      const context = makeContext(library);
+      await source.start(context);
+      const candidate = (await source.poll({ limit: 10 }, context)).candidates[0]!;
+      const outcome = (
+        await makePipeline(library).run([candidate], {
+          runLabel: 'exdev',
+          sourceId: source.id,
+          total: 1,
+        })
+      ).outcomes[0]!.outcome;
+
+      const acknowledgement = await source.acknowledge(candidate.ref, outcome, context);
+      await source.stop(context);
+
+      expect(acknowledgement.action).toBe('moved');
+      expect(acknowledgement.verified).toBe(true);
+      expect(acknowledgement.detail).toContain('filesystem boundary');
+      expect(readFileSync(join(processed, 'scan.pdf'))).toEqual(bytes);
+      expect(existsSync(join(watched.path, 'scan.pdf'))).toBe(false);
+    } finally {
+      rmSync(processed, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it('turns a consume that cannot be carried out into a refusal with a reason, not a raw errno', async () => {
+    if (process.getuid?.() === 0) {
+      // A read-only directory does not stop root, so the provocation below would not provoke.
+      expect(process.getuid?.()).toBe(0);
+      return;
+    }
+    const processed = join(watched.path, 'processed');
+    const bytes = makePdf({ lines: ['bound for a directory that will not take it'] });
+    writeFileSync(join(watched.path, 'scan.pdf'), bytes);
+    await sleep(40);
+
+    const source = new FolderSource({
+      root: watched.path,
+      consume: { mode: 'move', to: 'processed' },
+      stability: { quietMillis: 0, pollMillis: 20 },
+      watch: { enabled: false },
+    });
+    const context = makeContext(library);
+    await source.start(context);
+    const candidate = (await source.poll({ limit: 10 }, context)).candidates[0]!;
+    const outcome = (
+      await makePipeline(library).run([candidate], {
+        runLabel: 'unwritable',
+        sourceId: source.id,
+        total: 1,
+      })
+    ).outcomes[0]!.outcome;
+
+    // The processed directory becomes unwritable between activation and the acknowledgement: a
+    // read-only mount, a quota, a permission change. Whatever the cause, the destructive step
+    // fails, and it used to fail by throwing a raw errno out of `acknowledge` — which the runner
+    // records as a `detail` string while the state row stays `pending` for ever.
+    chmodSync(processed, 0o500);
+    let acknowledgement;
+    try {
+      acknowledgement = await source.acknowledge(candidate.ref, outcome, context);
+    } finally {
+      chmodSync(processed, 0o700);
+      await source.stop(context);
+    }
+
+    expect(acknowledgement.action).toBe('refused');
+    expect(acknowledgement.verified).toBe(false);
+    expect(acknowledgement.detail).toContain('could not be carried out');
+    expect(existsSync(join(watched.path, 'scan.pdf'))).toBe(true);
+    expect(openReviews(library).map((row) => row.reason_code)).toContain('source_consume_failed');
+  }, 60_000);
+});
+
+describe('SourceRunner.ok (ADR-0021)', () => {
+  /**
+   * The early return taken when the poll offers nothing hard-coded `ok: true` and never consulted
+   * `recovered`. That is the H1 crash window with its alarm disconnected: the process dies between
+   * the commit and the acknowledgement, the next process replays, the replay is *refused* because
+   * the file changed while nothing was running — the fix working — and the run reports clean.
+   */
+  it('is false when a replayed acknowledgement was refused and the poll offered nothing', async () => {
+    const ingested = makePdf({ lines: ['written before the crash'] });
+    const replacement = makePdf({ lines: ['dropped in while nothing was running'], salt: 'later' });
+    const path = join(watched.path, 'scan.pdf');
+    writeFileSync(path, ingested);
+    await sleep(40);
+
+    const source = new FolderSource({
+      root: watched.path,
+      consume: { mode: 'delete' },
+      stability: { quietMillis: 0, pollMillis: 20 },
+      watch: { enabled: false },
+    });
+    const context = makeContext(library);
+    await source.start(context);
+    const candidate = (await source.poll({ limit: 10 }, context)).candidates[0]!;
+    const report = await makePipeline(library).run([candidate], {
+      runLabel: 'ok-floor',
+      sourceId: source.id,
+      total: 1,
+    });
+    // The row lands and the process dies: `recordOutcome` without the acknowledgement that
+    // follows it is exactly what `SourceRunner` leaves behind when it is killed in the window.
+    sourceState(library).recordOutcome({
+      sourceId: source.id,
+      ref: candidate.ref,
+      outcome: report.outcomes[0]!.outcome,
+    });
+    await source.stop(context);
+    writeFileSync(path, replacement);
+
+    // The next process. Its poll offers nothing — the replacement has not settled under a long
+    // quiet period — so the run consists of the replay and nothing else.
+    const restarted = new FolderSource({
+      id: source.id,
+      root: watched.path,
+      consume: { mode: 'delete' },
+      stability: { quietMillis: 3_600_000, pollMillis: 20 },
+      watch: { enabled: false },
+    });
+    const runner = new SourceRunner({
+      source: restarted,
+      pipeline: makePipeline(library),
+      recueil: library,
+    });
+    await runner.start();
+    const second = await runner.runOnce();
+    await runner.stop();
+
+    expect(second.offered).toBe(0);
+    expect(second.recovered.map((record) => record.action)).toEqual(['refused']);
+    expect(second.ok).toBe(false);
+    expect(readFileSync(path)).toEqual(replacement);
+  }, 60_000);
+});
+
+describe('CommonSourceOptions.maxBytes (ADR-0022)', () => {
+  it('has a default, so a source that names no limit still reads under one', async () => {
+    const source = new FolderSource({ root: watched.path, watch: { enabled: false } });
+    const context = makeContext(library);
+    await source.start(context);
+    const report = await source.health(context);
+    await source.stop(context);
+
+    expect(DEFAULT_MAX_SOURCE_BYTES).toBeGreaterThan(0);
+    expect(Number.isFinite(DEFAULT_MAX_SOURCE_BYTES)).toBe(true);
+    expect(report.detail?.maxBytes).toBe(DEFAULT_MAX_SOURCE_BYTES);
+  });
+});
+
+describe('FolderSource consuming an archive container (re-attack)', () => {
+  /**
+   * `DEFAULT_CONSUME_ON` includes `container`, and `storeArchiveContainers.zip` is false, and the
+   * two contradicted each other: the store verification demanded a `documents` row at the
+   * container's own digest, which by that very default does not exist, so every zip reaching a
+   * `delete` or `move` policy was refused for ever. The run reported `ok: false`, the watched
+   * folder never drained, and the refusal blamed the store for a file the deployment had chosen
+   * not to keep — while both members were in the library all along.
+   */
+  it('deletes a zip once its members are verified, and says the container itself was not stored', async () => {
+    const first = makePdf({ lines: ['member one'], salt: 'one' });
+    const second = makePdf({ lines: ['member two'], salt: 'two' });
+    writeFileSync(
+      join(watched.path, 'batch.zip'),
+      makeZip([
+        { name: 'a.pdf', bytes: first },
+        { name: 'b.pdf', bytes: second },
+      ]),
+    );
+    await sleep(40);
+
+    const source = new FolderSource({
+      root: watched.path,
+      consume: { mode: 'delete' },
+      stability: { quietMillis: 0, pollMillis: 20 },
+      watch: { enabled: false },
+    });
+    const runner = new SourceRunner({
+      source,
+      pipeline: makePipeline(library),
+      recueil: library,
+    });
+    await runner.start();
+    const report = await runner.runOnce();
+    await runner.stop();
+
+    expect(report.acknowledgements[0]?.status).toBe('container');
+    expect(report.acknowledgements[0]?.action).toBe('deleted');
+    expect(report.acknowledgements[0]?.detail).toContain('not filed as a document');
+    expect(report.ok).toBe(true);
+    expect(existsSync(join(watched.path, 'batch.zip'))).toBe(false);
+    // Queried, not read off the report: both members really are in the library and the store.
+    expect(documentDigests(library).sort()).toEqual([sha256(first), sha256(second)].sort());
+    expect(await library.storage.has(sha256(first))).toBe(true);
+    expect(await library.storage.has(sha256(second))).toBe(true);
+  }, 60_000);
 });

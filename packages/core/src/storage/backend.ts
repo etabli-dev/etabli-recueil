@@ -59,6 +59,21 @@ export interface BlobStat {
   key: string;
 }
 
+/** How much of a blob a caller is willing to hold in memory at once. */
+export interface ReadBufferOptions {
+  /** Bytes. Defaults to `DEFAULT_MAX_BUFFER_BYTES`. */
+  readonly maxBytes?: number;
+}
+
+/**
+ * The default ceiling on a whole-blob read.
+ *
+ * Comfortably above any note, cover image or extracted-text sidecar, and comfortably below the
+ * 900 MB scan ADR-0022 names — which is exactly the kind of object that must be streamed rather
+ * than buffered. A caller that genuinely needs more says so and takes the memory knowingly.
+ */
+export const DEFAULT_MAX_BUFFER_BYTES = 64 * 1024 * 1024;
+
 export interface StorageBackend {
   /** Which `documents.storage_backend` value this is. */
   readonly backend: 'local' | 'webdav' | 's3';
@@ -83,8 +98,17 @@ export interface StorageBackend {
   /** Open the bytes for reading. Throws if the digest is not in the store. */
   get(sha256: string): Promise<Readable>;
 
-  /** Read the whole blob. Convenience for small files; prefer `get` for anything page-sized. */
-  getBuffer(sha256: string): Promise<Buffer>;
+  /**
+   * Read the whole blob into memory. Convenience for small files; prefer `get` for anything
+   * page-sized.
+   *
+   * `maxBytes` is a bound on the read, not a claim about the object (ADR-0022 §2). A backend is
+   * expected to reject early from whatever size it can learn cheaply *and* to abort the transfer
+   * on a running total, because the size a store reports is metadata and the bytes are the fact.
+   * A library holds four-hundred-megabyte scans, so an unbounded whole-file read here is one
+   * request away from the server's resident set.
+   */
+  getBuffer(sha256: string, options?: ReadBufferOptions): Promise<Buffer>;
 
   has(sha256: string): Promise<boolean>;
 
