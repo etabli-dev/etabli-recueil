@@ -33,7 +33,7 @@
     "@recueil/core": "workspace:*",
     "@recueil/rules": "workspace:*",
     "@recueil/schemas": "workspace:*",
-    "better-sqlite3": "^12.4.1",
+    "better-sqlite3": "^13.0.3",
     "drizzle-orm": "^0.44.6"
   },
   "devDependencies": {
