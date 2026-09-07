@@ -34,7 +34,7 @@
     "@recueil/core": "workspace:*",
     "@recueil/ingest": "workspace:*",
     "@recueil/rules": "workspace:*",
-    "drizzle-orm": "^0.44.6"
+    "drizzle-orm": "^0.45.2"
   },
   "devDependencies": {
     "@types/node": "^22.19.0",
