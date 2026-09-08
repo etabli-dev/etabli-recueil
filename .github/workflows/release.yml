@@ -57,7 +57,7 @@ jobs:
       # a self-hosted single-user server is as likely to be a Raspberry Pi or an Ampere VPS as an
       # x86 box.
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
         with:
           platforms: arm64
 
