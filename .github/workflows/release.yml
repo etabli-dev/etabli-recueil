@@ -117,7 +117,7 @@ jobs:
       # A second, independent provenance record: signed by GitHub's attestation service and
       # verifiable with `gh attestation verify oci://<image>@<digest>`.
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-name: ${{ env.IMAGE_NAME }}
           subject-digest: ${{ steps.build.outputs.digest }}
