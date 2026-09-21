@@ -30,16 +30,16 @@
     "yaml": "^2.9.0"
   },
   "devDependencies": {
-    "@playwright/test": "^1.62.1",
-    "@testing-library/dom": "^10.4.1",
+    "@playwright/test": "^1.63.0",
+    "@testing-library/dom": "^10.4.2",
     "@testing-library/jest-dom": "^7.0.1",
-    "@testing-library/react": "^16.3.2",
-    "@testing-library/user-event": "^14.6.6",
-    "@types/node": "^22.19.0",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.7",
+    "@types/node": "^22.20.3",
     "@types/react": "^18.3.27",
     "@types/react-dom": "^18.3.7",
     "@vitejs/plugin-react": "^5.2.0",
-    "jsdom": "^30.0.1",
+    "jsdom": "^30.1.0",
     "typescript": "^5.9.3",
     "vite": "^7.3.6",
     "vitest": "^4.1.11"
