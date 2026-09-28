@@ -42,7 +42,7 @@
     "zod-openapi": "^6.0.1"
   },
   "devDependencies": {
-    "@types/node": "^22.19.0",
+    "@types/node": "^22.20.4",
     "ajv": "^8.17.1",
     "ajv-formats": "^3.0.1",
     "typescript": "^5.9.3",
