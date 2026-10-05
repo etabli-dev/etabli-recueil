@@ -44,9 +44,9 @@
     "@recueil/schemas": "workspace:*",
     "@recueil/server": "workspace:*",
     "commander": "^14.0.3",
-    "drizzle-orm": "^0.44.6",
+    "drizzle-orm": "^0.45.3",
     "picocolors": "^1.1.1",
-    "yaml": "^2.9.0"
+    "yaml": "^2.9.1"
   },
   "devDependencies": {
     "@types/node": "^22.19.0",
