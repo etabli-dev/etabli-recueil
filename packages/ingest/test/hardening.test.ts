@@ -13,7 +13,7 @@
  */
 import { Buffer } from 'node:buffer';
 import { randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, statSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { crc32, deflateRawSync } from 'node:zlib';
@@ -1020,6 +1020,27 @@ describe('a folder candidate reads the file it checked (sources/local.ts)', () =
       writeFileSync(path, 'BBBBBBBBBB');
 
       await expect(scan.candidates[0]!.read()).rejects.toThrow(/different file/u);
+    } finally {
+      watched.dispose();
+    }
+  });
+
+  it('rejects rewritten contents even when inode, size and mtime are retained', async () => {
+    const watched = makeTempDir('recueil-toctou-rewrite-');
+    try {
+      const path = join(watched.path, 'scan.pdf');
+      writeFileSync(path, 'AAAAAAAAAA');
+      const timestamp = new Date('2026-01-01T00:00:00Z');
+      utimesSync(path, timestamp, timestamp);
+      const before = statSync(path);
+      const scan = await folderCandidates(watched.path);
+      writeFileSync(path, 'BBBBBBBBBB');
+      utimesSync(path, before.atime, before.mtime);
+      const after = statSync(path);
+      expect(after.ino).toBe(before.ino);
+      expect(after.size).toBe(before.size);
+      expect(after.mtimeMs).toBe(before.mtimeMs);
+      await expect(scan.candidates[0]!.read()).rejects.toThrow(SourceFileChangedError);
     } finally {
       watched.dispose();
     }

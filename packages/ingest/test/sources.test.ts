@@ -7,7 +7,7 @@
  * The mail test is the CONCEPT §5.3 sentence taken literally — "attachments as Documents, body as
  * Note, rules by sender/subject" — and the Office facet of §5.2 filled from the envelope.
  */
-import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { schema } from '@recueil/core';
@@ -71,6 +71,24 @@ describe('folderCandidates', () => {
       const second = (await folderCandidates(watched.path)).candidates[0]!;
       expect(second.ref.revision).not.toBe(first.ref.revision);
       expect(second.ref.externalId).toBe(first.ref.externalId);
+    } finally {
+      watched.dispose();
+    }
+  });
+
+  it('preserves existing fractional-millisecond revision strings', async () => {
+    const watched = makeTempDir('recueil-revision-');
+    try {
+      const path = join(watched.path, 'a.txt');
+      writeFileSync(path, 'unchanged');
+      for (const offset of [0.000003, 0.123456, 0.654321]) {
+        const seconds = 1793448000 + offset;
+        utimesSync(path, seconds, seconds);
+        const legacy = statSync(path);
+        const candidate = (await folderCandidates(watched.path)).candidates[0]!;
+        expect(candidate.ref.revision).toBe(`${String(legacy.mtimeMs)}:${String(legacy.size)}`);
+        expect(await candidate.read()).toEqual(Buffer.from('unchanged'));
+      }
     } finally {
       watched.dispose();
     }

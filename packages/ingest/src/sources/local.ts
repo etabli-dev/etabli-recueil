@@ -28,14 +28,14 @@
  *
  * So `read()` re-establishes both, and it does it over **identity** rather than over the path. The
  * file is opened with `O_NOFOLLOW`, so the final component cannot have become a symlink; the
- * descriptor is `fstat`ed and its device and inode compared against the ones the scan checked, so
+ * descriptor is `fstat`ed and its identity and change metadata compared against the scan, so
  * substituting a different file anywhere along the path is refused whatever the name now resolves
  * to; and the read is a bounded read from that descriptor, so the size that bounds it is the size
  * of the thing actually being read. Every byte returned comes from the descriptor that passed the
  * check, which is the only version of "the file that was checked is the file that was read" that
  * survives a concurrent writer.
  */
-import { constants } from 'node:fs';
+import { constants, type BigIntStats } from 'node:fs';
 import { open, readdir, realpath, stat } from 'node:fs/promises';
 import type { FileHandle } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
@@ -55,7 +55,7 @@ import type { DocumentSourceKind, IngestCandidate, JsonObject } from '../types.j
 export class SourceFileChangedError extends IngestError {
   constructor(path: string, reason: string) {
     super(
-      `'${path}' is not the file that was offered: ${reason}. It was not read, because the ` +
+      `'${path}' is not the file that was offered: ${reason}. It was not imported, because the ` +
         'containment check and the size limit were made against the file that was there then.',
       'source_changed_before_read',
       { path, reason },
@@ -111,42 +111,55 @@ export const fileCandidate = async (
   options: FileCandidateOptions = {},
 ): Promise<IngestCandidate> => {
   const absolute = resolve(path);
-  const info = await stat(absolute);
-  // Identity, not metadata. `(dev, ino)` names the file itself; a size and an mtime name a
-  // description of it that any writer — or any ordinary editor — can reproduce.
-  const identity = { dev: info.dev, ino: info.ino };
+  const info = await stat(absolute, { bigint: true });
+  // Inodes can be reused immediately after unlink (including on Linux). Keep
+  // nanosecond change metadata as well so replacement and in-place writes are
+  // refused even when size and modification time are restored by a writer.
+  const identity = info;
+  // Match the legacy stat().mtimeMs calculation, including pre-epoch times.
+  let seconds = info.mtimeNs / 1_000_000_000n;
+  let nanoseconds = info.mtimeNs % 1_000_000_000n;
+  if (nanoseconds < 0n) {
+    seconds -= 1n;
+    nanoseconds += 1_000_000_000n;
+  }
+  const mtimeMs = Number(seconds) * 1000 + Number(nanoseconds) / 1_000_000;
   return {
     ref: {
       sourceId: options.sourceId ?? 'folder',
       externalId: options.externalId ?? absolute,
-      revision: options.revision ?? `${String(info.mtimeMs)}:${String(info.size)}`,
+      revision: options.revision ?? `${String(mtimeMs)}:${String(info.size)}`,
     },
     sourceKind: options.sourceKind ?? 'folder',
     suggestedFilename: options.filename ?? basename(absolute),
     ...(options.mediaType === undefined ? {} : { mediaType: options.mediaType }),
-    observedAt: options.observedAt ?? new Date(info.mtimeMs).toISOString(),
+    observedAt: options.observedAt ?? new Date(mtimeMs).toISOString(),
     sourceMetadata: {
       ...(options.sourceMetadata ?? {}),
       path: absolute,
-      byteSize: info.size,
+      byteSize: Number(info.size),
     },
     read: async () => readChecked(absolute, identity, options.maxBytes),
   };
 };
+
+const sameFileVersion = (current: BigIntStats, scanned: BigIntStats): boolean =>
+  current.dev === scanned.dev && current.ino === scanned.ino &&
+  current.size === scanned.size && current.mtimeNs === scanned.mtimeNs &&
+  current.ctimeNs === scanned.ctimeNs && current.birthtimeNs === scanned.birthtimeNs;
 
 /**
  * Open the file the scan checked, prove it is still that file, and read it under a ceiling.
  *
  * Three things happen in an order that matters. `O_NOFOLLOW` refuses a final component that has
  * become a symbolic link — which is the substitution that turns a watched folder into a reader of
- * `/etc`. `fstat` on the open descriptor, compared against the scan's device and inode, catches
- * every other spelling of the same substitution, including a directory along the path having been
- * swapped. And the read is bounded and taken *from the descriptor*, so nothing between here and
- * the last byte can change what is being read.
+ * `/etc`. `fstat` compares the descriptor's identity and nanosecond change metadata with the scan.
+ * The bounded read uses that descriptor, then rechecks its version before returning bytes.
+ * A writer changing the file during the read is refused rather than importing mixed contents.
  */
 const readChecked = async (
   path: string,
-  identity: { dev: number; ino: number },
+  identity: BigIntStats,
   maxBytes: number | undefined,
 ): Promise<Buffer> => {
   let handle: FileHandle;
@@ -160,7 +173,7 @@ const readChecked = async (
   }
 
   try {
-    const info = await handle.stat();
+    const info = await handle.stat({ bigint: true });
     if (info.dev !== identity.dev || info.ino !== identity.ino) {
       throw new SourceFileChangedError(
         path,
@@ -168,20 +181,25 @@ const readChecked = async (
       );
     }
     if (!info.isFile()) throw new SourceFileChangedError(path, 'it is no longer a regular file');
-    if (maxBytes !== undefined && info.size > maxBytes) {
+    const size = Number(info.size);
+    if (maxBytes !== undefined && size > maxBytes) {
       throw new ResourceBudgetError(
         'folder.maxBytes',
         maxBytes,
-        `'${path}' is ${info.size} bytes, over the folder.maxBytes budget of ${maxBytes}. The ` +
+        `'${path}' is ${size} bytes, over the folder.maxBytes budget of ${maxBytes}. The ` +
           'size was taken from the open descriptor, not from the scan.',
-        { path, byteSize: info.size },
+        { path, byteSize: size },
       );
+    }
+
+    if (!sameFileVersion(info, identity)) {
+      throw new SourceFileChangedError(path, 'it is now a different file or its contents changed');
     }
 
     // Read at most what is allowed, and one byte more, so that a file growing under the read is a
     // refusal rather than a silent truncation.
-    const ceiling = maxBytes ?? info.size;
-    const buffer = Buffer.alloc(Math.min(info.size, ceiling) + 1);
+    const ceiling = maxBytes ?? size;
+    const buffer = Buffer.alloc(Math.min(size, ceiling) + 1);
     let filled = 0;
     for (;;) {
       const { bytesRead } = await handle.read(buffer, filled, buffer.length - filled, filled);
@@ -197,6 +215,9 @@ const readChecked = async (
           'than filed as a fragment of itself.',
         { path },
       );
+    }
+    if (!sameFileVersion(await handle.stat({ bigint: true }), identity)) {
+      throw new SourceFileChangedError(path, 'its contents changed while being read');
     }
     return buffer.subarray(0, filled);
   } finally {

@@ -54,3 +54,13 @@ The simhash fixture counted every generated word as eight characters, so its cla
 An isolated 2/8 MiB PDF probe measured approximately 3/12 ms CPU while wall time varied with scheduling. Complexity ratios now compare process CPU work, with the original 2-second wall ceiling separately asserted on every call. This avoids attributing other running jobs to the parser while retaining both complexity and responsiveness checks.
 
 The final workflow review pinned all eight third-party actions in the container release workflow to verified upstream commit SHAs, preserving their existing major versions and tag-triggered publication behavior. All suite workflow YAML parses; no container build, registry publication or remote workflow result is implied.
+
+## Linux CI follow-up — 2026-10-31
+
+The first published revision's browser job passed, but both Node 22 and Node 24 source jobs failed the existing replacement-file regression on Linux. Inode numbers can be reused immediately after unlink; checking only device/inode therefore allowed replacement bytes to be imported under the original candidate's metadata.
+
+The reader now captures bigint filesystem statistics at scan time and verifies identity, size, modification/change timestamps and birth time at nanosecond precision on the open descriptor before and after its bounded read. A changed file is refused without being imported. The existing size-budget error remains the first result for an oversized in-place rewrite. Revision strings retain the former `stat().mtimeMs` conversion so unchanged files are not presented as new revisions.
+
+A new real-file regression was observed failing before the repair: rewriting the same inode with equal-size bytes and restoring its exact mtime was accepted. It now complements the unchanged Linux replacement-file test. A second regression protects fractional-millisecond revision compatibility. Validation receipts and the follow-up remote CI result are recorded with the final publication evidence; no failed or interrupted run is counted as passing.
+
+Local follow-up evidence: `recueil-file-identity-focused-final` passes all 9 selected source/TOCTOU cases (35 unrelated cases intentionally outside that focused command). Ingest typechecking and affected-file ESLint both pass; the combined wrapper then encountered a missing optional `tsx` harness command, so it is not recorded as an overall pass. The compiled production-code probe `recueil-file-identity-negative-time` separately passes all five actual pre-1970 timestamp fixtures. Two interrupted broad local runs are retained as interrupted; the unchanged full Node 22/24 CI jobs will provide the complete-suite result for the follow-up commit.
