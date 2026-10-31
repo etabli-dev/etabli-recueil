@@ -67,12 +67,19 @@ export interface SharePanelProps {
  * The route's only job is to read two search parameters; everything that is worth asserting on —
  * the read-back, the upload, the duplicate report, the emptying of the stash — is here.
  */
-export const SharePanel = ({ shareKey, error }: SharePanelProps): JSX.Element => {
+export const SharePanel = (props: SharePanelProps): JSX.Element => (
+  <ShareSession key={props.shareKey ?? 'empty'} {...props} />
+);
+
+// A new key owns a new read/upload lifecycle. A late response for the previous share
+// must never clear or update the next share's cache.
+const ShareSession = ({ shareKey, error }: SharePanelProps): JSX.Element => {
   const client = useApiClient();
   const [shares, setShares] = useState<StashedShare[] | null>(null);
   const [outcomes, setOutcomes] = useState<Record<number, Outcome>>({});
   const [readError, setReadError] = useState<unknown>(null);
 
+  const [clearError, setClearError] = useState<unknown>(null);
   const key = shareKey;
 
   useEffect(() => {
@@ -85,7 +92,12 @@ export const SharePanel = ({ shareKey, error }: SharePanelProps): JSX.Element =>
       setShares([]);
       return;
     }
-    void readShare(caches, key).then(setShares).catch(setReadError);
+    let active = true;
+    void readShare(caches, key).then(
+      (value) => { if (active) setShares(value); },
+      (cause: unknown) => { if (active) setReadError(cause); },
+    );
+    return () => { active = false; };
   }, [key]);
 
   const upload = useCallback(
@@ -109,9 +121,13 @@ export const SharePanel = ({ shareKey, error }: SharePanelProps): JSX.Element =>
   // answer, and only when none of those answers is a failure: a failed share must stay collectable.
   useEffect(() => {
     if (key === null || shares === null || shares.length === 0) return;
-    const answered = shares.every((_, index) => outcomes[index]?.state === 'uploaded');
+    const answered = shares.every((_, index) => {
+      const outcome = outcomes[index];
+      return outcome?.state === 'uploaded' &&
+        outcome.result.outcome !== 'failed' && outcome.result.outcome !== 'stopped';
+    });
     if (!answered || typeof caches === 'undefined') return;
-    void clearShare(caches, key);
+    void clearShare(caches, key).catch(setClearError);
   }, [key, shares, outcomes]);
 
   if (error !== null) {
@@ -153,6 +169,9 @@ export const SharePanel = ({ shareKey, error }: SharePanelProps): JSX.Element =>
       <h2>
         {shares.length} shared file{shares.length === 1 ? '' : 's'}
       </h2>
+      {clearError === null ? null : (
+        <ErrorState label="The server accepted the files, but their local copies could not be cleared. A reload may show them again." error={clearError} />
+      )}
       <ul className="share__list">
         {shares.map((share, index) => (
           <li key={`${share.filename}-${String(index)}`} className="share__item" data-testid="share-item">
@@ -191,7 +210,18 @@ const ShareOutcome = ({ outcome, onUpload }: { outcome: Outcome | undefined; onU
       </>
     );
   }
-  return <UploadOutcome result={outcome.result} />;
+  const retryable = outcome.result.outcome === 'failed' || outcome.result.outcome === 'stopped';
+  return (
+    <>
+      <UploadOutcome result={outcome.result} />
+      {retryable ? (
+        <>
+          <p>The shared file is still kept on this device for up to 30 minutes. Keep your original and resolve the reported problem before retrying.</p>
+          <button type="button" className="button" onClick={onUpload}>Try again</button>
+        </>
+      ) : null}
+    </>
+  );
 };
 
 /**

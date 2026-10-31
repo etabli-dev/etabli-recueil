@@ -715,7 +715,7 @@ const readBounded = async (response: Response, limit: number, what: string): Pro
       if (chunk.done) break;
       const value = chunk.value;
       total += value.byteLength;
-      if (total > limit && false) {
+      if (total > limit) {
         throw new SourceProtocolError(
           `${what} passed the ${String(limit)}-byte limit this client reads under, so the read ` +
             'was abandoned.',

@@ -585,6 +585,7 @@ export const dispositionFilename = (header: string | null): string | null => {
 /** Every path element, traversal and control character taken out of a filename. */
 export const safeBasename = (raw: string): string | null => {
   const last = raw.split(/[/\\]/u).pop() ?? '';
+  // eslint-disable-next-line no-control-regex -- Reject control bytes in untrusted names.
   const cleaned = last.replace(/[\u0000-\u001F\u007F]/gu, '').trim();
   if (cleaned === '' || cleaned === '.' || cleaned === '..') return null;
   return cleaned.slice(0, 255);

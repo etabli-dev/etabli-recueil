@@ -1,17 +1,20 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://recueil.etabli.dev/schema/rule-set.schema.json",
-  "oneOf": [
-    {
-      "$ref": "#/$defs/IngestionRuleSet"
-    },
-    {
-      "$ref": "#/$defs/DedupRuleSet"
-    }
-  ],
-  "title": "Recueil rule set",
-  "description": "A versioned, declarative set of rules, in YAML or JSON. `kind: ingestion` drives CONCEPT.md §5.3 stage 8; `kind: dedup` drives §5.6. Both share the envelope, the precedence and the trace.",
+  "$ref": "#/$defs/RuleSet",
   "$defs": {
+    "RuleSet": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/IngestionRuleSet"
+        },
+        {
+          "$ref": "#/$defs/DedupRuleSet"
+        }
+      ],
+      "title": "Recueil rule set",
+      "description": "A versioned, declarative set of rules, in YAML or JSON. `kind: ingestion` drives CONCEPT.md §5.3 stage 8; `kind: dedup` drives §5.6. Both share the envelope, the precedence and the trace."
+    },
     "IngestionRuleSet": {
       "type": "object",
       "properties": {

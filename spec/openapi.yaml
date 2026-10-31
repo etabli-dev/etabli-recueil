@@ -10395,9 +10395,9 @@ components:
             - type: 'null'
         hasTextLayer:
           description: Null until the file has been examined.
-          anyOf:
-            - type: boolean
-            - type: 'null'
+          type:
+            - boolean
+            - 'null'
         textExtractedAt:
           anyOf:
             - $ref: '#/components/schemas/Timestamp'
@@ -14375,9 +14375,9 @@ components:
       type: object
       properties:
         libraryID:
-          anyOf:
-            - type: number
-            - type: string
+          type:
+            - number
+            - string
         libraryName:
           type: string
           maxLength: 255

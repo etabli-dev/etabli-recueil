@@ -26,7 +26,6 @@ import { jobLogToWire, jobToWire } from '../ingestion/queue.js';
 import { SOURCE_JOB_TYPE } from '../ingestion/runner.js';
 import {
   idPath,
-  jsonBody,
   jsonResponse,
   operation,
   pageQuery,

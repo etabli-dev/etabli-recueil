@@ -13,8 +13,26 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import { renderSpecYaml } from '../src/openapi.js';
+import type { SystemInfo } from '../src/system.js';
 import { PACKAGE_VERSION } from '../src/version.js';
 import { harness } from './helpers.js';
+
+/** The JSON members whose values and cross-references this contract test checks. */
+interface ServedOperation {
+  operationId: string;
+  requestBody?: unknown;
+  responses: Record<string, { content: Record<string, { schema: { $ref?: string } }> }>;
+}
+interface ServedDocument {
+  openapi: string;
+  info: { title: string; version: string; license: { identifier: string } };
+  paths: Record<string, Record<string, ServedOperation>>;
+  components: { schemas: Record<string, {
+    additionalProperties: boolean;
+    properties: Record<string, unknown>;
+    required: string[];
+  }> };
+}
 
 /** Walk the document and collect every `$ref` string, wherever it is nested. */
 const collectRefs = (value: unknown, found: string[] = []): string[] => {
@@ -42,7 +60,7 @@ describe('GET /openapi.json', () => {
       expect(response.statusCode).toBe(200);
       expect(response.headers['content-type']).toMatch(/application\/json/u);
 
-      const document = response.json() as Record<string, any>;
+      const document = response.json() as ServedDocument;
 
       // The three members OpenAPI 3.1 requires of a document, plus the version constraint.
       expect(document.openapi).toMatch(/^3\.1\.\d+$/u);
@@ -53,12 +71,12 @@ describe('GET /openapi.json', () => {
       expect(document.paths).toBeTypeOf('object');
 
       // Every path is a path template, and every operation on it declares responses.
-      for (const [path, item] of Object.entries(document.paths as Record<string, any>)) {
+      for (const [path, item] of Object.entries(document.paths)) {
         expect(path.startsWith('/'), `path '${path}' is not rooted`).toBe(true);
         const operations = Object.entries(item).filter(([method]) => HTTP_METHODS.includes(method));
         expect(operations.length, `path '${path}' declares no operation`).toBeGreaterThan(0);
         for (const [method, operation] of operations) {
-          const declared = operation as Record<string, any>;
+          const declared = operation as ServedOperation;
           expect(declared.responses, `${method.toUpperCase()} ${path} declares no responses`).toBeTypeOf(
             'object',
           );
@@ -74,7 +92,7 @@ describe('GET /openapi.json', () => {
     const h = await harness();
     try {
       const response = await h.app.inject({ method: 'GET', url: '/openapi.json' });
-      const document = response.json() as Record<string, any>;
+      const document = response.json() as ServedDocument;
 
       const refs = [...new Set(collectRefs(document))];
       expect(refs.length).toBeGreaterThan(0);
@@ -103,7 +121,7 @@ describe('GET /openapi.json', () => {
     const h = await harness();
     try {
       const response = await h.app.inject({ method: 'GET', url: '/openapi.json' });
-      const document = response.json() as Record<string, any>;
+      const document = response.json() as ServedDocument;
 
       for (const path of ['/health', '/api/v1/system/info', '/openapi.json']) {
         expect(document.paths[path], `the document does not declare ${path}`).toBeDefined();
@@ -119,13 +137,14 @@ describe('GET /openapi.json', () => {
     const h = await harness();
     try {
       const response = await h.app.inject({ method: 'GET', url: '/openapi.json' });
-      const document = response.json() as Record<string, any>;
+      const document = response.json() as ServedDocument;
 
       const health =
-        document.paths['/health'].get.responses['200'].content['application/json'].schema;
-      expect(health.$ref).toBe('#/components/schemas/ServerHealthResponse');
+        document.paths['/health']?.get?.responses['200']?.content['application/json']?.schema;
+      expect(health?.$ref).toBe('#/components/schemas/ServerHealthResponse');
 
       const schema = document.components.schemas.ServerHealthResponse;
+      if (schema === undefined) throw new Error('ServerHealthResponse schema is missing');
       expect(schema.additionalProperties).toBe(false);
       expect(Object.keys(schema.properties)).toEqual(
         expect.arrayContaining(['status', 'version', 'uptimeSeconds', 'database', 'storage', 'library']),
@@ -146,10 +165,7 @@ describe('GET /openapi.json', () => {
   it('reports the running version', async () => {
     const h = await harness();
     try {
-      const document = (await h.app.inject({ method: 'GET', url: '/openapi.json' })).json() as Record<
-        string,
-        any
-      >;
+      const document = (await h.app.inject({ method: 'GET', url: '/openapi.json' })).json() as ServedDocument;
       expect(document.info.version).toBe('0.1.0-test');
     } finally {
       await h.close();
@@ -164,7 +180,7 @@ describe('GET /api/v1/system/info', () => {
       const response = await h.app.inject({ method: 'GET', url: '/api/v1/system/info' });
       expect(response.statusCode).toBe(200);
 
-      const info = response.json() as Record<string, any>;
+      const info = response.json() as SystemInfo;
       expect(info.name).toBe('recueil');
       expect(info.version).toBe('0.1.0-test');
       expect(info.apiVersion).toBe('v1');
@@ -198,10 +214,7 @@ describe('the document and the route table', () => {
   it('declares every route the server registers', async () => {
     const h = await harness();
     try {
-      const document = (await h.app.inject({ method: 'GET', url: '/openapi.json' })).json() as Record<
-        string,
-        any
-      >;
+      const document = (await h.app.inject({ method: 'GET', url: '/openapi.json' })).json() as ServedDocument;
 
       const undeclared: string[] = [];
       for (const route of h.routes) {
@@ -224,17 +237,14 @@ describe('the document and the route table', () => {
   it('serves no operation the router does not answer', async () => {
     const h = await harness();
     try {
-      const document = (await h.app.inject({ method: 'GET', url: '/openapi.json' })).json() as Record<
-        string,
-        any
-      >;
+      const document = (await h.app.inject({ method: 'GET', url: '/openapi.json' })).json() as ServedDocument;
 
       const registered = new Set(
         h.routes.map((route) => `${route.method} ${toTemplate(route.url)}`),
       );
 
       const unserved: string[] = [];
-      for (const [path, item] of Object.entries(document.paths as Record<string, any>)) {
+      for (const [path, item] of Object.entries(document.paths)) {
         for (const method of Object.keys(item)) {
           if (!HTTP_METHODS.includes(method)) continue;
           if (!registered.has(`${method.toUpperCase()} ${path}`)) {
@@ -252,14 +262,11 @@ describe('the document and the route table', () => {
   it('gives every operation a unique operationId', async () => {
     const h = await harness();
     try {
-      const document = (await h.app.inject({ method: 'GET', url: '/openapi.json' })).json() as Record<
-        string,
-        any
-      >;
+      const document = (await h.app.inject({ method: 'GET', url: '/openapi.json' })).json() as ServedDocument;
 
       const seen = new Map<string, string>();
       const duplicates: string[] = [];
-      for (const [path, item] of Object.entries(document.paths as Record<string, any>)) {
+      for (const [path, item] of Object.entries(document.paths)) {
         for (const [method, operation] of Object.entries(item)) {
           if (!HTTP_METHODS.includes(method)) continue;
           const id = (operation as { operationId: string }).operationId;
@@ -279,10 +286,7 @@ describe('the document and the route table', () => {
   it('describes the Phase 1 resource groups', async () => {
     const h = await harness();
     try {
-      const document = (await h.app.inject({ method: 'GET', url: '/openapi.json' })).json() as Record<
-        string,
-        any
-      >;
+      const document = (await h.app.inject({ method: 'GET', url: '/openapi.json' })).json() as ServedDocument;
 
       for (const path of [
         '/api/v1/items',
@@ -322,17 +326,14 @@ describe('the errors the shared body pipeline can produce', () => {
   it('declares 400 and 415 on every operation that takes a body', async () => {
     const h = await harness();
     try {
-      const document = (await h.app.inject({ method: 'GET', url: '/openapi.json' })).json() as Record<
-        string,
-        any
-      >;
+      const document = (await h.app.inject({ method: 'GET', url: '/openapi.json' })).json() as ServedDocument;
 
       const bodyTaking: string[] = [];
       const missing: string[] = [];
-      for (const [path, item] of Object.entries(document.paths as Record<string, any>)) {
-        for (const [method, declared] of Object.entries(item as Record<string, any>)) {
+      for (const [path, item] of Object.entries(document.paths)) {
+        for (const [method, declared] of Object.entries(item)) {
           if (!HTTP_METHODS.includes(method)) continue;
-          if ((declared as Record<string, unknown>).requestBody === undefined) continue;
+          if (declared.requestBody === undefined) continue;
           bodyTaking.push(`${method.toUpperCase()} ${path}`);
           const responses = (declared as { responses: Record<string, unknown> }).responses;
           for (const status of ['400', '415']) {

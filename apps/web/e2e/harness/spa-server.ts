@@ -29,7 +29,7 @@ export interface SpaServer {
 
 /** Paths the API owns. Everything else is the SPA's. */
 const isApiPath = (pathname: string): boolean =>
-  pathname === '/health' || pathname === '/api' || pathname.startsWith('/api/');
+  pathname === '/health' || pathname === '/openapi.json' || pathname === '/api' || pathname.startsWith('/api/');
 
 const CONTENT_TYPES: Readonly<Record<string, string>> = {
   '.css': 'text/css; charset=utf-8',

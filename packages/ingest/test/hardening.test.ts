@@ -51,6 +51,11 @@ import type { TestLibrary } from './helpers.js';
 
 const MIB = 1024 * 1024;
 
+// Compare CPU work, with a separate wall deadline, so time spent descheduled
+// is not mistaken for parser complexity. Interleave measurements without relaxing
+// the growth factors or absolute ceilings of the security regressions.
+const median = (values: number[]): number => values.sort((a, b) => a - b)[Math.floor(values.length / 2)]!;
+
 /* -- P-REGEX: the page count, outside every budget ------------------------------------------- */
 
 /**
@@ -91,15 +96,21 @@ describe('the PDF page count runs inside the budget (re-attack CRITICAL, pdf-tex
 
     const time = (bytes: Buffer): number => {
       const started = process.hrtime.bigint();
+      const cpu = process.cpuUsage();
       extractPdfText(bytes, DEFAULT_PDF_BUDGET);
-      return Number(process.hrtime.bigint() - started) / 1e6;
+      const used = process.cpuUsage(cpu);
+      expect(Number(process.hrtime.bigint() - started) / 1e6).toBeLessThan(2_000);
+      return (used.user + used.system) / 1000;
     };
 
     // Warm the reader so the first call does not carry the JIT's cost into the ratio.
     extractPdfText(small.bytes, DEFAULT_PDF_BUDGET);
 
-    const smallMs = time(small.bytes);
-    const largeMs = time(large.bytes);
+    extractPdfText(large.bytes, DEFAULT_PDF_BUDGET);
+    const pairs = Array.from({ length: 5 }, () => [time(small.bytes), time(large.bytes)] as const);
+    const smallMs = median(pairs.map(([small]) => small));
+    const largeMs = median(pairs.map(([, large]) => large));
+    for (const [, elapsed] of pairs) expect(elapsed).toBeLessThan(2_000);
 
     // Four times the input for at most eight times the work: linear, with generous slack for a
     // loaded machine. Unfixed this ratio is ~16.
@@ -706,13 +717,21 @@ describe('the TEI reader is bounded (grobid.ts)', () => {
 
     const time = (tei: string): number => {
       const started = process.hrtime.bigint();
+      const cpu = process.cpuUsage();
       parseTeiHeader(tei, { extractor: 'grobid', confidence: 0.7 });
-      return Number(process.hrtime.bigint() - started) / 1e6;
+      const used = process.cpuUsage(cpu);
+      expect(Number(process.hrtime.bigint() - started) / 1e6).toBeLessThan(2_000);
+      return (used.user + used.system) / 1000;
     };
 
     parseTeiHeader(nest(500), { extractor: 'grobid', confidence: 0.7 }); // warm
-    const small = time(nest(4_000));
-    const large = time(nest(16_000));
+    const smallInput = nest(4_000);
+    const largeInput = nest(16_000);
+    parseTeiHeader(largeInput, { extractor: 'grobid', confidence: 0.7 });
+    const pairs = Array.from({ length: 5 }, () => [time(smallInput), time(largeInput)] as const);
+    const small = median(pairs.map(([small]) => small));
+    const large = median(pairs.map(([, large]) => large));
+    for (const [, elapsed] of pairs) expect(elapsed).toBeLessThan(2_000);
 
     // Four times the input for at most eight times the work. Unfixed the ratio is ~16.
     expect(large).toBeLessThan(Math.max(small, 1) * 8);
@@ -1115,10 +1134,11 @@ describe('the office heuristics are bounded (metadata/office.ts, text/simhash.ts
       const parts: string[] = [];
       let length = 0;
       for (let index = 0; length < chars; index += 1) {
-        parts.push(word(index));
-        length += 8;
+        const token = word(index);
+        parts.push(token);
+        length += token.length + (index === 0 ? 0 : 1);
       }
-      return parts.join(' ');
+      return parts.join(' ').slice(0, chars);
     };
 
     const time = (text: string): number => {
@@ -1128,8 +1148,15 @@ describe('the office heuristics are bounded (metadata/office.ts, text/simhash.ts
     };
 
     simhash(build(1 * MIB)); // warm
-    const atLimit = time(build(4 * MIB));
-    const wellPast = time(build(16 * MIB));
+    const prefix = build(4 * MIB);
+    const larger = build(16 * MIB);
+    expect(prefix.length).toBe(4 * MIB);
+    expect(larger.length).toBe(16 * MIB);
+    expect(larger.slice(0, prefix.length)).toBe(prefix);
+    // A deterministic check also catches an accidental removal of the bound.
+    expect(simhash(larger)).toBe(simhash(prefix));
+    const atLimit = time(prefix);
+    const wellPast = time(larger);
 
     // Four times the input for no more than twice the work: the prefix is the bound, and the
     // remainder is only the cost of slicing it. Unbounded, this ratio is four.

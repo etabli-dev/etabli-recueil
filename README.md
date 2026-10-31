@@ -15,7 +15,43 @@ mapping are native workflows, not exports.
 source checkout; there is no tagged release, no image on `ghcr.io` and no
 installable binary.
 
-`pnpm install && pnpm -r build` produces a working server, CLI and web client.
+## First use from source
+
+Prerequisites: Node.js 22.23.4 (the locally verified runtime), pnpm 9.15.4,
+and a recent Git. SQLite is embedded; no database server is required.
+
+```sh
+pnpm install --frozen-lockfile
+pnpm build
+node apps/cli/dist/index.js serve --host 127.0.0.1 --port 3000 \
+  --database ./local-library.sqlite --storage ./local-storage
+```
+
+In another terminal at the repository root:
+
+```sh
+curl --fail http://127.0.0.1:3000/health
+pnpm --filter @recueil/web dev --host 127.0.0.1
+# Open http://127.0.0.1:5173
+node apps/cli/dist/index.js --help
+```
+
+The web development server proxies the API. For a production deployment, serve
+`apps/web/dist` and proxy `/api`, `/health` and `/openapi.json` on the same origin;
+the API server does not serve the web assets itself. Configure authentication
+before exposing it beyond localhost; see [`deploy/README.md`](deploy/README.md).
+Keep the SQLite database and its content store together when backing up; see
+`node apps/cli/dist/index.js backup --help` and `restore --help`.
+
+Run the local gates with `pnpm lint`, `pnpm typecheck`, `pnpm check:spec`,
+`pnpm test`, and `pnpm --filter @recueil/web test:e2e` after installing Chromium
+with `pnpm --filter @recueil/web exec playwright install chromium`.
+The [October refinement record](spec/refinement-2026-10.md) distinguishes current
+checks from historical measurements and external release gates.
+
+## Implemented workflows
+
+`pnpm install --frozen-lockfile && pnpm build` produces a server, CLI and web client.
 What has been exercised end to end here:
 
 - **`recueil serve`** answers 124 operations over 92 paths — items, documents,
@@ -54,8 +90,8 @@ What has been exercised end to end here:
 - **The web client** is a keyboard-first three-pane library with an item pane, a
   PDF.js reader, a sources screen, a review workspace and a rules editor, covered
   by a Playwright suite that drives the built bundle against a real server.
-- 2 316 unit and integration tests across the twelve packages and apps that have
-  them (`pnpm -r test`, all passing), plus the Playwright suite
+- Unit and integration tests across twelve packages and apps (`pnpm test`),
+  plus the Playwright suite
   (`pnpm --filter @recueil/web run test:e2e`). Not one of them needs a container:
   OCR, GROBID, Paperless-ngx, WebDAV, S3 and IMAP are each behind an interface
   with an in-process fake.

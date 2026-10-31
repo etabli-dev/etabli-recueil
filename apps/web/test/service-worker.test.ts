@@ -31,6 +31,7 @@ import {
 } from '../src/pwa/service-worker.js';
 import {
   SHARE_CACHE,
+  MAX_SHARE_FILES,
   SHARE_FILENAME_HEADER,
   SHARE_STASHED_AT_HEADER,
   newShareId,
@@ -245,5 +246,30 @@ describe('the share target', () => {
     expect(removed).toBe(1);
     expect(await cache.match(shareKey('cd'.repeat(8), 0))).toBeDefined();
     expect(await cache.match(`${ORIGIN}/assets/not-a-share.js`)).toBeDefined();
+  });
+});
+
+
+describe('share batch failures', () => {
+  it('rejects oversized batches before keeping an unreadable tail', async () => {
+    const cache = new FakeCache();
+    const form = new FormData();
+    for (let i = 0; i <= MAX_SHARE_FILES; i++) form.append('file', new File(['pdf'], `${i}.pdf`));
+    await expect(stashShare(asCache(cache), form, { id: 'ab'.repeat(8), now: NOW })).rejects.toThrow('at most');
+    expect(cache.entries.size).toBe(0);
+  });
+  it('removes a partially written batch when storage fills', async () => {
+    const cache = new FakeCache();
+    const put = cache.put.bind(cache);
+    let writes = 0;
+    cache.put = async (key, response) => {
+      if (++writes === 2) throw new Error('Quota exceeded');
+      await put(key, response);
+    };
+    const form = new FormData();
+    form.append('file', new File(['first'], 'first.pdf'));
+    form.append('file', new File(['second'], 'second.pdf'));
+    await expect(stashShare(asCache(cache), form, { id: 'ab'.repeat(8), now: NOW })).rejects.toThrow('Quota exceeded');
+    expect(cache.entries.size).toBe(0);
   });
 });

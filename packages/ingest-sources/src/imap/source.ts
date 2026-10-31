@@ -545,7 +545,8 @@ const refusalSummary = (refusals: MailRuleOutcome['refusals']): string =>
 
 const filenameFor = (subject: string | null, uid: number): string => {
   const stem = (subject ?? '')
-    .replace(/[ -/\\:*?"<>|]/gu, ' ')
+    // eslint-disable-next-line no-control-regex -- Reject control bytes in untrusted filenames.
+    .replace(/[\u0000-\u001f\u007f/\\:*?"<>|]/gu, ' ')
     .replace(/\s+/gu, ' ')
     .trim()
     .slice(0, 80);

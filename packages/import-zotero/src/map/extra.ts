@@ -30,7 +30,7 @@ export interface ParsedExtra {
   freeText: string[];
 }
 
-const LINE = /^\s*([A-Za-z][A-Za-z0-9 _.\-]*?)\s*:\s*(.+?)\s*$/u;
+const LINE = /^\s*([A-Za-z][A-Za-z0-9 _.-]*?)\s*:\s*(.+?)\s*$/u;
 
 /** Read `Extra`. Never modifies it: `items.extra` keeps the original text (P10). */
 export const parseExtra = (extra: string | null | undefined): ParsedExtra => {

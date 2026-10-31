@@ -13,6 +13,8 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import type { ServerHealthResponse } from '../src/health.js';
+
 import { loadConfig } from '../src/config.js';
 import { start } from '../src/server.js';
 import type { RunningServer } from '../src/server.js';
@@ -48,10 +50,10 @@ describe('start', () => {
     const response = await fetch(`${running.url}/health`);
     expect(response.status).toBe(200);
 
-    const health = (await response.json()) as Record<string, any>;
+    const health = (await response.json()) as ServerHealthResponse;
     expect(health.status).toBe('ok');
-    expect(health.library.items).toBe(0);
-    expect(health.library.documents).toBe(0);
+    expect(health.library?.items).toBe(0);
+    expect(health.library?.documents).toBe(0);
     expect(health.database.migrationsApplied).toBeGreaterThan(0);
     expect(health.storage.path).toBe(join(root, 'storage'));
   });

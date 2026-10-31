@@ -8,15 +8,13 @@
  */
 import {
   SHARE_CACHE,
+  MAX_SHARE_FILES,
   SHARE_FILENAME_HEADER,
   SHARE_STASHED_AT_HEADER,
   SHARE_TEXT_HEADER,
   shareKey,
 } from './share-protocol.js';
 import type { StashedShare } from './share-protocol.js';
-
-/** How many files one share may carry. A share sheet that sent more is refused rather than truncated silently. */
-const MAX_SHARE_FILES = 20;
 
 /**
  * Everything stashed under one key, in the order the worker wrote it.

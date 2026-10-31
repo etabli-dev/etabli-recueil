@@ -18,7 +18,7 @@ import type { Ui } from '../ui.js';
  * 1 is under way, and the honest thing to say is exactly that: the phase it belongs to, and the
  * list of what this build does ship.
  */
-export const notImplemented = (spec: CommandSpec, ui: Ui): never => {
+export const notImplemented = (spec: CommandSpec, _ui: Ui): never => {
   const label = phaseLabel(spec.phase);
 
   throw new CliError(`\`recueil ${spec.name}\` is not implemented yet.`, {

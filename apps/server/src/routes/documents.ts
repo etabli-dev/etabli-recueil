@@ -458,6 +458,7 @@ const contentSecurityPolicy = (renderable: boolean, corsOrigin: string[] | boole
  */
 const contentDisposition = (kind: 'inline' | 'attachment', filename: string): string => {
   // Control characters first, and from both forms: they are the ones that end the header.
+  // eslint-disable-next-line no-control-regex -- Reject control bytes in untrusted names.
   const cleaned = filename.replace(/[\u0000-\u001f\u007f]/gu, '').slice(0, 200);
   const ascii = cleaned.replace(/[^\u0020-\u007e]/gu, '_').replace(/["\\]/gu, '').trim();
   const encoded = encodeURIComponent(cleaned).replace(

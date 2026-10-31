@@ -57,7 +57,6 @@ test.afterAll(async () => {
 
 test.afterEach(async ({ page }, testInfo) => {
   if (testInfo.status !== testInfo.expectedStatus) {
-    // eslint-disable-next-line no-console -- the server log is the first thing worth reading here.
     console.log(api.log());
     await page.screenshot({ path: testInfo.outputPath('failure.png'), fullPage: true }).catch(() => undefined);
   }

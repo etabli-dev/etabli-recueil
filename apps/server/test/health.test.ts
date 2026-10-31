@@ -196,7 +196,7 @@ describe('GET /health — the Phase 1 additions', () => {
     const h = await harness();
     try {
       const response = await h.app.inject({ method: 'GET', url: '/health' });
-      const health = response.json() as Record<string, any>;
+      const health = response.json() as Record<string, unknown>;
 
       expect(health.search).toEqual({ available: true, backend: 'fts5' });
       const search = (health.components as { name: string; required: boolean; status: string }[]).find(
@@ -216,7 +216,7 @@ describe('GET /health — the Phase 1 additions', () => {
   it('reports what the API surface is doing', async () => {
     const h = await harness({ env: { RECUEIL_REQUIRE_AUTH: 'true' } });
     try {
-      const health = (await h.app.inject({ method: 'GET', url: '/health' })).json() as Record<string, any>;
+      const health = (await h.app.inject({ method: 'GET', url: '/health' })).json() as Record<string, unknown>;
       expect(health.api).toEqual({
         basePath: '/api/v1',
         eventSubscribers: 0,

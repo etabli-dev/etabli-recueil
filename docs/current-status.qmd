@@ -1,0 +1,25 @@
+---
+title: "Current implementation and first use"
+---
+
+Self-hosted document/reference library with implemented Phase 1/2 API, CLI, web client, imports and ingestion review. Later evidence-verification, bibliometric and systematic-review features remain roadmap work. Source checkout only; no published image or binary is claimed.
+
+This page describes the October 2026 source revision. These source changes are not part of older development release downloads. Local checks are distinct from device, live-service and store acceptance.
+
+## Build from a clean checkout
+
+Node 22.23.4 and pnpm 9.15.4. Open http://127.0.0.1:5173; keep the API on localhost until authentication and deployment are configured.
+
+```sh
+pnpm install --frozen-lockfile
+pnpm build
+node apps/cli/dist/index.js serve --host 127.0.0.1 --port 3000 --database ./local-library.sqlite --storage ./local-storage
+# In another terminal:
+pnpm --filter @recueil/web dev --host 127.0.0.1
+```
+
+These commands build and run the local service from this source tree. Container deployment and real-library acceptance remain separate checks. A successful local build does not establish deployed operation.
+
+## Use and verification
+
+Read the [repository README](https://github.com/etabli-dev/etabli-recueil/blob/main/README.md) for the exact application workflow, privacy/storage behavior and platform differences. The [October refinement record](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/refinement-2026-10.md) records findings, changes, observed checks, deferred work and the next release action. See the workflow runs for the exact source commit; local verification does not establish a remote CI result.

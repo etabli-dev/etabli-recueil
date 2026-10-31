@@ -9,7 +9,7 @@
  */
 import { createServer } from 'node:http';
 import type { Server } from 'node:http';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 
@@ -164,6 +164,34 @@ describe('/api/v1/ingestion/sources', () => {
     } finally {
       await guarded.close();
       other.remove();
+    }
+  });
+
+  it('canonicalizes an allowed alias but refuses a symlink escaping it', async () => {
+    const allowed = temporaryDirectory('recueil-allowed-alias-');
+    const aliases = temporaryDirectory('recueil-aliases-');
+    const alias = join(aliases.path, 'allowed');
+    symlinkSync(allowed.path, alias, 'dir');
+    mkdirSync(join(allowed.path, 'inbox'));
+    symlinkSync(watched.path, join(allowed.path, 'escape'), 'dir');
+    const guarded = await harness({
+      env: { RECUEIL_SECRET_KEY: TEST_SECRET_KEY, RECUEIL_INGEST_ALLOWED_ROOTS: alias },
+    });
+    try {
+      const inside = await guarded.app.inject({
+        method: 'POST', url: '/api/v1/ingestion/sources',
+        payload: { name: 'Inside alias', config: { kind: 'folder', root: join(alias, 'inbox') } },
+      });
+      expect(inside.statusCode).toBe(201);
+      const escape = await guarded.app.inject({
+        method: 'POST', url: '/api/v1/ingestion/sources',
+        payload: { name: 'Escaping alias', config: { kind: 'folder', root: join(alias, 'escape') } },
+      });
+      expect(escape.statusCode).toBe(422);
+    } finally {
+      await guarded.close();
+      aliases.remove();
+      allowed.remove();
     }
   });
 

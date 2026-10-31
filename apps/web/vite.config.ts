@@ -28,12 +28,14 @@ export default defineConfig({
     proxy: {
       '/api': { target: SERVER_ORIGIN, changeOrigin: false },
       '/health': { target: SERVER_ORIGIN, changeOrigin: false },
+      '/openapi.json': { target: SERVER_ORIGIN, changeOrigin: false },
     },
   },
   preview: {
     proxy: {
       '/api': { target: SERVER_ORIGIN, changeOrigin: false },
       '/health': { target: SERVER_ORIGIN, changeOrigin: false },
+      '/openapi.json': { target: SERVER_ORIGIN, changeOrigin: false },
     },
   },
   build: {

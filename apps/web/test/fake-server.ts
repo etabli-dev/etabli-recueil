@@ -63,7 +63,7 @@ export const createFakeServer = (routes: Record<string, Handler>): FakeServer =>
       path: url.pathname,
       query: url.searchParams,
       headers: normaliseHeaders(init.headers),
-      body: typeof init.body === 'string' ? (JSON.parse(init.body) as unknown) : undefined,
+      body: typeof init.body === 'string' ? (JSON.parse(init.body) as unknown) : init.body,
     };
     requests.push(record);
 

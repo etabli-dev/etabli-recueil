@@ -33,6 +33,9 @@ export const SHARE_CACHE = 'recueil-share-v1';
 export const SHARE_KEY_PARAM = 'share';
 
 /** How long an uncollected share is kept. Long enough for a slow page load, short enough to forget. */
+/** Refuse larger batches before storing any file; the reader uses the same limit. */
+export const MAX_SHARE_FILES = 20;
+
 export const SHARE_TTL_MS = 30 * 60 * 1000;
 
 /** Headers the worker writes onto each stashed response, and the page reads back. */
@@ -83,6 +86,7 @@ export const parseShareKey = (url: string): { id: string; index: number } | null
 export const safeShareFilename = (raw: string | null | undefined, fallback: string): string => {
   if (raw === null || raw === undefined) return fallback;
   const lastSegment = raw.split(/[\\/]/u).pop() ?? '';
+  // eslint-disable-next-line no-control-regex -- Reject control bytes in untrusted names.
   const cleaned = lastSegment.replace(/[\u0000-\u001f\u007f]/gu, '').trim();
   if (cleaned === '' || cleaned === '.' || cleaned === '..') return fallback;
   return cleaned.slice(0, 200);

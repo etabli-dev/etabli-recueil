@@ -335,7 +335,7 @@ export const itemRoutes: FastifyPluginAsync = async (app) => {
     const expectedVersion = ifMatchVersion(request);
 
     assertAsnFree(recueil, body.office?.asn, id);
-    const record = withAsnConflict(recueil, body.office?.asn, () =>
+    withAsnConflict(recueil, body.office?.asn, () =>
       recueil.library.updateItem(id, withMirroredTitle(recueil, id, body), request.actor, {
         ...(expectedVersion === undefined ? {} : { expectedVersion }),
       }),

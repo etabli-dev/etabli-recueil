@@ -49,7 +49,6 @@ import { REPORT_SCHEMA } from './types.js';
 import type {
   AsnDeferral,
   AsnLoss,
-  CheckComparison,
   DocumentTypeParity,
   NotCarriedField,
   OriginalReportEntry,

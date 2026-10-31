@@ -29,7 +29,7 @@ import * as z from 'zod';
 import { renderExport, resolveSelection } from '../export.js';
 import type { ExportFormat, RenderedExport } from '../export.js';
 import { contentEtag, isFresh, sendJson } from '../http.js';
-import { idPath, jsonResponse, operation, problems } from '../openapi-kit.js';
+import { idPath, operation, problems } from '../openapi-kit.js';
 import { ApiError } from '../problem.js';
 import { ExportFormatSchema, ExportReportSchema } from '../schemas.js';
 import { coerceQuery, parseOrThrow } from '../validate.js';

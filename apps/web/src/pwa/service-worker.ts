@@ -23,6 +23,7 @@
  */
 import {
   SHARE_CACHE,
+  MAX_SHARE_FILES,
   SHARE_FILENAME_HEADER,
   SHARE_KEY_PARAM,
   SHARE_PATH,
@@ -76,18 +77,26 @@ export const stashShare = async (
   const title = firstString(form, ['title']);
   const files = form.getAll('file').filter((value): value is File => value instanceof File);
 
+  if (files.length > MAX_SHARE_FILES) throw new Error(`Share at most ${MAX_SHARE_FILES} files at once.`);
+
   let index = 0;
-  for (const file of files) {
-    const filename = safeShareFilename(file.name, `shared-${options.id}-${String(index)}`);
-    const headers = new Headers({
-      'content-type': file.type === '' ? 'application/octet-stream' : file.type,
-      [SHARE_FILENAME_HEADER]: encodeURIComponent(filename),
-      [SHARE_STASHED_AT_HEADER]: options.now.toISOString(),
-    });
-    const carried = note ?? title;
-    if (carried !== null) headers.set(SHARE_TEXT_HEADER, encodeURIComponent(carried));
-    await cache.put(shareKey(options.id, index), new Response(file, { headers }));
-    index += 1;
+  try {
+    for (const file of files) {
+      const filename = safeShareFilename(file.name, `shared-${options.id}-${String(index)}`);
+      const headers = new Headers({
+        'content-type': file.type === '' ? 'application/octet-stream' : file.type,
+        [SHARE_FILENAME_HEADER]: encodeURIComponent(filename),
+        [SHARE_STASHED_AT_HEADER]: options.now.toISOString(),
+      });
+      const carried = note ?? title;
+      if (carried !== null) headers.set(SHARE_TEXT_HEADER, encodeURIComponent(carried));
+      await cache.put(shareKey(options.id, index), new Response(file, { headers }));
+      index += 1;
+    }
+  } catch (error) {
+    // A failed batch must not leave an unreachable partial share behind.
+    await Promise.allSettled(Array.from({ length: index }, (_, i) => cache.delete(shareKey(options.id, i))));
+    throw error;
   }
 
   return {

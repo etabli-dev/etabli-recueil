@@ -58,7 +58,10 @@ describe('the published JSON Schema', () => {
   });
 
   it('describes the two kinds as a choice, keyed on `kind`', () => {
-    expect(checkedIn['oneOf']).toEqual([{ $ref: '#/$defs/IngestionRuleSet' }, { $ref: '#/$defs/DedupRuleSet' }]);
+    // Zod 4.6 names the root in $defs; verify the reference as well as the choice.
+    expect(checkedIn['$ref']).toBe('#/$defs/RuleSet');
+    const defs = checkedIn['$defs'] as Record<string, Record<string, unknown>>;
+    expect(defs['RuleSet']?.['oneOf']).toEqual([{ $ref: '#/$defs/IngestionRuleSet' }, { $ref: '#/$defs/DedupRuleSet' }]);
   });
 
   it('accepts the fixture rule sets, which the engine also runs', () => {

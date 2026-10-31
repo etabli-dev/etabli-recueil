@@ -55,8 +55,8 @@ plugin registry index.
 
 | Tool | Version | Note |
 |---|---|---|
-| Node.js | 22 LTS or newer | 22 is what CI targets and what the Docker image runs; newer versions should work but are not the reference |
-| pnpm | 9.x | `corepack enable && corepack prepare pnpm@9 --activate`, or install it however you prefer |
+| Node.js | 22 LTS or newer | 22 is the locally verified reference; CI also targets 24 |
+| pnpm | 9.15.4 | `npm install --global pnpm@9.15.4` |
 | Git | any recent version | commits must be signed off, see below |
 | Docker | optional | only needed for the sidecar profiles in `deploy/` (GROBID, OCRmyPDF, Meilisearch, translation-server) and for building the image |
 
@@ -65,25 +65,26 @@ No database server is needed: v1 is SQLite only (ADR-0015), and the file is crea
 ## Install, build, test, run
 
 ```sh
-pnpm install          # install the workspace
-pnpm build            # build every package and app
-pnpm test             # unit and integration tests (Vitest)
-pnpm lint             # lint and format check
-pnpm dev              # server and web UI in watch mode
+pnpm install --frozen-lockfile
+pnpm build
+pnpm lint             # ESLint checks source, tests and scripts
+pnpm typecheck
+pnpm check:spec       # plugin manifest and OpenAPI structure
+pnpm test             # unit/integration and generated-contract drift checks
+pnpm --filter @recueil/web exec playwright install chromium
+pnpm --filter @recueil/web test:e2e
 ```
 
-Scoped to one workspace member:
+Start the API with `node apps/cli/dist/index.js serve --host 127.0.0.1`, then
+`pnpm --filter @recueil/web dev --host 127.0.0.1` in another terminal.
+See the [README first-use instructions](README.md#first-use-from-source).
+There is no root `pnpm dev` or formatter command. To develop one package,
+use its own script, for example `pnpm --filter @recueil/server dev`.
 
-```sh
-pnpm --filter @recueil/server test
-pnpm --filter @recueil/server dev
-```
-
-**Phase 0 caveat, true as of this commit:** the repository is the specification plus a scaffold.
-There are no scripts in the root `package.json` yet and nothing runs — `pnpm install` succeeds and
-that is all. The commands above are the contract those scripts will implement in Phase 1; if you
-find they do not exist, the code has not landed yet rather than your setup being wrong. Phase 0's
-exit criterion is `recueil serve` answering a health check on an empty library (CONCEPT.md §7).
+Phases 1 and 2 are implemented. Desktop/mobile shells, the plugin host/SDK,
+generated client and Phase 3 onward remain planned; their directories are
+placeholders. Current validation and external acceptance gates are recorded in
+[`spec/refinement-2026-10.md`](spec/refinement-2026-10.md).
 
 ## Where the specification lives
 

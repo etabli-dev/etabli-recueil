@@ -7,7 +7,7 @@
  * only after the upload has answered, because a share cleared optimistically and then failing is a
  * document that was on the phone, was consumed by this page, and is nowhere.
  */
-import { describe, expect, it, beforeEach } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
@@ -43,7 +43,7 @@ const stash = async (filename = 'Rechnung 114.pdf'): Promise<void> => {
   const cache = await storage.open(SHARE_CACHE);
   await cache.put(
     shareKey(KEY, 0),
-    new Response(new Blob([new Uint8Array([1, 2, 3])], { type: 'application/pdf' }), {
+    new Response(new Uint8Array([1, 2, 3]), {
       headers: {
         'content-type': 'application/pdf',
         [SHARE_FILENAME_HEADER]: encodeURIComponent(filename),
@@ -54,9 +54,16 @@ const stash = async (filename = 'Rechnung 114.pdf'): Promise<void> => {
 };
 
 beforeEach(() => {
+  // Node supplies Response, while jsdom supplies FormData and Blob. Keep real response
+  // bytes, but return the DOM Blob that FormData accepts, as a browser would do.
+  vi.spyOn(Response.prototype, 'blob').mockImplementation(async function (this: Response) {
+    return new Blob([await this.arrayBuffer()], { type: this.headers.get('content-type') ?? '' });
+  });
   storage = new FakeCacheStorage();
   Object.defineProperty(globalThis, 'caches', { value: storage, configurable: true, writable: true });
 });
+
+afterEach(() => vi.restoreAllMocks());
 
 const render = (routes: Record<string, Handler> = {}): { server: FakeServer } => {
   const server = createFakeServer({ [`POST ${UPLOAD}`]: () => uploadResult(), ...routes });
@@ -99,6 +106,20 @@ describe('the share landing page', () => {
     // No `content-type` header from the client: the browser sets the multipart boundary, and a
     // client that set the header itself would set it without one.
     expect(request.headers['content-type']).toBeUndefined();
+    expect(request.body).toBeInstanceOf(FormData);
+    const form = request.body as FormData;
+    expect(form.get('sourceKind')).toBe('mobile');
+    const file = form.get('file') as File;
+    expect(file.name).toBe('Rechnung 114.pdf');
+    expect(file.type).toBe('application/pdf');
+    expect(file.size).toBe(3);
+    const bytes = await new Promise<ArrayBuffer>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as ArrayBuffer);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsArrayBuffer(file);
+    });
+    expect(new Uint8Array(bytes)).toEqual(new Uint8Array([1, 2, 3]));
   });
 
   it('reports a duplicate as one, rather than as a fresh upload', async () => {
@@ -154,6 +175,19 @@ describe('the share landing page', () => {
     });
   });
 
+  it('reports cache cleanup failure without losing the successful server result', async () => {
+    const user = userEvent.setup();
+    await stash();
+    const cache = await storage.open(SHARE_CACHE);
+    vi.spyOn(cache, 'delete').mockRejectedValue(new Error('cache storage unavailable'));
+    render();
+    await screen.findByTestId('share-page');
+    await user.click(screen.getByRole('button', { name: 'Add to the library' }));
+    expect(await screen.findByTestId('share-result')).toHaveAttribute('data-outcome', 'ingested');
+    expect(await screen.findByText(/local copies could not be cleared/)).toBeInTheDocument();
+    expect(cache.entries.size).toBe(1);
+  });
+
   it('keeps the stash when the upload failed, so the share is not lost', async () => {
     const user = userEvent.setup();
     await stash();
@@ -169,6 +203,26 @@ describe('the share landing page', () => {
     expect(await screen.findByRole('button', { name: 'Try again' })).toBeInTheDocument();
     const cache = await storage.open(SHARE_CACHE);
     expect(cache.entries.size).toBe(1);
+  });
+
+  it.each(['failed', 'stopped'])('keeps a %s pipeline outcome retryable even after HTTP success', async (outcome) => {
+    const user = userEvent.setup();
+    await stash();
+    let attempts = 0;
+    render({
+      [`POST ${UPLOAD}`]: () => ++attempts === 1
+        ? uploadResult({ outcome, document: null, item: null, detail: 'The pipeline refused this file.' })
+        : uploadResult(),
+    });
+    await screen.findByTestId('share-page');
+    await user.click(screen.getByRole('button', { name: 'Add to the library' }));
+    expect(await screen.findByTestId('share-result')).toHaveAttribute('data-outcome', outcome);
+    const cache = await storage.open(SHARE_CACHE);
+    expect(cache.entries.size).toBe(1);
+    await user.click(screen.getByRole('button', { name: 'Try again' }));
+    await waitFor(() => expect(screen.getByTestId('share-result')).toHaveAttribute('data-outcome', 'ingested'));
+    await waitFor(() => expect(cache.entries.size).toBe(0));
+    expect(attempts).toBe(2);
   });
 
   it('explains itself when opened with nothing to pick up', async () => {

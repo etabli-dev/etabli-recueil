@@ -554,7 +554,6 @@ describe('FolderSource, when the original changes under the acknowledgement (H1)
 
     // The process dies between the commit and the acknowledgement: the state row is `pending` and
     // the far side has not been touched.
-    const realAcknowledge = source.acknowledge.bind(source);
     source.acknowledge = async () => {
       throw new Error('SIGKILL between the commit and the acknowledgement');
     };
@@ -618,6 +617,10 @@ describe('FolderSource, when the original changes under the acknowledgement (H1)
 
     const path = join(watched.path, 'inplace.pdf');
     writeFileSync(path, ingested);
+    // Whole seconds round-trip exactly across APFS and other filesystems.
+    // Set the stamp before polling so this still defeats the metadata check.
+    const stableStamp = new Date('2025-01-01T00:00:00.000Z');
+    utimesSync(path, stableStamp, stableStamp);
     await sleep(40);
 
     const source = new FolderSource({

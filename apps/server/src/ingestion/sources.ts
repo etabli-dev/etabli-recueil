@@ -611,7 +611,19 @@ export class IngestionSourceService {
       );
     }
 
-    if (this.allowedRoots.length > 0 && !this.allowedRoots.some((allowed) => isInside(allowed, real))) {
+    // Compare canonical paths on both sides. On macOS /var is an alias of
+    // /private/var; operator-selected symlinks are also legitimate allow-list roots.
+    // An unresolved configured root must fail closed, rather than disabling the rule.
+    let canonicalAllowed: string[];
+    try {
+      canonicalAllowed = await Promise.all(this.allowedRoots.map((allowed) => realpath(allowed)));
+    } catch (error) {
+      throw new ValidationError(
+        `A directory in RECUEIL_INGEST_ALLOWED_ROOTS cannot be resolved: ${describe(error)}`,
+        { path: 'config.root' },
+      );
+    }
+    if (canonicalAllowed.length > 0 && !canonicalAllowed.some((allowed) => isInside(allowed, real))) {
       throw new ValidationError(
         `'${real}' is not inside any directory named by RECUEIL_INGEST_ALLOWED_ROOTS ` +
           `(${this.allowedRoots.join(', ')}).`,
