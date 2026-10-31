@@ -111,7 +111,16 @@ export const fileCandidate = async (
   options: FileCandidateOptions = {},
 ): Promise<IngestCandidate> => {
   const absolute = resolve(path);
-  const info = await stat(absolute, { bigint: true });
+  return candidateFromStat(absolute, await stat(absolute, { bigint: true }), options);
+};
+
+// A folder scan must retain the metadata it checked. Taking another stat here
+// would allow an ancestor symlink swap to replace that checked identity.
+const candidateFromStat = (
+  absolute: string,
+  info: BigIntStats,
+  options: FileCandidateOptions,
+): IngestCandidate => {
   // Inodes can be reused immediately after unlink (including on Linux). Keep
   // nanosecond change metadata as well so replacement and in-place writes are
   // refused even when size and modification time are restored by a writer.
@@ -280,7 +289,24 @@ export const folderCandidates = async (
         continue;
       }
 
-      const info = await stat(real);
+      const info = await stat(real, { bigint: true });
+      // An ancestor may have changed while stat was resolving the path. Check
+      // containment again before descending or retaining this identity.
+      let currentReal: string;
+      try {
+        currentReal = await realpath(real);
+      } catch (error) {
+        skipped.push({ path: child, reason: `it could not be resolved after checking metadata: ${String(error)}` });
+        continue;
+      }
+      if (!isInside(realRoot, currentReal)) {
+        skipped.push({ path: child, reason: `it resolves to '${currentReal}', outside the watched folder` });
+        continue;
+      }
+      if (currentReal !== real) {
+        skipped.push({ path: child, reason: 'its location changed while it was being scanned' });
+        continue;
+      }
       if (info.isDirectory()) {
         if (options.recursive === false) {
           skipped.push({ path: child, reason: 'it is a directory and the scan is not recursive' });
@@ -293,7 +319,7 @@ export const folderCandidates = async (
         skipped.push({ path: child, reason: 'it is not a regular file' });
         continue;
       }
-      if (options.maxBytes !== undefined && info.size > options.maxBytes) {
+      if (options.maxBytes !== undefined && Number(info.size) > options.maxBytes) {
         skipped.push({
           path: child,
           reason: `it is ${String(info.size)} bytes, over the ${String(options.maxBytes)}-byte limit`,
@@ -305,7 +331,7 @@ export const folderCandidates = async (
         // `maxBytes` travels with the candidate rather than staying behind in the scan, because a
         // limit compared against a `stat` and then not carried to the read is a description of a
         // limit. The scan's own check stays: refusing early is cheaper than refusing late.
-        await fileCandidate(real, {
+        candidateFromStat(real, info, {
           ...options,
           sourceId: options.sourceId ?? realRoot,
           // The path relative to the watched root, so moving the whole folder does not turn every
