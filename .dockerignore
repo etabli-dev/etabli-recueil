@@ -1,0 +1,40 @@
+# Keep the build context independent of local dependencies, outputs and credentials.
+.git
+.refinement
+**/node_modules
+**/.pnpm-store
+**/dist
+**/build
+**/coverage
+**/*.tsbuildinfo
+**/.vite
+**/.quarto
+**/_site
+**/playwright-report
+**/test-results
+**/.DS_Store
+**/.env
+**/.env.*
+!**/.env.example
+**/.ssh
+**/.aws
+**/*.jks
+**/*.keystore
+# Local libraries, recovery copies and operator material are not build inputs.
+**/data
+**/backups
+**/scratch
+**/private
+**/saved-snapshot
+**/*.sqlite
+**/*.sqlite-*
+**/*.db
+**/*.db-*
+**/*.log
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+# These two committed synthetic Zotero libraries are source fixtures.
+!fixtures/zotero/zotero.sqlite
+!fixtures/zotero/better-bibtex.sqlite

@@ -18,7 +18,7 @@ node apps/cli/dist/index.js serve --host 127.0.0.1 --port 3000 --database ./loca
 pnpm --filter @recueil/web dev --host 127.0.0.1
 ```
 
-These commands build and run the local service from this source tree. Container deployment and real-library acceptance remain separate checks. A successful local build does not establish deployed operation.
+These commands build and run the local service from this source tree. For the locally checked Linux ARM64 CLI/API container, follow the [deployment guide](https://github.com/etabli-dev/etabli-recueil/blob/main/deploy/README.md). The November 2 synthetic container check passed startup, token enforcement, persistence, backup/restore and actual Compose host-loopback health; published images, public deployment and representative real-library acceptance remain separate gates.
 
 ## Use and verification
 

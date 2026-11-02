@@ -6,22 +6,15 @@
 #
 #   docker build -f deploy/Dockerfile --target runtime -t recueil:dev .
 #
-# Stages:
-#   base          node + pnpm, shared by everything
-#   builder       installs the whole workspace and builds it, then prunes to a production tree
-#   runtime-base  the unprivileged server image: files, user, data directory, entrypoint
-#   ocr-worker    runtime-base plus OCRmyPDF and Tesseract (deploy/docker-compose.sidecars.yml)
-#   runtime       the published image, and the default target because it is last
-#
-# Pass --target explicitly in anything scripted. The default is runtime, but relying on stage order
-# is the sort of thing that breaks quietly when a stage is added.
+# Target runtime builds the current CLI/API server. No OCR worker command exists.
+# Pass --target runtime explicitly in scripted builds.
 #
 # Debian slim rather than Alpine: SQLite and image handling reach for native modules, and prebuilt
 # binaries exist for glibc far more reliably than for musl. The size difference is not worth a
 # from-source better-sqlite3 build on every arm64 release.
 #
-# Status: unbuilt on this machine. The workspace now builds and `recueil serve` answers /health
-# (Phase 0's exit criterion), but no image has been produced from this file yet.
+# Container build and synthetic recovery validation are tracked in spec/refinement-2026-10.md.
+# This file does not establish a published image or production deployment.
 
 # ------------------------------------------------------------------------------------------------
 # base
@@ -106,12 +99,12 @@ ENV NODE_ENV=production \
     RECUEIL_LOG_LEVEL=info
 
 # `node` (uid 1000) comes with the base image. Anything mounted at /data must be writable by it;
-# deploy/README.md says how when a host bind mount is used instead of a named volume.
+# The documented Compose path uses a named volume with the image's initialized ownership.
 COPY --from=builder --chown=node:node /prod/recueil /app
 
-# One volume for everything stateful: the database, the content-addressed store and the scratch
-# space archive extraction uses (CONCEPT.md §5.3). Backing up /data plus the .env file is the whole
-# backup story (P10).
+# One volume holds the database, content-addressed store and extraction scratch space.
+# Follow deploy/README.md for consistent CLI backup/verify/restore, separately retained snapshots
+# and private configuration/key backups; a raw copy of a live database is not a verified backup.
 RUN mkdir -p /data/storage /data/scratch \
     && chown -R node:node /data
 VOLUME ["/data"]
@@ -144,50 +137,19 @@ ENTRYPOINT ["/usr/bin/tini", "--", "recueil"]
 CMD ["serve"]
 
 # ------------------------------------------------------------------------------------------------
-# ocr-worker
-#
-# The same application with the OCR toolchain added, roughly half a gigabyte of Tesseract, Ghostscript
-# and language data that most libraries never need. Built on demand, not published:
-#
-#   docker build -f deploy/Dockerfile --target ocr-worker -t recueil-ocr:dev .
-#
-# See the `ocr` profile in deploy/docker-compose.sidecars.yml, and the caveat about running a second
-# process against a SQLite job queue in deploy/README.md.
-# ------------------------------------------------------------------------------------------------
-FROM runtime-base AS ocr-worker
-
-USER root
-
-# English and German language data by default. Add further packs here as `tesseract-ocr-<iso639-2>`
-# and set RECUEIL_OCR_LANGUAGES to match; each pack is a few megabytes.
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-        ocrmypdf \
-        tesseract-ocr \
-        tesseract-ocr-eng \
-        tesseract-ocr-deu \
-        ghostscript \
-        qpdf \
-        unpaper \
-        pngquant \
-    && rm -rf /var/lib/apt/lists/*
-
-USER node
-
-CMD ["worker", "--queues", "ocr"]
-
-# ------------------------------------------------------------------------------------------------
 # runtime — the published image
 # ------------------------------------------------------------------------------------------------
 FROM runtime-base AS runtime
 
 ARG RECUEIL_VERSION=0.0.0-dev
 ARG RECUEIL_REVISION=unknown
+# The runtime is a sibling of builder, so its /health version needs its own ENV.
+ENV RECUEIL_VERSION=${RECUEIL_VERSION}
 
 LABEL org.opencontainers.image.title="Recueil" \
       org.opencontainers.image.description="Self-hosted, API-first document and reference manager with reference verification, bibliometrics and systematic-review workflow" \
       org.opencontainers.image.licenses="AGPL-3.0-or-later" \
-      org.opencontainers.image.source="https://github.com/etabli-dev/recueil" \
-      org.opencontainers.image.documentation="https://github.com/etabli-dev/recueil/blob/main/deploy/README.md" \
+      org.opencontainers.image.source="https://github.com/etabli-dev/etabli-recueil" \
+      org.opencontainers.image.documentation="https://github.com/etabli-dev/etabli-recueil/blob/main/deploy/README.md" \
       org.opencontainers.image.version="${RECUEIL_VERSION}" \
       org.opencontainers.image.revision="${RECUEIL_REVISION}"

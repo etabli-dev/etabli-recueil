@@ -1,29 +1,17 @@
-# Recueil — base deployment.
-#
-#   cp .env.example .env
-#   docker compose up -d
-#
-# This is the whole thing: one container, one volume, SQLite inside it. The optional sidecars live
-# in docker-compose.sidecars.yml and are opt-in per profile; nothing here depends on them.
-#
-#   docker compose -f docker-compose.yml -f docker-compose.sidecars.yml --profile grobid up -d
-#
-# Status: untested. At Phase 0 the image in `image:` does not exist yet, so this file has never been
-# run. See README.md.
+# Local Recueil server: docker compose up --build -d
+# Build context is the repository root. No registry image is assumed to exist.
+# Read README.md before exposing the service beyond host loopback.
 
 name: recueil
 
 services:
   recueil:
-    image: ${RECUEIL_IMAGE:-ghcr.io/etabli-dev/recueil}:${RECUEIL_VERSION:-latest}
-
-    # To run your own build instead of the published image, uncomment this and run
-    # `docker compose build`. The context is the repository root because the Dockerfile builds the
-    # whole workspace; `target: runtime` skips the OCR toolchain stage.
-    #build:
-    #  context: ..
-    #  dockerfile: deploy/Dockerfile
-    #  target: runtime
+    image: ${RECUEIL_IMAGE:-recueil}:${RECUEIL_IMAGE_TAG:-local}
+    pull_policy: never
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: runtime
 
     # Optional: the server's own defaults are enough to start. `required: false` so a fresh clone
     # comes up before anyone has copied .env.example.

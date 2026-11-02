@@ -1,304 +1,136 @@
-# Deploying Recueil
+# Run Recueil in a local container
 
-Recueil is one container with one volume. SQLite is the database (ADR-0015), the file store is a
-directory beside it, and the job queue runs inside the server process (ADR-0010), so a working
-install needs nothing else. The sidecars in this directory are options, not parts.
+The current image contains the CLI and HTTP API, SQLite, and a local file store. It does not serve the separate Vite web frontend. Start with synthetic data; production deployment and live-service interoperability have separate acceptance requirements.
 
-> **Status: none of this has been run.**
-> At Phase 0 the repository is a specification and a scaffold. The workspace produces no build
-> output, so `deploy/Dockerfile` has never been built, the image referenced below does not exist in
-> the registry yet, and the compose files have never started anything. What is here is the intended
-> deployment, written so that Phase 1 has something to make true rather than something to invent.
-> Where the files and the code disagree once the code lands, assume the files are wrong.
+**Verification status (2026-11-02):** a local Linux ARM64 image build and isolated CLI/API checks passed: non-root startup, token-required access, synthetic PDF upload/deduplication, restart persistence, verified backup and restoration to a separate empty volume with identical document bytes. The actual Compose service reached healthy and responded over its host-loopback port. See [the refinement record](../spec/refinement-2026-10.md) for the evidence and preserved harness failures. No registry image, multi-architecture release, sidecar integration or production deployment is claimed.
 
-## What is in this directory
+## Requirements and first start
 
-| File | Purpose |
-|---|---|
-| [`Dockerfile`](Dockerfile) | Multi-stage build of the server image. Build context is the repository root, not this directory |
-| [`docker-compose.yml`](docker-compose.yml) | The base deployment: the server, a named volume, a healthcheck |
-| [`docker-compose.sidecars.yml`](docker-compose.sidecars.yml) | The optional sidecars from CONCEPT.md §5.1, one Compose profile each |
-| [`.env.example`](.env.example) | Every variable the server reads, documented, with safe defaults |
+Use Docker Engine **28.0.0 or newer** with Compose v2.24+ (`env_file.required` is used), sufficient disk for the dependency/build layers and library, and network access for the first image build. The image uses Node 22 and the repository's pinned pnpm. Docker Desktop/Colima or an equivalent engine is needed on macOS; installing the CLI alone is insufficient. The observed local ARM64 image size was 134,243,541 bytes; build-cache/disk use and minimum memory requirements have not been established. Podman has not been verified. The engine minimum matters for first-token setup: [Docker documents](https://docs.docker.com/engine/network/port-publishing/#publishing-ports) that versions before 28.0.0 can expose localhost-published ports to other hosts on the same network segment.
 
-## Requirements
+For an existing installation, compare its `.env` with the new example before running these commands. Preserve the original file, private keys and verified backups. The scaffold used `RECUEIL_VERSION` as an image tag; move that image-tag value to `RECUEIL_IMAGE_TAG` (the application version is now supplied at image build). Old bootstrap-token, worker and sidecar variables do not configure authentication or integrations in this server. Do not apply the unauthenticated first-token instructions to an existing remotely reachable instance: first review its published addresses and proxies, or keep authentication enabled and use an existing administrator token. No existing `.env` is rewritten by this guide.
 
-| | |
-|---|---|
-| Docker Engine | 24 or newer |
-| Docker Compose | v2.24 or newer — `env_file:` with `required: false` needs it |
-| Architecture | linux/amd64 or linux/arm64; the release image is a multi-architecture manifest, so `docker pull` picks the right one |
-| Disk | The library, mostly. Image size is unmeasured because nothing has been built yet; expect a few hundred megabytes, and roughly half a gigabyte more for the OCR variant |
-| Memory | 512 MB is enough for the server alone. GROBID wants 4–6 GB of its own, which is why it is a sidecar |
-
-Podman 5 with `podman compose` should work — nothing here needs the Docker socket, a privileged
-container or a user namespace trick — but it has not been tried.
-
-## Quick start
+From the repository root:
 
 ```sh
+test -e deploy/.env || cp deploy/.env.example deploy/.env
 cd deploy
-cp .env.example .env
-$EDITOR .env          # optional: every variable has a working default
-docker compose up -d
-docker compose logs -f recueil
+docker compose up --build -d
+docker compose logs --tail=100 recueil
+curl --fail http://127.0.0.1:3000/health
 ```
 
-Then check that it is alive, which is Phase 0's exit criterion:
+Compose builds `deploy/Dockerfile`'s `runtime` target locally as `recueil:local`; no registry pull is required. It publishes only `127.0.0.1:3000`, runs as uid 1000, and stores state in its named `recueil-data` volume. The default permits unauthenticated local API access so the first token can be created. Keep this instance local until authentication is enabled. The health response should report a working database and writable storage; a running container alone does not establish readiness.
+
+To select another local image name/tag or host port, edit `RECUEIL_IMAGE`, `RECUEIL_IMAGE_TAG` or `RECUEIL_PUBLISH_PORT` in `.env`. These are Compose settings; `RECUEIL_VERSION` is the application version embedded during image build. An existing data volume survives service recreation. Do not use `docker compose down -v` on a library you intend to keep.
+
+## Create the first API token
+
+The HTTP token API is implemented. The proposed `recueil token create` command and `RECUEIL_BOOTSTRAP_TOKEN` environment variable are not implemented.
+
+While the server is reachable only on host loopback, save the one-time token response to a private temporary file. The response contains a secret; do not put it in logs, Git or screenshots.
 
 ```sh
-curl http://127.0.0.1:3000/health
+umask 077
+RECUEIL_TOKEN_FILE=$(mktemp "${TMPDIR:-/tmp}/recueil-token.XXXXXX")
+curl --fail --silent --show-error \
+  --header 'Content-Type: application/json' \
+  --data '{"name":"local-administrator","scopes":["admin:*"]}' \
+  --output "$RECUEIL_TOKEN_FILE" \
+  http://127.0.0.1:3000/api/v1/tokens
 ```
 
-Create an API token for the clients (web UI, CLI, R, Python, MCP), unless you set
-`RECUEIL_BOOTSTRAP_TOKEN` in `.env` and let the server create one at boot:
+Store the response's `secret` in your password manager. Set `RECUEIL_REQUIRE_AUTH=true` in `deploy/.env`, then run `docker compose up -d --force-recreate recueil` from `deploy/`. An unauthenticated `/api/v1/items` request must now return 401; the same request with `Authorization: Bearer <saved secret>` must return 200. `/health` remains available without a token. Create narrower scoped client tokens through the authenticated token API. Delete the temporary response only after its secret is safely saved and verified.
 
-```sh
-docker compose exec recueil recueil token create --name laptop --scope '*'
-```
+## Current configuration
 
-Any CLI subcommand works the same way — the image's entrypoint is the CLI, so `serve` is only the
-default command:
+[`.env.example`](.env.example) lists settings consumed by the current server; [config.ts](../apps/server/src/config.ts) is authoritative. Common settings are:
 
-```sh
-docker compose exec recueil recueil check run --all
-docker compose exec recueil recueil import zotero /data/import/zotero.sqlite
-```
-
-## Configuration
-
-Everything is environment variables (CONCEPT.md §5.15); there is no configuration file to mount.
-[`.env.example`](.env.example) documents each one and is the reference — the summary below is only
-the shape of it.
-
-| Group | Variables | Notes |
-|---|---|---|
-| Core | `RECUEIL_HOST`, `RECUEIL_PORT`, `RECUEIL_LOG_LEVEL`, `RECUEIL_BASE_URL` | Leave `RECUEIL_HOST` at `0.0.0.0`; publish the port with `RECUEIL_PUBLISH_ADDR`/`RECUEIL_PUBLISH_PORT` instead |
-| Storage | `RECUEIL_DATABASE_URL`, `RECUEIL_STORAGE_PATH`, `RECUEIL_SCRATCH_PATH` | All on `/data` by default. The URL scheme selects the driver (ADR-0003) |
-| Jobs | `RECUEIL_JOB_CONCURRENCY`, `RECUEIL_INGEST_CONCURRENCY` | Conservative by default: the resolvers are rate-limited upstream |
-| Search | `RECUEIL_SEARCH_BACKEND`, `RECUEIL_MEILISEARCH_*` | FTS5 unless you enable the `search` profile (ADR-0011) |
-| Sidecars | `RECUEIL_GROBID_URL`, `RECUEIL_TRANSLATION_SERVER_URL`, `RECUEIL_OCR_*` | Unset means the feature is off, not broken |
-| Enrichment | `CROSSREF_*`, `OPENALEX_*`, `NCBI_*`, `SEMANTIC_SCHOLAR_API_KEY`, `UNPAYWALL_EMAIL`, `ORCID_*` | All optional. Every resolver works without a key, more slowly |
-
-Two things about credentials. First, a contact address is worth more than a key: `CROSSREF_MAILTO`
-and `OPENALEX_MAILTO` put requests in the polite pool, which is faster and less likely to be
-throttled than anonymous access, and `UNPAYWALL_EMAIL` is required rather than optional — Unpaywall
-stays off until it is set. Second, values in `.env` are readable by anything that can read the file
-and show up in `docker inspect`. For a deployment where that matters, use Docker secrets and the
-`${file:/run/secrets/name}` reference form (spec/plugin-api.md §4.3) instead of putting the secret in
-the environment.
-
-## Sidecars
-
-Each sidecar is a Compose profile in [`docker-compose.sidecars.yml`](docker-compose.sidecars.yml).
-Nothing starts unless its profile is named, and the overlay file has to be passed after the base
-file:
-
-```sh
-docker compose -f docker-compose.yml -f docker-compose.sidecars.yml --profile grobid up -d
-```
-
-Setting these two in `.env` saves repeating the flags:
-
-```sh
-COMPOSE_FILE=docker-compose.yml:docker-compose.sidecars.yml
-COMPOSE_PROFILES=grobid,search
-```
-
-| Profile | Service | Gives you | Also set in `.env` |
-|---|---|---|---|
-| `grobid` | GROBID | Title, authors, DOI, abstract, reference lists and in-text citation contexts from scholarly PDFs (§5.3, §5.8) | `RECUEIL_GROBID_URL=http://grobid:8070` |
-| `ocr` | OCR worker | OCRmyPDF and Tesseract for scans with no text layer (§5.3) | `RECUEIL_OCR_ENABLED=true`, `RECUEIL_OCR_LANGUAGES` |
-| `search` | Meilisearch | Typo-tolerant, faceted search for large libraries (ADR-0011) | `RECUEIL_SEARCH_BACKEND=meilisearch`, `RECUEIL_MEILISEARCH_URL`, `RECUEIL_MEILISEARCH_KEY`, `MEILI_MASTER_KEY` |
-| `translation` | zotero/translation-server | URL, DOI, PMID, ISBN and arXiv import through the Zotero translators (ADR-0006) | `RECUEIL_TRANSLATION_SERVER_URL=http://translation-server:1969` |
-
-Starting a profile is deliberately only half of it. The server ignores a sidecar until it is given
-the URL, so a URL that is set but not answering is a misconfiguration worth reporting, while a URL
-that is unset is a feature that is simply off.
-
-The fifth sidecar in CONCEPT.md §5.1, the SciCite citation-intent model, has no service here: the
-published model is a research artefact rather than something with a maintained image, so packaging
-it is Phase 5 work. Until then citation contexts are stored unclassified.
-
-### The OCR worker is a caveat, not just a profile
-
-The OCR profile is the one place in this directory that argues with an ADR. ADR-0010 puts the job
-queue in the database and runs it inside the server process, and says in as many words that a
-single-container deployment stays single-container. The `ocr` profile starts a second container that
-opens the same SQLite file to take OCR jobs. On one host, with the same volume and WAL journalling,
-that works — but it is a deployment shape the ADR did not sanction, so it is off by default. The
-reason to want it is that the OCR toolchain is about half a gigabyte the base image otherwise carries
-for a feature many libraries never use. If it proves worth keeping, it needs an ADR of its own.
-
-It is also not a published image, so it has to be built:
-
-```sh
-docker compose -f docker-compose.yml -f docker-compose.sidecars.yml --profile ocr build
-docker compose -f docker-compose.yml -f docker-compose.sidecars.yml --profile ocr up -d
-```
-
-## Building the image
-
-The Dockerfile has two publishable stages. Pass `--target` in anything scripted rather than relying
-on stage order.
-
-```sh
-# from the repository root, not from deploy/
-docker build -f deploy/Dockerfile --target runtime    -t recueil:dev .
-docker build -f deploy/Dockerfile --target ocr-worker -t recueil-ocr:dev .
-```
-
-Multi-architecture, the way the release workflow does it:
-
-```sh
-docker buildx build \
-  -f deploy/Dockerfile --target runtime \
-  --platform linux/amd64,linux/arm64 \
-  --build-arg RECUEIL_VERSION=0.1.0 \
-  --build-arg RECUEIL_REVISION="$(git rev-parse HEAD)" \
-  -t ghcr.io/etabli-dev/recueil:0.1.0 .
-```
-
-Notes on the build:
-
-- The build needs a committed `pnpm-lock.yaml`. `pnpm fetch` runs from the lockfile alone so that a
-  source edit does not invalidate the dependency download layer; a build that fails at that step is
-  telling you the lockfile is missing, which is the same thing CI's `--frozen-lockfile` says.
-- The runtime is Debian slim rather than Alpine. SQLite and image handling reach for native modules,
-  and prebuilt binaries exist for glibc far more reliably than for musl; the size saving is not worth
-  compiling `better-sqlite3` from source on every arm64 release.
-- The entrypoint is resolved at build time from the deployed package's own `bin` field, so it fails
-  loudly at build time rather than producing an image whose entrypoint is not there.
-- There is no `.dockerignore` in the repository yet, so `COPY . .` currently pulls in `.git` and any
-  local `node_modules`. That costs build time, not image size — the runtime stage copies only the
-  pruned production tree — but it should be added.
-
-## Releases, provenance and SBOM
-
-Tagging `v*` runs [`.github/workflows/release.yml`](../.github/workflows/release.yml), which builds
-`linux/amd64` and `linux/arm64` and pushes to `ghcr.io/etabli-dev/recueil`. Every image carries SLSA
-provenance and an SBOM as attestations, plus a signed GitHub attestation, so what you pull can be
-checked against the commit it came from:
-
-```sh
-gh attestation verify oci://ghcr.io/etabli-dev/recueil:0.1.0 --owner etabli-dev
-docker buildx imagetools inspect ghcr.io/etabli-dev/recueil:0.1.0 --format '{{ json .Provenance }}'
-```
-
-A standalone SPDX document is attached to each release run as a workflow artefact, for scanners that
-want a file rather than an attestation.
-
-## Data, backup and restore
-
-Everything stateful lives on one volume:
-
-```
-/data
-  recueil.sqlite      the library: items, metadata, annotations, jobs, audit log
-  storage/            the content-addressed file store, laid out by SHA-256
-  scratch/            archive extraction, cleaned after hashing
-```
-
-The store is readable without the application, by design (P10): the files are the original bytes
-under their hashes, and the database is plain SQLite that `sqlite3` or DuckDB will open.
-
-Back up with the CLI rather than by copying the database file out from under a running server —
-`recueil backup` takes a consistent snapshot of the database, a storage manifest and the
-configuration, in a layout restic is happy with (CONCEPT.md §5.15):
-
-```sh
-docker compose exec recueil recueil backup --output /data/backups
-restic -r /srv/restic backup /var/lib/docker/volumes/recueil_recueil-data/_data/backups
-```
-
-Restore into an empty volume:
-
-```sh
-docker compose run --rm recueil restore --from /data/backups/<snapshot>
-```
-
-To copy the volume somewhere else wholesale, stop the server first so SQLite is not mid-write:
-
-```sh
-docker compose stop recueil
-docker run --rm -v recueil_recueil-data:/data -v "$PWD":/backup alpine \
-  tar czf /backup/recueil-data.tar.gz -C /data .
-docker compose start recueil
-```
-
-### Bind mounts and file ownership
-
-The container runs as uid 1000 (`node`). A named volume inherits the image's ownership, which is why
-that is the default. If you would rather see the files on the host, mount a directory you have first
-chowned:
-
-```sh
-sudo mkdir -p /srv/recueil
-sudo chown -R 1000:1000 /srv/recueil
-```
-
-and replace the volume line in `docker-compose.yml` with `- /srv/recueil:/data`. Permission errors on
-first start are almost always this.
-
-## Reverse proxy and TLS
-
-The container speaks plain HTTP and binds to loopback on the host by default. Terminate TLS in front
-of it. With Caddy that is two lines:
-
-```caddy
-recueil.example.org {
-    reverse_proxy 127.0.0.1:3000
-}
-```
-
-Set `RECUEIL_BASE_URL=https://recueil.example.org` so generated links, webhook payloads and the
-tokened `.bib` endpoints carry the public URL, and `RECUEIL_TRUST_PROXY=true` so the audit log records
-the real client address rather than the proxy's. Turn that on only when the proxy in front is one you
-control, because it means believing `X-Forwarded-For`.
-
-Recueil is a single-user application with token authentication and no rate limiting in v1. A
-Tailscale or WireGuard address is a better place for it than the public internet, and if it is on the
-public internet, it wants at least a proxy that enforces basic rate limits.
-
-**AGPL, briefly.** If you run a modified Recueil where other people can reach it over a network, the
-licence requires you to offer them the modified source (AGPL-3.0-or-later §13, ADR-0005). Running an
-unmodified released image satisfies this by pointing at the upstream repository.
-
-## Upgrading
-
-```sh
-docker compose exec recueil recueil backup --output /data/backups   # first
-docker compose pull
-docker compose up -d
-```
-
-Migrations run at start-up and are logged. Pin `RECUEIL_VERSION` to a version rather than `latest` in
-anything you rely on, and read the release notes before a major: the plugin API and the data model
-may both change under a migration before 1.0 (CONTRIBUTING.md).
-
-## Troubleshooting
-
-| Symptom | Cause |
+| Setting | Purpose |
 |---|---|
-| `container is unhealthy` at first start | The healthcheck's start period is 60 s; a first start that migrates and indexes a large imported library can exceed it. Check `docker compose logs recueil` before raising it |
-| `EACCES` on `/data` | A bind mount owned by someone other than uid 1000. See above |
-| Meilisearch exits immediately | `MEILI_MASTER_KEY` is unset. It is required in production mode |
-| Enrichment is slow, and the log is full of 429s | No contact address. Set `CROSSREF_MAILTO` and `OPENALEX_MAILTO`; they cost nothing and change the rate limit |
-| GROBID is killed | It wants 4–6 GB. The `deploy.resources.limits` entry in the sidecars file is a ceiling, not a reservation |
-| `pnpm-lock.yaml: not found` during build | The lockfile is not committed. See "Building the image" |
-| The image builds the OCR variant unexpectedly | `--target` was not passed. The default is `runtime`, but say so explicitly |
+| `RECUEIL_DATABASE_URL`, `RECUEIL_STORAGE_PATH` | SQLite file and content-addressed store; both default under `/data` in the image |
+| `RECUEIL_REQUIRE_AUTH` | Require API bearer tokens; enable before remote access |
+| `RECUEIL_BASE_URL`, `RECUEIL_CORS_ORIGIN` | Public base URL and explicitly allowed browser origins for the separate frontend |
+| `RECUEIL_TRUST_PROXY` | Trust forwarded headers only behind a proxy you control |
+| `RECUEIL_SECRET_KEY` | Privately backed-up 32-byte key for encrypted ingestion/storage credentials; required only when those credentials are stored |
+| `RECUEIL_INGEST_ALLOWED_ROOTS` | Comma-separated absolute input roots inside the container; also mount those deliberate directories |
+| `RECUEIL_INGEST_SCRATCH_PATH`, `RECUEIL_MAX_UPLOAD_BYTES` | Scratch directory and upload limit |
+| `RECUEIL_OCR_ENGINE` | `none` in the base image; OCR requires a separately supplied executable and validated configuration |
 
-## Running without Docker
+Environment values can be read by the host/container administrator. The `${file:/run/secrets/name}` expansion described in design documents is not implemented by current server configuration; passing that text does not load a secret file. Back up any `RECUEIL_SECRET_KEY` privately: the redacted backup configuration cannot recover it.
 
-The server is a Node process; Docker is a convenience, not a requirement. The same code runs as a
-Tauri sidecar in desktop mode (CONCEPT.md §5.1).
+## Backup and restore
+
+From `deploy/`, take a uniquely named snapshot while the service runs, then verify it:
 
 ```sh
-corepack enable
-pnpm install --frozen-lockfile
-pnpm build
-RECUEIL_DATABASE_URL=file:./data/recueil.sqlite \
-RECUEIL_STORAGE_PATH=./data/storage \
-  pnpm --filter @recueil/cli exec recueil serve
+RECUEIL_SNAPSHOT="/data/backups/$(date -u +%Y%m%dT%H%M%SZ)"
+docker compose exec -T recueil recueil backup --out "$RECUEIL_SNAPSHOT"
+docker compose exec -T recueil recueil restore "$RECUEIL_SNAPSHOT" --verify-only
 ```
 
-Node 22 LTS is the reference runtime; CI also tests 24.
+The snapshot includes a consistent SQLite copy, a storage manifest and blobs, plus redacted configuration. A backup on the same volume does not protect against loss of that volume: copy the verified snapshot to separately managed storage and retain its private configuration/key backup. For example, copy to a new directory outside the checkout:
+
+```sh
+mkdir -p "$HOME/Backups/recueil"
+RECUEIL_BACKUP_COPY="$HOME/Backups/recueil/$(date -u +%Y%m%dT%H%M%SZ)"
+test ! -e "$RECUEIL_BACKUP_COPY" && \
+  docker compose cp "recueil:$RECUEIL_SNAPSHOT" "$RECUEIL_BACKUP_COPY"
+```
+
+Retain that verified copy on separately managed storage; a second directory on the same disk is not an off-device backup.
+
+Restore into a new, empty location, without `--force`:
+
+```sh
+docker compose exec -T recueil recueil restore "$RECUEIL_SNAPSHOT" --into /data/restored-check
+```
+
+That writes `/data/restored-check/library.sqlite`, `storage/` and redacted `config/recueil.json`. It does not switch the running server to the restored library. Validate the restored files and application reads separately before choosing a recovery location; only then set `RECUEIL_DATABASE_URL` and `RECUEIL_STORAGE_PATH` to it and recreate the service. Keep the original library and backup until recovery is verified. Do not restore over an active database.
+
+For an upgrade, take and externally retain a verified backup first, rebuild the desired source revision with `docker compose build recueil`, recreate with `docker compose up -d recueil`, and check health and representative library reads. Migrations run on startup; rollback may require restoring the pre-upgrade snapshot rather than starting an older binary against a migrated database.
+
+## Build and distribution
+
+From the repository root:
+
+```sh
+docker build -f deploy/Dockerfile --target runtime \
+  --build-arg RECUEIL_VERSION=0.0.0-dev \
+  --build-arg RECUEIL_REVISION="$(git rev-parse HEAD)" \
+  -t recueil:local .
+```
+
+`.dockerignore` excludes local dependencies, generated outputs, Git metadata and local environment/key files. Lockfiles, package manifests, source, migrations, build scripts and fixtures remain build inputs. The image resolves the CLI launcher from its package manifest and copies its production dependency tree; neither pnpm nor workspace symlinks are required to run the deployed CLI.
+
+The tag-triggered [release workflow](../.github/workflows/release.yml) prepares multi-architecture images and provenance/SBOM outputs. Its existence is not evidence that a particular image or attestation has been published. Do not substitute an assumed registry tag for the verified local build. Deployment of modified AGPL software must retain the applicable source-delivery notices and source access.
+
+## Run the container regression check
+
+The portable check requires host **Bash, Git and Python 3.9+**, Docker Engine **28.0.0+**, and Compose **2.24.4+**. The ordinary Compose guide above requires 2.24.0 for `env_file.required`; the smoke check additionally uses [`!override`, introduced in 2.24.4](https://docs.docker.com/reference/compose-file/merge/), to exclude the repository `.env` and existing volumes. The Docker daemon's loopback-published ports must be reachable from this host; a remote daemon requires deliberate port forwarding.
+
+From the repository root, build the current runtime and exercise only disposable data:
+
+```sh
+bash deploy/smoke.sh --run
+```
+
+It prints a new evidence directory outside the checkout, builds for the daemon's native Linux architecture, and verifies non-root startup, PDF upload/deduplication, rejected inputs, token enforcement after restart, backup/restore with identical bytes, and the actual Compose healthcheck and host-loopback endpoint. Probe/fixture files are copied into newly created containers; the daemon does not need to bind-mount the checkout. The required `Container build and recovery` CI job runs this same command from a clean checkout and retains its evidence. The extracted command passed locally in existing-image mode on November 2, preserving all runtime/recovery/Compose assertions; the exact source revision's workflow result supplies clean-build CI evidence. A configured CI job is not a passing CI result.
+
+To recheck an already-built local image without recompiling, provide its expected embedded application version:
+
+```sh
+bash deploy/smoke.sh --run --image recueil:local --expected-version 0.0.0-dev
+```
+
+This mode resolves the supplied image once to an immutable ID and records its identity separately from the current probe/Compose source snapshot. It does not claim that image was built from the current checkout. Use the version actually supplied when building that image. `--output /absolute/new/directory` optionally selects a nonexisting evidence directory outside the repository. The check never publishes an image or uses an existing library. On exit it stops only its labelled containers and retains those containers, unique images, networks and synthetic volumes for inspection; cleanup must verify the saved ownership prefix and must never use a global prune.
+
+## Deferred integrations
+
+[`docker-compose.sidecars.yml`](docker-compose.sidecars.yml) retains historical, profile-disabled sketches for GROBID, Meilisearch and Zotero translation-server. Current server configuration does not connect those services by the proposed environment variables. Starting them does not establish integration. The former OCR worker service/target was removed because `recueil worker` does not exist; no separate worker feature was added. The base image does not include OCRmyPDF/Tesseract.
+
+`recueil check`, token-management CLI commands and several later roadmap commands remain explicitly unimplemented. Use `recueil --help` and the current API, not examples from the specification as proof of implemented behavior. Production reverse-proxy/TLS, authentication boundaries, external services, representative real-library recovery and resource limits still need their own validation. The completed synthetic local container check does not establish any of those.
+
+## Without Docker
+
+Follow the [repository README](../README.md) for frozen pnpm installation/build, CLI/API startup and the separate web frontend. Container use is optional.
