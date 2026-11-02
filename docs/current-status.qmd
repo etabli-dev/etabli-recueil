@@ -22,4 +22,6 @@ These commands build and run the local service from this source tree. Container 
 
 ## Use and verification
 
+The [GitHub Actions run for source commit c4023d7](https://github.com/etabli-dev/etabli-recueil/actions/runs/41200169067) passed on 2026-10-31: 2,496 tests on each of Node 22 and Node 24, 15 browser journeys, frozen installation, build, typing, lint, specification checks and production dependency audits. The audits reported no known vulnerabilities at that time. These source and CI results do not establish deployed operation or real-library acceptance.
+
 Read the [repository README](https://github.com/etabli-dev/etabli-recueil/blob/main/README.md) for the exact application workflow, privacy/storage behavior and platform differences. The [October refinement record](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/refinement-2026-10.md) records findings, changes, observed checks, deferred work and the next release action. See the workflow runs for the exact source commit; local verification does not establish a remote CI result.
