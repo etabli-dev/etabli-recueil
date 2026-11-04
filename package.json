@@ -2,7 +2,7 @@
   "name": "recueil",
   "private": true,
   "license": "AGPL-3.0-or-later",
-  "description": "Recueil \u2014 self-hosted, API-first document and reference manager. Monorepo root; the packages are in apps/, packages/ and plugins/.",
+  "description": "Recueil — self-hosted, API-first document and reference manager. Monorepo root; the packages are in apps/, packages/ and plugins/.",
   "engines": {
     "node": ">=22"
   },
@@ -24,6 +24,13 @@
     "globals": "^16",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8",
+    "vite": "8.2.4",
     "yaml": "^2.9.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "undici@>=8.0.0 <8.12.2": "8.12.2",
+      "source-map-js@>=1.0.0 <1.2.2": "1.2.2"
+    }
   }
 }
