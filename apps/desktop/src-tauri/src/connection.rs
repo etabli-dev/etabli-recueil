@@ -111,11 +111,22 @@ pub enum Navigation {
 }
 
 /// True when `url` is the shell's own origin: `tauri://localhost` on Linux and macOS,
-/// `http://tauri.localhost` on Windows.
+/// `http://tauri.localhost` on Windows (the shell does not set `useHttpsScheme`).
+///
+/// Only the current platform's origin counts. Elsewhere `tauri.localhost` is an ordinary
+/// host name that resolves to the loopback interface, so accepting it would let whatever
+/// listens on local port 80 load inside the shell window.
 pub fn is_app_origin(url: &Url) -> bool {
+    is_app_origin_on(url, cfg!(windows))
+}
+
+fn is_app_origin_on(url: &Url, windows: bool) -> bool {
+    if url.port().is_some() {
+        return false;
+    }
     match url.scheme() {
-        "tauri" => url.host_str() == Some("localhost"),
-        "http" | "https" => url.host_str() == Some("tauri.localhost"),
+        "tauri" => !windows && url.host_str() == Some("localhost"),
+        "http" => windows && url.host_str() == Some("tauri.localhost"),
         _ => false,
     }
 }
@@ -206,6 +217,26 @@ mod tests {
     }
 
     #[test]
+    fn only_the_current_platforms_origin_is_the_app() {
+        let url = |s: &str| Url::parse(s).unwrap();
+        // Linux and macOS
+        assert!(is_app_origin_on(&url("tauri://localhost/index.html"), false));
+        assert!(!is_app_origin_on(&url("http://tauri.localhost/index.html"), false));
+        assert!(!is_app_origin_on(&url("https://tauri.localhost/index.html"), false));
+        // Windows
+        assert!(is_app_origin_on(&url("http://tauri.localhost/index.html"), true));
+        assert!(!is_app_origin_on(&url("https://tauri.localhost/index.html"), true));
+        assert!(!is_app_origin_on(&url("tauri://localhost/index.html"), true));
+        // Neither: other ports and look-alike hosts
+        for windows in [false, true] {
+            assert!(!is_app_origin_on(&url("tauri://localhost:8080/"), windows));
+            assert!(!is_app_origin_on(&url("http://tauri.localhost:8080/"), windows));
+            assert!(!is_app_origin_on(&url("http://tauri.localhost.example.org/"), windows));
+            assert!(!is_app_origin_on(&url("tauri://evil.example/"), windows));
+        }
+    }
+
+    #[test]
     fn every_problem_has_a_message() {
         for problem in [
             UrlProblem::Empty,
@@ -225,8 +256,9 @@ mod tests {
         let server = Url::parse("http://127.0.0.1:3000").unwrap();
         let allow = |target: &str| classify_navigation(&Url::parse(target).unwrap(), Some(&server), None);
 
-        assert_eq!(allow("tauri://localhost/shell/connect.html"), Navigation::Allow);
-        assert_eq!(allow("http://tauri.localhost/reader/abc"), Navigation::Allow);
+        let own = if cfg!(windows) { "http://tauri.localhost" } else { "tauri://localhost" };
+        assert_eq!(allow(&format!("{own}/shell/connect.html")), Navigation::Allow);
+        assert_eq!(allow(&format!("{own}/reader/abc")), Navigation::Allow);
         assert_eq!(allow("about:blank"), Navigation::Allow);
         assert_eq!(allow("http://127.0.0.1:3000/api/v1/documents/x/content"), Navigation::Allow);
 
