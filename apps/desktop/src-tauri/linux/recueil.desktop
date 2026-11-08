@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Recueil
+GenericName=Reference manager
+{{#if comment}}
+Comment={{comment}}
+{{/if}}
+Exec={{exec}}
+Icon={{icon}}
+Terminal=false
+Categories={{categories}}
+Keywords=references;bibliography;documents;library;systematic review;
+StartupWMClass={{exec}}

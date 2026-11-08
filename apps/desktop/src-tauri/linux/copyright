@@ -1,0 +1,16 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: Recueil
+Upstream-Contact: https://github.com/etabli-dev/etabli-recueil/issues
+Source: https://github.com/etabli-dev/etabli-recueil
+
+Files: *
+Copyright: 2026 R. Heller
+License: AGPL-3.0-or-later
+ This program is free software: you can redistribute it and/or modify it
+ under the terms of the GNU Affero General Public License as published by the
+ Free Software Foundation, either version 3 of the License, or (at your
+ option) any later version.
+ .
+ The full text of the licence is installed as
+ /usr/share/doc/etabli-recueil/LICENSE, and the corresponding source is
+ published at the Source address above.

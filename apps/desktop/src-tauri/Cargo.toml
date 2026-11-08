@@ -1,0 +1,47 @@
+[package]
+name = "recueil-desktop"
+version = "0.1.0"
+description = "The Recueil desktop shell: the web client in a Tauri 2 window, connected to a Recueil server."
+authors = ["R. Heller"]
+license = "AGPL-3.0-or-later"
+repository = "https://github.com/etabli-dev/etabli-recueil"
+edition = "2021"
+rust-version = "1.90"
+publish = false
+
+[lib]
+# The library holds everything; `main.rs` only calls `run()`. Tauri's mobile targets need the
+# cdylib and staticlib kinds, and keeping them now means the crate does not change shape later.
+name = "recueil_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "=2.7.4", features = [] }
+
+[dependencies]
+tauri = { version = "=2.12.5", features = [] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+url = "2.5.8"
+# Links leaving the window open in the system browser. Called from Rust only; the web view is
+# given no permission to open anything itself.
+open = "=5.4.4"
+
+# The API token, when a server needs one, lives in the operating system's credential store and
+# never in the settings file: Keychain on macOS, Credential Manager on Windows, the Secret Service
+# (GNOME Keyring, KWallet) on Linux.
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "=3.6.3", features = ["apple-native"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { version = "=3.6.3", features = ["windows-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "=3.6.3", features = ["sync-secret-service", "crypto-rust"] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en-GB">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Recueil — connection</title>
+    <link rel="icon" href="../../web/public/icons/icon-192.png" type="image/png" />
+    <link rel="stylesheet" href="./connect.css" />
+    <script type="module" src="./connect.ts"></script>
+  </head>
+  <body>
+    <main class="connect" aria-labelledby="connect-title">
+      <header class="connect__header">
+        <img class="connect__logo" src="../../web/public/icons/recueil.svg" alt="" width="56" height="56" />
+        <div>
+          <h1 id="connect-title">Recueil</h1>
+          <p class="connect__tagline">Gather. Verify. Map.</p>
+        </div>
+      </header>
+
+      <section class="status" id="status" data-tone="pending" aria-live="polite" data-testid="status">
+        <h2 class="status__title" id="status-title">Checking the server…</h2>
+        <p class="status__detail" id="status-detail"></p>
+        <pre class="status__code" id="status-code" hidden></pre>
+      </section>
+
+      <form class="settings" id="settings" novalidate hidden>
+        <h2>Server</h2>
+        <label for="server-url">Address</label>
+        <input
+          id="server-url"
+          name="serverUrl"
+          type="url"
+          inputmode="url"
+          autocomplete="url"
+          spellcheck="false"
+          required
+          placeholder="http://127.0.0.1:3000"
+        />
+        <p class="settings__hint">
+          Plain <code>http://</code> on this computer only (127.0.0.1, ::1, localhost); any other server needs
+          <code>https://</code>.
+        </p>
+
+        <label for="token">API token <span class="settings__optional">(optional)</span></label>
+        <input id="token" name="token" type="password" autocomplete="off" spellcheck="false" />
+        <p class="settings__hint" id="token-hint">
+          Only needed when the server runs with <code>RECUEIL_REQUIRE_AUTH=true</code>. Kept in the system credential
+          store, never in a file.
+        </p>
+        <label class="settings__check" id="forget-token-row" hidden>
+          <input id="forget-token" name="forgetToken" type="checkbox" />
+          Forget the stored token for this server
+        </label>
+
+        <p class="settings__error" id="form-error" role="alert" hidden></p>
+
+        <div class="settings__actions">
+          <button type="button" id="test">Test</button>
+          <button type="submit" id="save" class="primary">Save and connect</button>
+          <button type="button" id="continue" hidden>Back to the library</button>
+        </div>
+      </form>
+
+      <footer class="connect__footer">
+        <p id="settings-note"></p>
+        <p>
+          Recueil is free software under the GNU Affero General Public License, version 3 or later. Source:
+          <span class="mono">github.com/etabli-dev/etabli-recueil</span>.
+        </p>
+      </footer>
+    </main>
+  </body>
+</html>
