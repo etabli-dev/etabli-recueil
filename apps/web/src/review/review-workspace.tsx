@@ -199,13 +199,11 @@ export const ReviewWorkspace = ({
   );
 
   const cancelLast = useCallback(() => {
-    setPending((current) => {
-      if (current.length === 0) return current;
-      const last = current[current.length - 1] as PendingDecision;
-      select(last.entry.id);
-      return current.slice(0, -1);
-    });
-  }, [select]);
+    const last = pending[pending.length - 1];
+    if (last === undefined) return;
+    setPending((current) => current.filter((decision) => decision.entry.id !== last.entry.id));
+    select(last.entry.id);
+  }, [pending, select]);
 
   useEffect(() => {
     if (selectedId === null && entries.length > 0) select(entries[0]?.id ?? null);

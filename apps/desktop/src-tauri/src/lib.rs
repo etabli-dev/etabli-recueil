@@ -97,21 +97,20 @@ impl Shell {
         self.lock().server_url.clone()
     }
 
-    /// The token for the current server and where it came from. May block on the credential store.
-    fn token(&self) -> TokenLookup {
-        let server_url = {
+    /// The token for one server snapshot. May block on the credential store.
+    fn token_for(&self, server_url: &str) -> TokenLookup {
+        {
             let inner = self.lock();
-            if let Some(token) = inner.session_tokens.get(&inner.server_url) {
+            if let Some(token) = inner.session_tokens.get(server_url) {
                 return TokenLookup { token: Some(token.clone()), source: "session", problem: None };
             }
             if let Some((cached_for, lookup)) = &inner.token_cache {
-                if *cached_for == inner.server_url {
+                if cached_for == server_url {
                     return lookup.clone();
                 }
             }
-            inner.server_url.clone()
-        };
-        let lookup = match credentials::read(&self.service, &server_url) {
+        }
+        let lookup = match credentials::read(&self.service, server_url) {
             Ok(Some(token)) => TokenLookup { token: Some(token), source: "stored", problem: None },
             Ok(None) => TokenLookup { token: None, source: "none", problem: None },
             Err(problem) => {
@@ -119,26 +118,51 @@ impl Shell {
                 TokenLookup { token: None, source: "none", problem: Some(problem.to_string()) }
             }
         };
-        self.lock().token_cache = Some((server_url, lookup.clone()));
+        self.lock().token_cache = Some((server_url.to_owned(), lookup.clone()));
         lookup
     }
 
     fn state(&self) -> ShellState {
-        let lookup = self.token();
-        let inner = self.lock();
+        let (server_url, saved, settings_problem) = {
+            let inner = self.lock();
+            (inner.server_url.clone(), inner.saved, inner.settings_problem.clone())
+        };
+        let lookup = self.token_for(&server_url);
         ShellState {
-            server_url: inner.server_url.clone(),
+            server_url,
             default_server_url: DEFAULT_SERVER_URL,
-            saved: inner.saved,
-            settings_problem: inner.settings_problem.clone(),
+            saved,
+            settings_problem,
             token: lookup.source,
             credential_store_problem: lookup.problem,
         }
     }
 
     fn connection(&self) -> Connection {
-        let lookup = self.token();
-        Connection { base_url: self.server_url(), token: lookup.token }
+        // Credential lookup can block while another command changes the server. Keep the
+        // address and its token paired with the same snapshot throughout that lookup.
+        let server_url = self.server_url();
+        self.connection_for(server_url)
+    }
+
+    fn connection_for(&self, server_url: String) -> Connection {
+        let lookup = self.token_for(&server_url);
+        Connection { base_url: server_url, token: lookup.token }
+    }
+
+    fn forget_token_with(
+        &self,
+        server_url: &str,
+        forget: impl FnOnce() -> Result<(), credentials::StoreError>,
+    ) -> Result<(), String> {
+        {
+            let mut inner = self.lock();
+            inner.session_tokens.remove(server_url);
+            inner.token_cache = None;
+        }
+        forget().map_err(|problem| format!(
+            "The saved token could not be removed: {problem}. Check the system credential store and try again."
+        ))
     }
 
     fn save(&self, server_url: &str, token: Option<&str>, forget_token: bool) -> Result<ShellState, String> {
@@ -161,12 +185,7 @@ impl Shell {
         }
 
         if forget_token {
-            let mut inner = self.lock();
-            inner.session_tokens.remove(&server_url);
-            inner.token_cache = None;
-            drop(inner);
-            // An unavailable store holds nothing to forget.
-            let _ = credentials::forget(&self.service, &server_url);
+            self.forget_token_with(&server_url, || credentials::forget(&self.service, &server_url))?;
         }
         if let Some(token) = token {
             let written = credentials::write(&self.service, &server_url, token);
@@ -337,4 +356,58 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("the Recueil desktop shell failed to start");
+}
+
+#[cfg(test)]
+mod shell_tests {
+    use super::*;
+
+    #[test]
+    fn a_failed_credential_deletion_is_reported_and_session_copies_are_cleared() {
+        let server = "https://library.example.org".to_owned();
+        let shell = Shell {
+            service: "test-unused-credential-store".into(),
+            settings_path: PathBuf::new(),
+            inner: Arc::new(Mutex::new(Inner {
+                server_url: server.clone(), saved: true, settings_problem: None,
+                session_tokens: HashMap::from([(server.clone(), "session-token".into())]),
+                token_cache: Some((server.clone(), TokenLookup {
+                    token: Some("cached-token".into()), source: "stored", problem: None,
+                })),
+            })),
+        };
+        let result = shell.forget_token_with(&server, || {
+            Err(credentials::StoreError::Unavailable("test store is locked".into()))
+        });
+        assert!(result.unwrap_err().contains("saved token could not be removed"));
+        let inner = shell.lock();
+        assert!(!inner.session_tokens.contains_key(&server));
+        assert!(inner.token_cache.is_none());
+    }
+
+    #[test]
+    fn switching_servers_during_lookup_keeps_the_original_address_and_token_paired() {
+        let original = "https://first.example.org".to_owned();
+        let replacement = "https://second.example.org".to_owned();
+        let shell = Shell {
+            service: "test-unused-credential-store".into(),
+            settings_path: PathBuf::new(),
+            inner: Arc::new(Mutex::new(Inner {
+                server_url: original.clone(), saved: false, settings_problem: None,
+                session_tokens: HashMap::from([
+                    (original.clone(), "first-token".into()),
+                    (replacement.clone(), "second-token".into()),
+                ]),
+                token_cache: None,
+            })),
+        };
+        let snapshot = shell.server_url();
+        shell.lock().server_url = replacement.clone();
+        let pending = shell.connection_for(snapshot);
+        assert_eq!(pending.base_url, original);
+        assert_eq!(pending.token.as_deref(), Some("first-token"));
+        let next = shell.connection();
+        assert_eq!(next.base_url, replacement);
+        assert_eq!(next.token.as_deref(), Some("second-token"));
+    }
 }

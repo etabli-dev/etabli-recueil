@@ -2,6 +2,7 @@ import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import type { Readable } from 'node:stream';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { afterEach } from 'vitest';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -11,11 +12,15 @@ export const PACKAGE_ROOT = join(here, '..');
  * The tests drive the real entry point in a real child process.
  *
  * Calling `main()` in-process would be faster, but exit codes and signal handling are most of what
- * is being asserted here, and neither is observable without a process boundary. The source is run
+ * is being asserted here, and neither is observable without a process boundary. By default the source is run
  * through tsx so the suite does not depend on a prior build; `pnpm build` is verified separately by
  * CI running the build script.
  */
-export const CLI_ENTRY = join(PACKAGE_ROOT, 'src', 'index.ts');
+// Opt in after `pnpm build` to exercise the production entry point without the tsx loader.
+const compiled = process.env.RECUEIL_TEST_COMPILED === '1';
+export const CLI_ENTRY = compiled
+  ? join(PACKAGE_ROOT, 'dist', 'index.js')
+  : join(PACKAGE_ROOT, 'src', 'index.ts');
 
 const baseEnv = (extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv => ({
   ...process.env,
@@ -35,12 +40,32 @@ const baseEnv = (extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv => ({
 /** stdin is closed: nothing the CLI does in these tests reads from it. */
 export type CliProcess = ChildProcessByStdio<null, Readable, Readable>;
 
-export const spawnCli = (args: readonly string[], env: NodeJS.ProcessEnv = {}): CliProcess =>
-  spawn(process.execPath, ['--import', 'tsx', CLI_ENTRY, ...args], {
+const children = new Set<CliProcess>();
+
+export const spawnCli = (args: readonly string[], env: NodeJS.ProcessEnv = {}): CliProcess => {
+  const child = spawn(process.execPath, [...(compiled ? [] : ['--import', 'tsx']), CLI_ENTRY, ...args], {
     env: baseEnv(env),
     cwd: PACKAGE_ROOT,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+  children.add(child);
+  child.once('close', () => children.delete(child));
+  return child;
+};
+
+/** Reap only children this helper created, including those left by a timed-out test. */
+export const stopCliProcesses = async (): Promise<void> => {
+  while (children.size > 0) {
+    await Promise.all([...children].map((child) => new Promise<void>((resolve) => {
+      child.once('close', () => resolve());
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+    })));
+  }
+};
+
+// Run before fixture teardown (the CLI suite config uses registration-order hooks),
+// so a failed test cannot keep writing a library that the next hook removes.
+afterEach(stopCliProcesses);
 
 export interface RunResult {
   code: number | null;

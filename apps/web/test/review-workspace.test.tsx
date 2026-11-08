@@ -8,7 +8,7 @@
  * offering an undo that cannot work.
  */
 import { useState } from 'react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
@@ -177,6 +177,7 @@ describe('the review queue workspace', () => {
   });
 
   it('undoes a staged decision by never sending it', async () => {
+    const errors = vi.spyOn(console, 'error');
     const user = userEvent.setup();
     const { server } = render(defaultRoutes({ [`POST ${QUEUE}/:id/accept`]: () => acceptResult() }));
 
@@ -188,6 +189,7 @@ describe('the review queue workspace', () => {
 
     expect(server.requestsTo('POST', `${QUEUE}/${REVIEW_ENTRY_ID}/accept`)).toHaveLength(0);
     expect(screen.queryByTestId('pending-banner')).not.toBeInTheDocument();
+    expect(errors.mock.calls.some((args) => String(args[0]).includes('Cannot update a component'))).toBe(false);
     // The entry is back in the queue and selected again.
     await waitFor(() => {
       expect(screen.getByTestId('review-detail')).toHaveAttribute('data-entry', REVIEW_ENTRY_ID);

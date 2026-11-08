@@ -4,7 +4,7 @@ title: "Current implementation and first use"
 
 Self-hosted document/reference library with implemented Phase 1/2 API, CLI, web client, imports and ingestion review. Later evidence-verification, bibliometric and systematic-review features remain roadmap work. Source checkout only; no published image or binary is claimed.
 
-This page describes the October 2026 source revision. These source changes are not part of older development release downloads. Local checks are distinct from device, live-service and store acceptance.
+This page describes the source revision through the November 2026 audit. These source changes are not part of older development release downloads. Local checks are distinct from device, live-service and store acceptance.
 
 ## Build from a clean checkout
 
@@ -19,6 +19,10 @@ pnpm --filter @recueil/web dev --host 127.0.0.1
 ```
 
 These commands build and run the local service from this source tree. For the locally checked Linux ARM64 CLI/API container, follow the [deployment guide](https://github.com/etabli-dev/etabli-recueil/blob/main/deploy/README.md). The November 2 synthetic container check passed startup, token enforcement, persistence, backup/restore and actual Compose host-loopback health; published images, public deployment and representative real-library acceptance remain separate gates.
+
+## November Apple and credential audit
+
+The [Apple audit](apple-audit-2026-11-08.md) records the locally built arm64 DMG, 14 Rust tests, credential isolation/deletion fixes, keyboard-undo correction and CLI process-cleanup checks. It distinguishes clean checks, resource-related timeout repeats, unresolved development-tool advisories and remaining signing/live-library acceptance. The [baseline desktop workflow](https://github.com/etabli-dev/etabli-recueil/actions/runs/42527324842) passed Linux, Windows and macOS packaging before these refinements; the new source requires its own CI result.
 
 ## Use and verification
 

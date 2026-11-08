@@ -9,6 +9,7 @@ export default defineConfig({
     // writes a SQLite file in a temp directory. Serialised so that a failure names one file rather
     // than an interleaving of four.
     fileParallelism: false,
+    sequence: { hooks: 'list' },
     testTimeout: 30_000,
     hookTimeout: 30_000,
   },
