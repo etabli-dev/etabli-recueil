@@ -44,6 +44,8 @@ This page is an index; the files are authoritative.
 | **0020** | [Systematic-review automation disclosure](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0020-systematic-review-automation-disclosure.md) | Automation disclosure is a per-review setting, off by default, exported with the audit trail when on. | Accepted | Phase 0 (governs Phase 7) |
 | **0021** | [A verification check queries both sides](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0021-a-verification-check-queries-both-sides.md) | Each side of a check comes from an independent source, never from the producing code's own narration, and every blocking check ships with a test that makes it fail. | Accepted | Phase 0 (governs every phase) |
 | **0022** | [Resource budgets on untrusted input](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0022-resource-budgets-on-untrusted-input.md) | Every path that decompresses, parses or pattern-matches attacker-influenced input runs under an explicit budget enforced by the call. Declared sizes inform, never bound. | Accepted | Phase 0 (governs every phase) |
+| **0023** | [The desktop shell connects to a server before it bundles one](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0023-desktop-shell-connects-before-it-bundles.md) | Phase A: the web client in a Tauri window against a configured server — HTTPS or loopback only, token in the OS credential store, four commands and nothing from Tauri's core. Phase B: the sidecar of ADR-0001. | Proposed | Phase 2 (governs Phase 4) |
+| **0024** | [Capacitor for the mobile shell](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0024-capacitor-for-the-mobile-shell.md) | Recommends Capacitor over Tauri 2 mobile for iOS and Android, because the capture use cases have maintained plugins there; superseding ADR-0007 for mobile only once accepted. | Proposed | Phase 2 (governs Phase 8) |
 
 :::
 
@@ -52,11 +54,13 @@ ADRs 0001–0012 are the technology decisions catalogued in
 0013–0020 resolve the open-decision backlog in §10 — the questions the concept document deliberately
 left open until they blocked something. ADRs 0021 and 0022 came out of the August 2026 hardening
 round: each records a fault three independent reviewers found in three separate places, which makes
-it a design rule rather than a set of bugs.
+it a design rule rather than a set of bugs. ADRs 0023 and 0024, both still proposed, settle how the
+desktop and mobile shells reach the server; the [platform roadmap](platform-roadmap.md) carries the
+plan they belong to.
 
 ## Reading them in groups
 
-Twenty-two records is more than anyone wants to read in order. These are the useful clusters.
+Twenty-four records is more than anyone wants to read in order. These are the useful clusters.
 
 **What the thing is.** [0001](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0001-server-first-architecture.md)
 server-first, [0019](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0019-name-recueil.md)
@@ -74,6 +78,11 @@ citation keys.
 **How data gets out.** [0008](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0008-parquet-and-duckdb-analytics-layer.md)
 the analytics layer, [0013](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0013-curation-canvas-in-app-ggraph-for-publication-figures.md)
 publication figures.
+
+**How the clients reach the server.** [0007](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0007-tauri-2-for-desktop-and-mobile-shells.md)
+the shell technology, [0023](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0023-desktop-shell-connects-before-it-bundles.md)
+the desktop shell in two phases, [0024](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0024-capacitor-for-the-mobile-shell.md)
+the proposed mobile shell.
 
 **How it is extended.** [0012](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0012-in-process-trusted-plugin-host-in-v1.md)
 and [0018](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0018-sandboxing-tier-in-process-until-multi-user.md)
