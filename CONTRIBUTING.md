@@ -81,9 +81,10 @@ See the [README first-use instructions](README.md#first-use-from-source).
 There is no root `pnpm dev` or formatter command. To develop one package,
 use its own script, for example `pnpm --filter @recueil/server dev`.
 
-Phases 1 and 2 are implemented. Desktop/mobile shells, the plugin host/SDK,
-generated client and Phase 3 onward remain planned; their directories are
-placeholders. Current validation and external acceptance gates are recorded in
+Phases 1 and 2 are implemented, and `apps/desktop` holds the desktop shell as a
+client of a running server (see its README). The mobile shell, the plugin
+host/SDK, generated client and Phase 3 onward remain planned; their directories
+are placeholders. Current validation and external acceptance gates are recorded in
 [`spec/refinement-2026-10.md`](spec/refinement-2026-10.md).
 
 ## Where the specification lives

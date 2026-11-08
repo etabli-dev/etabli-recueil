@@ -20,9 +20,10 @@ and Paperless-ngx migrators, the ingestion pipeline and the three storage backen
 [the README](https://github.com/etabli-dev/etabli-recueil/blob/main/README.md) for what was measured.
 
 Everything from Phase 3 onwards — enrichment, the checks engine, deduplication, the graph, the
-systematic-review module, the desktop and mobile shells, the MCP server — is still a **contract to
-be implemented**. Each page marks which roadmap phase brings its subject into existence, and a
-command belonging to a later phase says so and exits non-zero rather than half-working.
+systematic-review module, the desktop shell's built-in server, the mobile shell, the MCP server — is
+still a **contract to be implemented**. Each page marks which roadmap phase brings its subject into
+existence, and a command belonging to a later phase says so and exits non-zero rather than
+half-working.
 
 Neither **M1** (Zotero replaced) nor **M2** (Paperless replaced) is claimed: both ask for the
 author's real library and real hardware, and both have so far only been proved against the fixture

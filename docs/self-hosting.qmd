@@ -55,9 +55,23 @@ Start with none of them. Add one when you have a reason you can name.
 
 ### Desktop
 
-The Tauri 2 shell bundles the same server binary as a sidecar on `localhost` (Phase 4). Same code,
-same database file, no container. It adds watched folders, a tray icon, the `recueil://item/<id>`
-URI scheme for deep links out of Overleaf or Quarto, and open-in-external-app.
+The Tauri 2 shell in `apps/desktop` is, for now, a client of a server you run — phase A of the
+[platform roadmap](platform-roadmap.md). It opens the web client against a configured address,
+`http://127.0.0.1:3000` until told otherwise. Its window has an origin of its own, so the server has
+to allow it:
+
+```sh
+RECUEIL_CORS_ORIGIN=tauri://localhost,http://tauri.localhost
+```
+
+`tauri://localhost` is the origin on Linux and macOS, `http://tauri.localhost` on Windows; add them to
+any origins already listed. Plain `http://` is accepted for loopback addresses only, so any other
+server needs HTTPS, and a token, when the server requires one, is kept in the operating system's
+credential store rather than a file.
+
+In Phase 4 the shell bundles the same server binary as a sidecar on `localhost` (phase B). Same
+code, same database file, no container. It adds watched folders, a tray icon, the
+`recueil://item/<id>` URI scheme for deep links out of Overleaf or Quarto, and open-in-external-app.
 
 ### From source
 
@@ -81,7 +95,7 @@ offender, rather than falling back to a default.
 | `RECUEIL_HOST` | `127.0.0.1` | Bind address. The container image sets `0.0.0.0` |
 | `RECUEIL_BASE_URL` | — | Public URL behind a reverse proxy; also the `servers` entry of the served OpenAPI document |
 | `RECUEIL_LOG_LEVEL` | `info` | `trace` … `fatal`, or `silent`; output is structured JSON |
-| `RECUEIL_CORS_ORIGIN` | — | Comma-separated origins, or `*`. Unset means no cross-origin browser access |
+| `RECUEIL_CORS_ORIGIN` | — | Comma-separated origins, or `*`. Unset means no cross-origin browser access. The desktop application needs `tauri://localhost,http://tauri.localhost` |
 | `RECUEIL_TRUST_PROXY` | `false` | Trust `X-Forwarded-*`. Only behind a proxy you control |
 | `RECUEIL_REQUIRE_AUTH` | `false` | Refuse an unauthenticated `/api/v1` call. **Turn it on for anything reachable beyond loopback** |
 | `RECUEIL_MAX_UPLOAD_BYTES` | `536870912` | Ceiling on one uploaded file, enforced during the streaming hash |

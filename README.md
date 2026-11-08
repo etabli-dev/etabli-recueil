@@ -13,7 +13,14 @@ mapping are native workflows, not exports.
 
 **Status:** Phases 1 and 2 in the tree, unreleased. It builds and runs from a
 source checkout; there is no tagged release, no image on `ghcr.io` and no
-installable binary.
+published installable binary.
+
+**Platforms:** the server runs wherever Node 22 or Docker runs. A desktop
+application for Linux, Windows and macOS (`apps/desktop`, Tauri 2) is in the
+tree as a client of a running server: its Linux `.deb` and AppImage have been
+built and launched here, while the Windows and macOS packages are built only
+in CI, which has not run yet, and nothing is signed. iOS and Android are
+planned for Phase 8. See the [platform roadmap](docs/platform-roadmap.md).
 
 ## First use from source
 
@@ -163,7 +170,8 @@ nothing else yet.
 | `apps/server` | the Fastify server and the REST contract |
 | `apps/cli` | the `recueil` command line |
 | `apps/web` | the web client |
-| `apps/desktop`, `apps/mobile`, `apps/connector`, `apps/mcp` | placeholder |
+| `apps/desktop` | the Tauri 2 desktop shell: the web client against a configured server ([platform roadmap](docs/platform-roadmap.md), phase A) |
+| `apps/mobile`, `apps/connector`, `apps/mcp` | placeholder |
 | `packages/schemas` | the Zod contract and the OpenAPI components |
 | `packages/core` | data model, migrations, content-addressed store, services |
 | `packages/formats` | BibTeX, BibLaTeX, RIS, CSL-JSON and citation keys |

@@ -3,6 +3,7 @@ project:
   output-dir: _site
   render:
     - "*.qmd"
+    - "platform-roadmap.md"
 
 lang: en-GB
 
@@ -49,6 +50,8 @@ website:
         menu:
           - text: "Roadmap"
             href: roadmap.qmd
+          - text: "Platform roadmap"
+            href: platform-roadmap.md
           - text: "Decision records"
             href: adr.qmd
           - text: "Contributing"
@@ -80,6 +83,7 @@ website:
       - section: "Project"
         contents:
           - roadmap.qmd
+          - platform-roadmap.md
           - adr.qmd
           - contributing.qmd
 

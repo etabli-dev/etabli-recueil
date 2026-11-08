@@ -25,12 +25,13 @@ client, the Zotero and Paperless-ngx migrators, the ingestion pipeline and the s
 | `recueil import paperless` with a verification report | Enrichment, the checks engine, dedup (Phase 3) |
 | `recueil ingest`, `recueil ingest watch` — the ten stages of CONCEPT.md §5.3 | OCR and GROBID *proved*: both adapters exist, neither has been run against the real sidecar here |
 | Folder, WebDAV and IMAP sources; the YAML rule engine; the review queue | Per-page OCR — the decision is per document, so a scanned page inside a text PDF is missed |
-| Local filesystem, WebDAV and S3 stores, all passing one conformance suite | The desktop shell, the mobile app, the MCP server |
+| Local filesystem, WebDAV and S3 stores, all passing one conformance suite | The desktop shell's built-in server, the mobile app, the MCP server |
 | `recueil export bibtex \| biblatex \| csl-json \| ris` | translation-server integration for URL/DOI/PMID/ISBN import |
 | `recueil backup` / `recueil restore` | Everything from Phase 3 on |
 | `.bib` feeds for Overleaf and Quarto | |
 | Web client: three-pane library, item pane, PDF reader, sources, review queue, rules editor | Annotation and saved-search UI |
 | The Zotero connector endpoints answer, and are tested against verbatim upstream connector code | A capture run end to end in a browser with the extension installed |
+| The desktop shell as a client of a running server: Linux `.deb` and AppImage built and launched ([platform roadmap](platform-roadmap.md)) | Windows and macOS packages run in CI only, which has not run yet; nothing is signed |
 
 ## Build it
 

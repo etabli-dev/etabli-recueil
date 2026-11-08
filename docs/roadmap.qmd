@@ -16,6 +16,10 @@ Phases 1 to 3 are the critical path, because they are what retires the stack cur
 — Zotero with three self-written plugins, Paperless-ngx, and a pile of R scripts holding them
 together.
 
+Which platforms the clients run on — Ubuntu and Debian, Windows, macOS, iOS and Android — how each is
+built, signed and distributed, and in which of the phases below each step lands is in the
+[platform roadmap](platform-roadmap.md).
+
 ## Phases
 
 | Phase | Theme | Effort | Milestone |
@@ -104,6 +108,11 @@ FTS5 and Meilisearch; saved searches as smart collections. The GROBID sidecar, f
 Tauri desktop v1 with watched folders, a tray, the URI scheme and open-in-external-app — including a
 PDF.js performance test on WebKitGTK, which is the known risk on Linux.
 
+**Already in the tree, ahead of this phase:** the shell's first half — the web client in a Tauri 2
+window for Linux, Windows and macOS, connected to a server that runs elsewhere (phase A of the
+[platform roadmap](platform-roadmap.md), [ADR-0023](adr.qmd), proposed). Phase 4 adds phase B, the
+server bundled as a sidecar, and the items above.
+
 **Exit:** annotate, note and cite works entirely inside the application, in the browser and in the
 desktop shell.
 
@@ -138,7 +147,9 @@ data loading in R without manual reshaping.
 ## Phase 8 — Mobile and own connector
 
 Tauri mobile, with Capacitor as the fallback: camera scan, barcode lookup, share sheet, cached
-reading and queued writes. Recueil's own WebExtension superseding the Zotero Connector, published to
+reading and queued writes. The [platform roadmap](platform-roadmap.md) weighs the two against those
+capture use cases and recommends Capacitor ([ADR-0024](adr.qmd), proposed); until it is accepted,
+this paragraph is the plan. Recueil's own WebExtension superseding the Zotero Connector, published to
 the Chrome Web Store, AMO and Safari.
 
 **Exit:** phone capture to library in under thirty seconds; the extension listed in the Chrome Web

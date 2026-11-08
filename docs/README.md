@@ -27,6 +27,7 @@ quarto render docs      # build into docs/_site
 | `cli.qmd` | The `recueil` command surface |
 | `plugins.qmd` | Extension surfaces, manifest, hook catalogue, SDK |
 | `roadmap.qmd` | Summary of CONCEPT.md §7 |
+| `platform-roadmap.md` | Ubuntu and Debian, Windows, macOS, iOS and Android: current state, per-platform execution, milestones. Plain Markdown so that it reads the same on GitHub; listed in `render` in `_quarto.yml` |
 | `adr.qmd` | Index of the decision records in `spec/adr/` |
 | `contributing.qmd` | Summary of CONTRIBUTING.md |
 
