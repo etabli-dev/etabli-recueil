@@ -5,9 +5,9 @@
   "identifier": "com.raban.etabli.recueil",
   "build": {
     "frontendDist": "../dist",
-    "beforeBuildCommand": "pnpm --filter \"@recueil/desktop...\" run build",
+    "beforeBuildCommand": "pnpm --filter @recueil/desktop... run build",
     "beforeDevCommand": {
-      "script": "pnpm --filter \"@recueil/desktop...\" run build",
+      "script": "pnpm --filter @recueil/desktop... run build",
       "wait": true
     }
   },
