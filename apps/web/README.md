@@ -69,6 +69,15 @@ Errors are RFC 9457 problem documents. Everything that can fail — a 4xx, a pro
 dropped connection — becomes an `ApiError` carrying a `ProblemDetails`, so the error state has one
 shape to render and always shows the `detail`, the stable `type` URI and the `traceId`.
 
+### Inside a host shell
+
+The desktop application (`apps/desktop`) serves this bundle from an origin of its own, so relative
+paths would reach the shell rather than the server. A shell like that defines
+`globalThis.recueilHost` before the entry module runs, and `src/main.tsx` builds the client from its
+one answer — `connection()`, a base URL and an optional bearer token (`src/host.ts`). In a browser
+there is no host, the base URL stays empty and nothing changes. Inside a host the service worker is
+not registered: there is no install prompt or share sheet for it to serve.
+
 ### The item pane is a registry
 
 CONCEPT.md §5.13 lists item-pane sections as the first UI extension surface. The six core sections —
