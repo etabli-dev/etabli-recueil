@@ -63,6 +63,8 @@ struct Shell {
     inner: Arc<Mutex<Inner>>,
     /// Serialize credential-store IO and cache changes; always acquire before `inner`.
     credential_ops: Arc<Mutex<()>>,
+    /// Serialize the settings file and selected-server update. Lock order: save, credential, inner.
+    save_ops: Arc<Mutex<()>>,
 }
 
 /// What the connection page shows. Never carries the token itself.
@@ -200,6 +202,16 @@ impl Shell {
     }
 
     fn save(&self, server_url: &str, token: Option<&str>, forget_token: bool) -> Result<ShellState, String> {
+        self.save_with_settings(server_url, token, forget_token, settings::save)
+    }
+
+    fn save_with_settings(
+        &self,
+        server_url: &str,
+        token: Option<&str>,
+        forget_token: bool,
+        persist: impl FnOnce(&std::path::Path, &settings::Settings) -> std::io::Result<()>,
+    ) -> Result<ShellState, String> {
         let server_url = normalise_server_url(server_url).map_err(|problem| problem.to_string())?;
         let token = token.map(str::trim).filter(|token| !token.is_empty());
         if let Some(token) = token {
@@ -208,7 +220,9 @@ impl Shell {
             }
         }
 
-        settings::save(&self.settings_path, &settings::Settings { server_url: server_url.clone() }).map_err(
+        // Keep persisted settings and the in-memory server in one ordered save operation.
+        let _save = self.save_ops.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        persist(&self.settings_path, &settings::Settings { server_url: server_url.clone() }).map_err(
             |error| format!("The settings could not be saved to {}: {error}", self.settings_path.display()),
         )?;
         {
@@ -357,6 +371,7 @@ pub fn run() {
                 service: app.config().identifier.clone(),
                 settings_path,
                 credential_ops: Arc::new(Mutex::new(())),
+                save_ops: Arc::new(Mutex::new(())),
                 inner: Arc::new(Mutex::new(Inner {
                     server_url,
                     saved,
@@ -390,11 +405,64 @@ mod shell_tests {
             service: "test-unused-credential-store".into(),
             settings_path: PathBuf::new(),
             credential_ops: Arc::new(Mutex::new(())),
+            save_ops: Arc::new(Mutex::new(())),
             inner: Arc::new(Mutex::new(Inner {
                 server_url: "https://library.example.org".into(), saved: true,
                 settings_problem: None, session_tokens: HashMap::new(), token_cache: None,
             })),
         }
+    }
+
+    #[test]
+    fn concurrent_saves_keep_the_real_settings_file_and_selected_server_in_order() {
+        use std::sync::mpsc;
+        use std::time::{Duration, SystemTime, UNIX_EPOCH};
+        struct TemporaryDirectory(PathBuf);
+        impl Drop for TemporaryDirectory {
+            fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); }
+        }
+        let temporary = TemporaryDirectory(std::env::temp_dir().join(format!(
+            "recueil-concurrent-save-{}-{}", std::process::id(),
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos(),
+        )));
+        let mut shell = empty_shell();
+        shell.settings_path = temporary.0.join("settings.json");
+        let first = "https://first.example.org";
+        let second = "https://second.example.org";
+        // Status responses use these synthetic session tokens, never the OS store.
+        {
+            let mut inner = shell.lock();
+            inner.session_tokens.insert(first.into(), "first-token".into());
+            inner.session_tokens.insert(second.into(), "second-token".into());
+        }
+        let (persisted_tx, persisted_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let first_shell = shell.clone();
+        let first_save = std::thread::spawn(move || first_shell.save_with_settings(first, None, false, |path, value| {
+            settings::save(path, value)?;
+            persisted_tx.send(()).unwrap();
+            release_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            Ok(())
+        }));
+        persisted_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        // A second save cannot enter the persistence/state gap of the first one.
+        assert!(shell.save_ops.try_lock().is_err());
+        let (started_tx, started_rx) = mpsc::channel();
+        let second_shell = shell.clone();
+        let second_save = std::thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            second_shell.save(second, None, false)
+        });
+        started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        release_tx.send(()).unwrap();
+        assert_eq!(first_save.join().unwrap().unwrap().server_url, first);
+        assert_eq!(second_save.join().unwrap().unwrap().server_url, second);
+        assert_eq!(shell.server_url(), second);
+        match settings::load(&shell.settings_path) {
+            settings::Loaded::Present(saved) => assert_eq!(saved.server_url, second),
+            other => panic!("Expected final saved settings, got {other:?}"),
+        }
+        assert_eq!(std::fs::read_dir(&temporary.0).unwrap().count(), 1);
     }
 
     fn slow_lookup_then_mutate(save: bool) {
@@ -453,6 +521,7 @@ mod shell_tests {
             service: "test-unused-credential-store".into(),
             settings_path: PathBuf::new(),
             credential_ops: Arc::new(Mutex::new(())),
+            save_ops: Arc::new(Mutex::new(())),
             inner: Arc::new(Mutex::new(Inner {
                 server_url: server.clone(), saved: true, settings_problem: None,
                 session_tokens: HashMap::from([(server.clone(), "session-token".into())]),
@@ -478,6 +547,7 @@ mod shell_tests {
             service: "test-unused-credential-store".into(),
             settings_path: PathBuf::new(),
             credential_ops: Arc::new(Mutex::new(())),
+            save_ops: Arc::new(Mutex::new(())),
             inner: Arc::new(Mutex::new(Inner {
                 server_url: original.clone(), saved: false, settings_problem: None,
                 session_tokens: HashMap::from([

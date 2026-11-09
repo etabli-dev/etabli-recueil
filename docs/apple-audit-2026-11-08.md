@@ -11,6 +11,15 @@ inside that operation lock, and status lookup starts after write guards are
 released. Two injected slow-read regressions cover concurrent save and forget;
 they never call the real Keychain.
 
+Settings saves also serialize the real file replacement and selected-server
+update, with lock order save → credential operation → state. The temporary file
+uses exclusive creation with a PID/counter suffix, so concurrent saves and
+separate app instances cannot truncate the same temporary file. The writer
+closes it before atomic replacement and removes only its own temporary file on
+error. A controlled real-file save overlap, 64 concurrent direct writes, and a
+failed-replacement cleanup regression passed without accessing a live account or
+credential store. The only production settings writer is the shell save path.
+
 ## Review queue
 
 Undo now changes the selected review entry outside React's state updater. The former updater notified its parent while React was rendering, producing a cross-component update warning. The existing keyboard-undo regression also checks that this warning is absent.
@@ -21,11 +30,11 @@ CLI tests can opt into the final production build with `RECUEIL_TEST_COMPILED=1 
 
 ## Verification
 
-Frozen dependency installation, final-source ESLint, full workspace typechecking and production builds, specification validation, and the 10 desktop TypeScript tests passed locally on macOS. The final keyboard-undo suite passed all 23 tests. The final Rust suite passed 16 tests, including the two additional concurrent credential-cache regressions. Production Tauri DMG packaging passed again after the final credential-operation mutex change; the final disk image passed `hdiutil verify`.
+Frozen dependency installation, final-source ESLint, full workspace typechecking and production builds, specification validation, and the 10 desktop TypeScript tests passed locally on macOS. The final keyboard-undo suite passed all 23 tests. The final Rust suite passed 19 tests, including credential-cache races, ordered shell saves, concurrent direct settings writes and failed-replacement cleanup. Production Tauri DMG packaging passed again after the final settings and credential concurrency changes; the final disk image passed `hdiutil verify`.
 
 The serial workspace round passed 2,355 non-CLI tests. The source CLI round had two 30-second timeouts on the heavily loaded local host. After adding child cleanup, the production-CLI round passed 156 of 157 tests; its one remaining dry-run timeout passed an isolated repeat in 2.3 seconds. Both source and compiled cleanup regressions passed. These are results across scoped repeats, not a claim that the initial complete run was green. Default test budgets were not increased.
 
-Final artifact: `apps/desktop/src-tauri/target/release/bundle/dmg/Recueil_0.1.0_aarch64.dmg` (2,241,593 bytes, arm64). SHA-256: `27fd9c896f1d97d418f19b1ab5d92f320dd907618be5058b8eb9df2292aa69be`. This is the final rebuild after the credential-operation mutex refinement.
+Final artifact: `apps/desktop/src-tauri/target/release/bundle/dmg/Recueil_0.1.0_aarch64.dmg` (2,241,545 bytes, arm64). SHA-256: `7d1050087dd670b51a957ab7b8b59f994cf37b44a287b3f3f95688acbe1e04bb`. This is the final rebuild after the settings and credential concurrency refinements.
 
 The pre-refinement source already has a successful [desktop package workflow](https://github.com/etabli-dev/etabli-recueil/actions/runs/42527324842) and [full CI workflow](https://github.com/etabli-dev/etabli-recueil/actions/runs/42527324818). Those runs precede this credential fix and do not validate it.
 

@@ -9,6 +9,7 @@
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
 
@@ -60,6 +61,7 @@ pub fn load(path: &Path) -> Loaded {
 
 /// Write the settings atomically: a sibling temporary file, flushed, then renamed over the old one,
 /// so that a crash mid-write leaves either the old file or the new one and never half of each.
+/// Exclusive temporary creation avoids collisions between saves or separate app instances.
 pub fn save(path: &Path, settings: &Settings) -> std::io::Result<()> {
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir)?;
@@ -67,13 +69,27 @@ pub fn save(path: &Path, settings: &Settings) -> std::io::Result<()> {
     let mut body = serde_json::to_vec_pretty(settings).map_err(std::io::Error::other)?;
     body.push(b'\n');
 
-    let temporary = path.with_extension("json.tmp");
-    {
-        let mut file = fs::File::create(&temporary)?;
-        file.write_all(&body)?;
-        file.sync_all()?;
+    static NEXT_TEMPORARY: AtomicU64 = AtomicU64::new(0);
+    let (temporary, mut file) = loop {
+        let mut name = path.file_name().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "Settings path needs a file name")
+        })?.to_os_string();
+        name.push(format!(".tmp-{}-{}", std::process::id(), NEXT_TEMPORARY.fetch_add(1, Ordering::Relaxed)));
+        let temporary = path.with_file_name(name);
+        match fs::OpenOptions::new().write(true).create_new(true).open(&temporary) {
+            Ok(file) => break (temporary, file),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        }
+    };
+    let written = file.write_all(&body).and_then(|_| file.sync_all());
+    // Windows cannot replace an open file; close it before rename or cleanup.
+    drop(file);
+    let result = written.and_then(|_| fs::rename(&temporary, path));
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
     }
-    fs::rename(&temporary, path)
+    result
 }
 
 #[cfg(test)]
@@ -102,7 +118,42 @@ mod tests {
         assert_eq!(load(&path), Loaded::Present(settings));
         let text = fs::read_to_string(&path).unwrap();
         assert_eq!(text, "{\n  \"serverUrl\": \"https://library.example.org\"\n}\n");
-        assert!(!path.with_extension("json.tmp").exists());
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 1, "No temporary files remain");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn concurrent_direct_saves_do_not_share_a_temporary_file() {
+        use std::sync::{Arc, Barrier};
+        let dir = scratch("concurrent");
+        let path = path_in(&dir);
+        let barrier = Arc::new(Barrier::new(8));
+        let writers: Vec<_> = (0..8).map(|index| {
+            let path = path.clone();
+            let barrier = barrier.clone();
+            std::thread::spawn(move || {
+                let settings = Settings { server_url: format!("https://server-{index}.example.org") };
+                barrier.wait();
+                for _ in 0..8 { save(&path, &settings).unwrap(); }
+            })
+        }).collect();
+        for writer in writers { writer.join().unwrap(); }
+        let Loaded::Present(saved) = load(&path) else { panic!("Final settings must be valid JSON") };
+        assert!((0..8).any(|index| saved.server_url == format!("https://server-{index}.example.org")));
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 1, "No temporary files remain");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn failed_replacement_removes_only_its_own_temporary_file() {
+        let dir = scratch("failed-replacement");
+        let path = path_in(&dir);
+        fs::create_dir_all(&path).unwrap();
+        fs::write(path.join("keep.txt"), "original").unwrap();
+        let settings = Settings { server_url: "https://library.example.org".into() };
+        assert!(save(&path, &settings).is_err());
+        assert_eq!(fs::read_to_string(path.join("keep.txt")).unwrap(), "original");
+        assert_eq!(fs::read_dir(&dir).unwrap().count(), 1, "No temporary file remains after error");
         fs::remove_dir_all(dir).unwrap();
     }
 
