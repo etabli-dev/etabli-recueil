@@ -61,6 +61,8 @@ struct Shell {
     service: String,
     settings_path: PathBuf,
     inner: Arc<Mutex<Inner>>,
+    /// Serialize credential-store IO and cache changes; always acquire before `inner`.
+    credential_ops: Arc<Mutex<()>>,
 }
 
 /// What the connection page shows. Never carries the token itself.
@@ -99,6 +101,15 @@ impl Shell {
 
     /// The token for one server snapshot. May block on the credential store.
     fn token_for(&self, server_url: &str) -> TokenLookup {
+        self.token_for_with(server_url, || credentials::read(&self.service, server_url))
+    }
+
+    fn token_for_with(
+        &self,
+        server_url: &str,
+        read: impl FnOnce() -> Result<Option<String>, credentials::StoreError>,
+    ) -> TokenLookup {
+        let _operation = self.credential_ops.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         {
             let inner = self.lock();
             if let Some(token) = inner.session_tokens.get(server_url) {
@@ -110,7 +121,7 @@ impl Shell {
                 }
             }
         }
-        let lookup = match credentials::read(&self.service, server_url) {
+        let lookup = match read() {
             Ok(Some(token)) => TokenLookup { token: Some(token), source: "stored", problem: None },
             Ok(None) => TokenLookup { token: None, source: "none", problem: None },
             Err(problem) => {
@@ -155,6 +166,7 @@ impl Shell {
         server_url: &str,
         forget: impl FnOnce() -> Result<(), credentials::StoreError>,
     ) -> Result<(), String> {
+        let _operation = self.credential_ops.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         {
             let mut inner = self.lock();
             inner.session_tokens.remove(server_url);
@@ -163,6 +175,28 @@ impl Shell {
         forget().map_err(|problem| format!(
             "The saved token could not be removed: {problem}. Check the system credential store and try again."
         ))
+    }
+
+    fn save_token_with(
+        &self,
+        server_url: &str,
+        token: &str,
+        write: impl FnOnce() -> Result<(), credentials::StoreError>,
+    ) {
+        let _operation = self.credential_ops.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let written = write();
+        let mut inner = self.lock();
+        match written {
+            Ok(()) => {
+                inner.session_tokens.remove(server_url);
+                let lookup = TokenLookup { token: Some(token.to_owned()), source: "stored", problem: None };
+                inner.token_cache = Some((server_url.to_owned(), lookup));
+            }
+            Err(problem) => {
+                eprintln!("recueil-desktop: token kept for this session only: {problem}");
+                inner.session_tokens.insert(server_url.to_owned(), token.to_owned());
+            }
+        }
     }
 
     fn save(&self, server_url: &str, token: Option<&str>, forget_token: bool) -> Result<ShellState, String> {
@@ -188,19 +222,7 @@ impl Shell {
             self.forget_token_with(&server_url, || credentials::forget(&self.service, &server_url))?;
         }
         if let Some(token) = token {
-            let written = credentials::write(&self.service, &server_url, token);
-            let mut inner = self.lock();
-            match written {
-                Ok(()) => {
-                    inner.session_tokens.remove(&server_url);
-                    let lookup = TokenLookup { token: Some(token.to_owned()), source: "stored", problem: None };
-                    inner.token_cache = Some((server_url.clone(), lookup));
-                }
-                Err(problem) => {
-                    eprintln!("recueil-desktop: token kept for this session only: {problem}");
-                    inner.session_tokens.insert(server_url.clone(), token.to_owned());
-                }
-            }
+            self.save_token_with(&server_url, token, || credentials::write(&self.service, &server_url, token));
         }
         Ok(self.state())
     }
@@ -334,6 +356,7 @@ pub fn run() {
             let shell = Shell {
                 service: app.config().identifier.clone(),
                 settings_path,
+                credential_ops: Arc::new(Mutex::new(())),
                 inner: Arc::new(Mutex::new(Inner {
                     server_url,
                     saved,
@@ -362,12 +385,74 @@ pub fn run() {
 mod shell_tests {
     use super::*;
 
+    fn empty_shell() -> Shell {
+        Shell {
+            service: "test-unused-credential-store".into(),
+            settings_path: PathBuf::new(),
+            credential_ops: Arc::new(Mutex::new(())),
+            inner: Arc::new(Mutex::new(Inner {
+                server_url: "https://library.example.org".into(), saved: true,
+                settings_problem: None, session_tokens: HashMap::new(), token_cache: None,
+            })),
+        }
+    }
+
+    fn slow_lookup_then_mutate(save: bool) {
+        use std::sync::mpsc;
+        use std::time::Duration;
+        let shell = empty_shell();
+        let server = shell.server_url();
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let reader_shell = shell.clone();
+        let reader_server = server.clone();
+        let reader = std::thread::spawn(move || reader_shell.token_for_with(&reader_server, || {
+            started_tx.send(()).unwrap();
+            release_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            Ok(Some("old-token".into()))
+        }));
+        started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        // The old store read holds the operation lock, not the state lock.
+        assert!(shell.credential_ops.try_lock().is_err());
+        assert!(shell.lock().token_cache.is_none());
+        let writer_shell = shell.clone();
+        let writer_server = server.clone();
+        let writer = std::thread::spawn(move || {
+            if save {
+                writer_shell.save_token_with(&writer_server, "new-token", || Ok(()));
+            } else {
+                writer_shell.forget_token_with(&writer_server, || Ok(())).unwrap();
+            }
+        });
+        release_tx.send(()).unwrap();
+        reader.join().unwrap();
+        writer.join().unwrap();
+        if save {
+            let latest = shell.token_for_with(&server, || panic!("new token must stay cached"));
+            assert_eq!(latest.token.as_deref(), Some("new-token"));
+        } else {
+            assert!(shell.lock().token_cache.is_none());
+            assert!(shell.token_for_with(&server, || Ok(None)).token.is_none());
+        }
+    }
+
+    #[test]
+    fn a_pending_store_read_cannot_repopulate_a_forgotten_token() {
+        slow_lookup_then_mutate(false);
+    }
+
+    #[test]
+    fn a_pending_store_read_cannot_replace_a_newly_saved_token() {
+        slow_lookup_then_mutate(true);
+    }
+
     #[test]
     fn a_failed_credential_deletion_is_reported_and_session_copies_are_cleared() {
         let server = "https://library.example.org".to_owned();
         let shell = Shell {
             service: "test-unused-credential-store".into(),
             settings_path: PathBuf::new(),
+            credential_ops: Arc::new(Mutex::new(())),
             inner: Arc::new(Mutex::new(Inner {
                 server_url: server.clone(), saved: true, settings_problem: None,
                 session_tokens: HashMap::from([(server.clone(), "session-token".into())]),
@@ -392,6 +477,7 @@ mod shell_tests {
         let shell = Shell {
             service: "test-unused-credential-store".into(),
             settings_path: PathBuf::new(),
+            credential_ops: Arc::new(Mutex::new(())),
             inner: Arc::new(Mutex::new(Inner {
                 server_url: original.clone(), saved: false, settings_problem: None,
                 session_tokens: HashMap::from([
