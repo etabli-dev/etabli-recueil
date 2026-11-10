@@ -85,8 +85,12 @@ export const start = async (options: StartOptions = {}): Promise<RunningServer> 
     throw error;
   }
 
+  // Fastify lists a pipe or socket path as a bare string; only a TCP address can be made into a URL.
   const address = app.addresses()[0];
-  const url = address === undefined ? `http://${config.host}:${config.port}` : formatAddress(address);
+  const url =
+    address === undefined || typeof address === 'string'
+      ? `http://${config.host}:${config.port}`
+      : formatAddress(address);
 
   app.log.info(
     {
