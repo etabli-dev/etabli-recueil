@@ -86,7 +86,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends \
             libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libdbus-1-dev file
-      - run: pnpm install --frozen-lockfile
+      # The shell and what it is built from (the web client, rules and schemas), not the whole
+      # workspace. The server side brings native modules the shell never loads, and building them
+      # here is what fails: when better-sqlite3 has no binary to fetch it falls back to node-gyp,
+      # and the node-gyp bundled with pnpm 9 cannot find the Visual Studio on windows-latest.
+      - run: pnpm install --frozen-lockfile --filter "@recueil/desktop..."
       - name: Shell unit tests
         run: pnpm --filter @recueil/desktop test
       - name: Build and package
