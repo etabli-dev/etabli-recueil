@@ -26,7 +26,7 @@
     "@tanstack/react-virtual": "^3.14.26",
     "pdfjs-dist": "^6.5.438",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1",
+    "react-dom": "^19.3.1",
     "yaml": "^2.9.1"
   },
   "devDependencies": {
@@ -37,7 +37,7 @@
     "@testing-library/user-event": "^14.6.8",
     "@types/node": "^22.20.5",
     "@types/react": "^18.3.27",
-    "@types/react-dom": "^18.3.7",
+    "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.3.0",
     "jsdom": "^30.0.1",
     "typescript": "^5.9.3",
