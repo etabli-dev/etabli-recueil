@@ -1,0 +1,131 @@
+/*-- scss:defaults --*/
+// Etabli Docs Theme — DARK. Quarto layers this stylesheet on top of the light
+// one when the navbar dark toggle is active, so every rule here is unconditional
+// (no [data-bs-theme] gate) and simply overrides the light base.
+
+$coder-accent:        #28A745;
+$coder-accent-dark:   #1E7E34;
+$coder-accent-light:  #48C76A;
+
+// Dark palette
+$coder-d-bg:          #121417;
+$coder-d-surface:     #1A1D21;
+$coder-d-surface-alt: #22262B;
+$coder-d-text:        #F2F4F6;
+$coder-d-text-2:      #A6ACB3;
+$coder-d-border:      #33373D;
+
+$coder-sp-md: 16px;
+$coder-radius-md: 10px;
+$coder-radius-lg: 16px;
+
+// Map Coder DARK tokens onto Bootstrap as the base (these win in dark mode)
+$primary:          $coder-accent;
+$body-bg:          $coder-d-bg;
+$body-color:       $coder-d-text;
+$border-color:     $coder-d-border;
+$link-color:       $coder-accent-light;
+$link-hover-color: $coder-accent;
+$code-color:       $coder-accent-light;
+$border-radius:    $coder-radius-md;
+$border-radius-lg: $coder-radius-lg;
+
+$font-family-sans-serif: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+$font-family-monospace:  "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+$headings-font-weight: 600;
+
+// The Cosmo base theme @imports Source Sans Pro from Google Fonts. This theme sets the system
+// font stack above instead, so switch the import off and the site makes no request to Google.
+$web-font-path: false;
+
+/*-- scss:rules --*/
+// Force dark surfaces unconditionally (layered above the light sheet).
+:root {
+  --bs-body-bg: #{$coder-d-bg};
+  --bs-body-color: #{$coder-d-text};
+  --bs-border-color: #{$coder-d-border};
+  --bs-emphasis-color: #{$coder-d-text};
+  --bs-secondary-color: #{$coder-d-text-2};
+}
+
+body {
+  background-color: $coder-d-bg !important;
+  color: $coder-d-text !important;
+}
+
+// Main content + sidebars + toc
+#quarto-content, #quarto-document-content, main.content,
+#quarto-sidebar, .sidebar, #quarto-margin-sidebar, #TOC, nav[role="doc-toc"] {
+  background-color: $coder-d-bg !important;
+  color: $coder-d-text;
+}
+
+.navbar {
+  background-color: $coder-accent-dark !important;
+  border-bottom: 1px solid $coder-accent-dark;
+  .navbar-brand, .nav-link { color: #fff !important; }
+  .nav-link:hover { color: rgba(255,255,255,.82) !important; }
+  .navbar-brand img { height: 40px; }
+}
+
+p, li, td, th, dd, dt, .toc-actions, figcaption { color: $coder-d-text; }
+.text-muted, small, .quarto-categories { color: $coder-d-text-2 !important; }
+
+h1, h2, h3, h4, h5, h6 { color: $coder-d-text !important; }
+h2 { border-bottom-color: $coder-d-border !important; }
+
+code, pre { font-family: $font-family-monospace; }
+pre {
+  background-color: $coder-d-surface-alt !important;
+  border: 1px solid $coder-d-border !important;
+  border-radius: $coder-radius-md;
+  padding: $coder-sp-md;
+}
+:not(pre) > code {
+  background-color: $coder-d-surface-alt !important;
+  color: $coder-accent-light !important;
+  padding: .12em .38em; border-radius: $coder-radius-md;
+}
+
+a { color: $coder-accent-light !important; text-decoration: none; }
+a:hover { text-decoration: underline; }
+.navbar a { color: #fff !important; }
+
+.sidebar, .quarto-sidebar { border-right: 1px solid $coder-d-border !important; }
+.sidebar a, .quarto-sidebar a, #TOC a, nav[role="doc-toc"] a { color: $coder-d-text-2 !important; }
+.sidebar a.active, .quarto-sidebar a.active,
+#TOC a.active, nav[role="doc-toc"] a.active {
+  color: $coder-accent-light !important; font-weight: 600;
+  border-left: 3px solid $coder-accent; padding-left: calc(#{$coder-sp-md} - 3px);
+}
+
+// Tables
+table, .table {
+  --bs-table-bg: transparent;
+  --bs-table-color: #{$coder-d-text};
+  color: $coder-d-text;
+  border-color: $coder-d-border;
+}
+thead, th, td { border-color: $coder-d-border !important; }
+
+// Cards / callouts / borders
+.card, .callout, .panel-tabset, .quarto-title-block {
+  background-color: $coder-d-surface !important;
+  border-color: $coder-d-border !important;
+  color: $coder-d-text;
+}
+hr { border-color: $coder-d-border; }
+
+.btn-primary {
+  background-color: $coder-accent; border-color: $coder-accent; color: #fff;
+  &:hover { background-color: $coder-accent-dark; border-color: $coder-accent-dark; }
+}
+
+.etabli-badge {
+  display: inline-block; background: $coder-accent; color: #fff;
+  border-radius: 999px; padding: .12em .7em; font-size: .8rem; font-weight: 600;
+}
+
+// Footer
+.nav-footer { background-color: $coder-d-surface !important; color: $coder-d-text-2; border-top: 1px solid $coder-d-border; }
+.nav-footer a { color: $coder-accent-light !important; }

@@ -28,6 +28,8 @@ website:
     copy-button: true
 
   navbar:
+    logo: assets/etabli-logo.svg
+    logo-href: index.html
     title: "Recueil"
     pinned: true
     collapse-below: lg
@@ -111,8 +113,8 @@ format:
       - text: |
           <script defer data-domain="etabli-dev.github.io" src="https://analytics.hellebo.de/js/script.file-downloads.outbound-links.js"></script>
     theme:
-      light: cosmo
-      dark: darkly
+      light: [cosmo, theme/etabli.scss]
+      dark: [cosmo, theme/etabli-dark.scss]
     toc: true
     toc-depth: 3
     toc-expand: true

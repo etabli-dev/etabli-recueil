@@ -1,0 +1,85 @@
+/*-- scss:defaults --*/
+// Etabli Docs Theme — LIGHT. Derived from _style/tokens/coder-design-system.json
+// (accent #28A745). Do not hand-edit per app; regenerate from the central tokens.
+
+$coder-accent:        #28A745;
+$coder-accent-dark:   #1E7E34;
+$coder-accent-light:  #48C76A;
+
+// Light palette
+$coder-l-bg:          #FFFFFF;
+$coder-l-surface:     #F7F8FA;
+$coder-l-surface-alt: #EDEFF2;
+$coder-l-text:        #1A1C1E;
+$coder-l-text-2:      #5A5F66;
+$coder-l-border:      #D9DCE1;
+
+// Spacing / Radius
+$coder-sp-sm: 8px;
+$coder-sp-md: 16px;
+$coder-sp-lg: 24px;
+$coder-radius-md: 10px;
+$coder-radius-lg: 16px;
+
+// Map Coder tokens onto Bootstrap (light)
+$primary:          $coder-accent;
+$body-bg:          $coder-l-bg;
+$body-color:       $coder-l-text;
+$border-color:     $coder-l-border;
+$link-color:       $coder-accent-dark;
+$link-hover-color: $coder-accent;
+$code-color:       $coder-accent-dark;
+$border-radius:    $coder-radius-md;
+$border-radius-lg: $coder-radius-lg;
+
+$font-family-sans-serif: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+$font-family-monospace:  "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+$headings-font-weight: 600;
+
+// The Cosmo base theme @imports Source Sans Pro from Google Fonts. This theme sets the system
+// font stack above instead, so switch the import off and the site makes no request to Google.
+$web-font-path: false;
+
+/*-- scss:rules --*/
+.navbar {
+  background-color: $coder-accent !important;
+  border-bottom: 1px solid darken($coder-accent, 8%);
+  .navbar-brand, .nav-link { color: #fff !important; font-weight: 500; }
+  .nav-link:hover { color: rgba(255,255,255,.82) !important; }
+  // logo-only brand: keep the mark crisp, no text gap
+  .navbar-brand img { height: 40px; }
+}
+
+code, pre { font-family: $font-family-monospace; }
+pre {
+  background-color: $coder-l-surface-alt;
+  border: 1px solid $coder-l-border;
+  border-radius: $coder-radius-md;
+  padding: $coder-sp-md;
+}
+:not(pre) > code {
+  background-color: $coder-l-surface-alt;
+  padding: .12em .38em; border-radius: $coder-radius-md;
+}
+
+.sidebar, .quarto-sidebar { border-right: 1px solid $coder-l-border; }
+.sidebar a.active, .quarto-sidebar a.active {
+  color: $coder-accent-dark; font-weight: 600;
+  border-left: 3px solid $coder-accent; padding-left: calc(#{$coder-sp-md} - 3px);
+}
+
+h1, h2, h3 { color: $coder-l-text; }
+h2 { border-bottom: 1px solid $coder-l-border; padding-bottom: .3em; }
+
+.btn-primary {
+  background-color: $coder-accent; border-color: $coder-accent;
+  &:hover { background-color: $coder-accent-dark; border-color: $coder-accent-dark; }
+}
+
+a { text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+.etabli-badge {
+  display: inline-block; background: $coder-accent; color: #fff;
+  border-radius: 999px; padding: .12em .7em; font-size: .8rem; font-weight: 600;
+}
