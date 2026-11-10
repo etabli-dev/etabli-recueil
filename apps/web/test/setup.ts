@@ -45,7 +45,9 @@ if (hasDom && typeof Element.prototype.scrollTo !== 'function') {
  * jsdom lays nothing out, so every element reports `offsetHeight === 0` — and a virtualiser given a
  * zero-height window correctly renders no rows, because none of them are visible. The size here is
  * arbitrary but real: a 640-pixel window over 76-pixel rows. Elements that have been given an
- * explicit pixel height in a style attribute keep it.
+ * explicit pixel height in a style attribute keep it. Both the offset and the client sizes are
+ * supplied, because the virtualiser has read each in turn: `@tanstack/virtual-core` 3.17 measured
+ * `offsetHeight`, 3.19 measures `clientHeight`. With no borders or scrollbars the two agree.
  */
 const pixelsFrom = (value: string): number | null => {
   const match = /^(\d+(?:\.\d+)?)px$/u.exec(value);
@@ -53,17 +55,21 @@ const pixelsFrom = (value: string): number | null => {
 };
 
 if (hasDom) {
-  Object.defineProperty(HTMLElement.prototype, 'offsetWidth', {
-    configurable: true,
-    get(this: HTMLElement): number {
-      return pixelsFrom(this.style.width) ?? 720;
-    },
-  });
+  for (const property of ['offsetWidth', 'clientWidth'] as const) {
+    Object.defineProperty(HTMLElement.prototype, property, {
+      configurable: true,
+      get(this: HTMLElement): number {
+        return pixelsFrom(this.style.width) ?? 720;
+      },
+    });
+  }
 
-  Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
-    configurable: true,
-    get(this: HTMLElement): number {
-      return pixelsFrom(this.style.height) ?? 640;
-    },
-  });
+  for (const property of ['offsetHeight', 'clientHeight'] as const) {
+    Object.defineProperty(HTMLElement.prototype, property, {
+      configurable: true,
+      get(this: HTMLElement): number {
+        return pixelsFrom(this.style.height) ?? 640;
+      },
+    });
+  }
 }
