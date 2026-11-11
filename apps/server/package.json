@@ -37,7 +37,7 @@
   },
   "dependencies": {
     "@fastify/cors": "^11.4.1",
-    "@fastify/multipart": "^9.2.1",
+    "@fastify/multipart": "^10.1.8",
     "@fastify/sensible": "^6.0.7",
     "@recueil/core": "workspace:*",
     "@recueil/formats": "workspace:*",
