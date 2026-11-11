@@ -51,6 +51,20 @@ updates:
       - dependency-name: "typescript"
         versions:
           - ">= 7.0.0"
+      # React 19 is a migration, not a bump: react-dom 19 does not run against react 18, so react,
+      # react-dom and their types have to move together, by hand. Lift these when that is done.
+      - dependency-name: "react"
+        update-types:
+          - version-update:semver-major
+      - dependency-name: "react-dom"
+        update-types:
+          - version-update:semver-major
+      - dependency-name: "@types/react"
+        update-types:
+          - version-update:semver-major
+      - dependency-name: "@types/react-dom"
+        update-types:
+          - version-update:semver-major
     # No `commit-message:` block on purpose. Dependabot's default subject — "Bump x from 1.2.3 to
     # 1.3.0" — is already imperative, capitalised and under 72 characters, which is the commit
     # convention in CONTRIBUTING.md.
@@ -93,3 +107,9 @@ updates:
     labels:
       - dependencies
       - deployment
+    ignore:
+      # Node 22 LTS is the pinned runtime (CONCEPT.md §5.16). The image moves to the next LTS
+      # deliberately, together with @types/node, not because a new major exists.
+      - dependency-name: "node"
+        update-types:
+          - version-update:semver-major
