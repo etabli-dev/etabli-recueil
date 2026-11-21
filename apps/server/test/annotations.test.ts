@@ -101,3 +101,16 @@ describe('GET /api/v1/documents/{id}/annotated.pdf', () => {
     }
   });
 });
+
+describe('GET /api/v1/annotations on a document without any', () => {
+  it('answers an empty page, not an error', async () => {
+    const h = await harness();
+    try {
+      const response = await h.app.inject({ method: 'GET', url: '/api/v1/annotations?documentId=01ARZ3NDEKTSV4RRFFQ69G5FAV' });
+      expect(response.statusCode).toBe(200);
+      expect(body<{ data: unknown[] }>(response).data).toEqual([]);
+    } finally {
+      await h.close();
+    }
+  });
+});

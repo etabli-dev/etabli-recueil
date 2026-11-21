@@ -296,7 +296,7 @@ export class AnnotationService {
       if (current.trashedAt === null) return current;
       const record = findOpenTrashRecord(tx, 'annotation', id);
       if (record === undefined || !String(record.restorePayload).includes('"standalone":true')) {
-        throw new ConflictError('This annotation went into the trash with its item; restore the item (I4).', { annotationId: id });
+        throw new ValidationError('An annotation is restored with the item it belongs to, not by itself (I4).', { annotationId: id });
       }
       const now = nowTimestamp();
       tx.update(annotations).set({ trashedAt: null, updatedAt: now, version: current.version + 1 }).where(eq(annotations.id, id)).run();

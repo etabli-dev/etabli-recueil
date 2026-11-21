@@ -20,7 +20,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import type { ZodOpenApiPathsObject } from 'zod-openapi';
 import * as z from 'zod';
 
-import { ifMatchVersion, sendJson, versionEtag } from '../http.js';
+import { ifMatchVersion, pageInfo, sendJson, versionEtag } from '../http.js';
 import { idPath, includeTrashedQuery, jsonBody, jsonResponse, operation, problems } from '../openapi-kit.js';
 import { coerceQuery, parseOrThrow, refuse } from '../validate.js';
 import { embedAnnotations } from '../annotated-pdf.js';
@@ -49,9 +49,10 @@ export const annotationRoutes: FastifyPluginAsync = async (app) => {
       ...(query.itemId === undefined ? {} : { itemId: query.itemId }),
       ...(query.includeTrashed === undefined ? {} : { includeTrashed: query.includeTrashed }),
     });
+    // One page: a document's annotations are read whole, in reading order.
     return sendJson(reply, AnnotationPageSchema, {
       data: rows.map(annotationToWire),
-      page: { limit: rows.length, nextCursor: null, hasMore: false },
+      page: pageInfo({ nextCursor: null, hasMore: false, limit: Math.max(1, rows.length) }, rows.length),
     });
   });
 
