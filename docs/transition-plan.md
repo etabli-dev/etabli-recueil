@@ -31,7 +31,7 @@ and installable apps for iOS and iPadOS, Android, Windows, Linux and macOS
 | Step | Content | Gate at the end |
 |---|---|---|
 | **Z** | Two-way Zotero sync: `@recueil/sync-zotero`, the Web API client, the state tables, pull, push, three-way merge, held conflicts, files both ways, `recueil sync zotero` (with `conflicts` and `resolve`). Server routes and a conflicts screen in the web client follow with the background job queue, because a sync from the server is a long-running job | Fake-server suite (versions, 412, backoff, deletions, files); a dry run against the owner's account by the owner |
-| **3** | Enrichment resolvers, checks engine and bibliography audit, dedup, plugin SDK v1 | CONCEPT §7 Phase 3 exit, rehearsed on fixtures |
+| **3** | Plugin SDK v1 and host; enrichment through eleven resolvers; the thirteen checks and bibliography audit; record dedup with reversible merges; parity tests for Metadata Mender, Attaclone and Argus One (`spec/parity-zotero-plugins.md`). File-layer near-duplicates (simhash) and server routes follow with Phase 4's reading work and the job queue | CONCEPT §7 Phase 3 exit, rehearsed on fixtures; the owner archives the three Zotero plugins and delivers one real manuscript audit |
 | **4** | Annotations layer, saved searches, Meilisearch option, GROBID sidecar, desktop v1 (watched folders, tray, URI scheme) | Annotate → note → cite inside the app |
 | **5** | Graph schema, citation network, Parquet/DuckDB, R and Python packages | `rc_bibliometrix()` runs in biblioshiny |
 | **6** | Curated networks and their exports | One publication figure end to end |

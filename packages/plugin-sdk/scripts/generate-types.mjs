@@ -24,7 +24,6 @@ export const generate = (spec) => {
     ' * `scripts/generate-types.mjs`. The specification is the source: change it and regenerate, never',
     ' * edit this file by hand. `pnpm test` fails when the two disagree.',
     ' */',
-    '/* eslint-disable */',
     "import type { HostApiTypes } from './host-apis.js';",
     "type SettingsHandle = HostApiTypes['SettingsHandle'];",
     "type Logger = HostApiTypes['Logger'];",

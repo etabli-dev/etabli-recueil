@@ -60,6 +60,18 @@ importers:
       '@recueil/ingest-sources':
         specifier: workspace:*
         version: link:../../packages/ingest-sources
+      '@recueil/plugin-checks-core':
+        specifier: workspace:*
+        version: link:../../plugins/checks-core
+      '@recueil/plugin-dedup-core':
+        specifier: workspace:*
+        version: link:../../plugins/dedup-core
+      '@recueil/plugin-host':
+        specifier: workspace:*
+        version: link:../../packages/plugin-host
+      '@recueil/plugin-resolvers-core':
+        specifier: workspace:*
+        version: link:../../plugins/resolvers-core
       '@recueil/rules':
         specifier: workspace:*
         version: link:../../packages/rules

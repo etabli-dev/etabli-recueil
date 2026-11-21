@@ -12,6 +12,7 @@ import { registerReview } from './commands/review.js';
 import { registerRules } from './commands/rules.js';
 import { registerServe } from './commands/serve.js';
 import { registerSync } from './commands/sync.js';
+import { registerCheck, registerDedup, registerEnrich, registerPlugin } from './commands/phase3.js';
 import { Ui } from './ui.js';
 import { VERSION } from './version.js';
 
@@ -125,6 +126,10 @@ export const buildProgram = (): BuiltProgram => {
     review: registerReview,
     rules: registerRules,
     sync: registerSync,
+    enrich: registerEnrich,
+    check: registerCheck,
+    dedup: registerDedup,
+    plugin: registerPlugin,
   };
 
   for (const spec of COMMANDS) {

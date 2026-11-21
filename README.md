@@ -11,7 +11,7 @@ and enriches references against the open scholarly graph, and exposes the whole
 library to R, Python and LLMs as data. Systematic reviews and bibliometric
 mapping are native workflows, not exports.
 
-**Status:** Phases 1 and 2 in the tree, unreleased. It builds and runs from a
+**Status:** Phases 1–3 in the tree, unreleased. It builds and runs from a
 source checkout; there is no tagged release, no image on `ghcr.io` and no
 published installable binary.
 
@@ -111,6 +111,16 @@ What has been exercised end to end here:
   writes nothing to either side. Tested against an in-process fake of the Web API, **not yet
   against a real zotero.org account**.
 
+- **Phase 3 — enrichment, checks, deduplication, plugins.** An in-process plugin host
+  (`packages/plugin-host`, ADR-0012) loads plugins written against `@recueil/plugin-sdk`, whose
+  types are generated from `spec/hooks.md`. Three first-party plugins ship: eleven resolvers
+  (`recueil enrich`), the thirteen checks including bibliography audit (`recueil check --audit`),
+  and identifier and fuzzy dedup rules (`recueil dedup`, reversible merges, `dedup undo`). Plugins
+  are installed disabled; `recueil plugin enable --builtin` turns them on. Parity tests carry the
+  behaviour of the three Zotero plugins this phase retires ([`spec/parity-zotero-plugins.md`](spec/parity-zotero-plugins.md)).
+  The upstream sources are exercised against recorded responses, **not yet against the live
+  services**, and no real manuscript audit has been delivered, so **M3 is not claimed**.
+
 ### The hardening round
 
 An adversarial review between Phase 2 and Phase 3 returned 8 critical, 8 major and
@@ -190,8 +200,10 @@ nothing else yet.
 | `packages/ingest-sources` | watched folders, the WebDAV feed and the IMAP mailbox |
 | `packages/rules` | the YAML/JSON rule language, its engine and the dry-run report |
 | `packages/storage-backends` | WebDAV and S3, and the conformance suite all three pass |
-| `packages/plugin-sdk`, `packages/client-ts` | placeholder |
-| `plugins/` | first-party plugins — placeholder |
+| `packages/plugin-sdk` | the plugin API 1.0.0 types, errors and helpers |
+| `packages/plugin-host` | the plugin host and the enrichment, checks and dedup engines |
+| `packages/client-ts` | placeholder |
+| `plugins/` | first-party plugins: `resolvers-core`, `checks-core`, `dedup-core` |
 | `spec/` | OpenAPI, plugin manifest schema, ADRs, data model |
 | `docs/` | Quarto documentation site |
 | `deploy/` | Dockerfile and docker-compose with sidecar profiles (untested) |

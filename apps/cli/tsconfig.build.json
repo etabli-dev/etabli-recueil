@@ -21,6 +21,7 @@
     { "path": "../../packages/ingest/tsconfig.build.json" },
     { "path": "../../packages/ingest-sources/tsconfig.build.json" },
     { "path": "../../packages/rules/tsconfig.build.json" },
+    { "path": "../../packages/plugin-host/tsconfig.build.json" },
     { "path": "../../packages/schemas/tsconfig.build.json" },
     { "path": "../../packages/sync-zotero/tsconfig.build.json" },
     { "path": "../server/tsconfig.build.json" }

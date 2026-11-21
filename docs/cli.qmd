@@ -35,9 +35,10 @@ Machine-readable output on every command via `--json`, so `jq` is the intended c
 | `recueil backup` / `restore` | Consistent snapshot and recovery | 1 | ✓ |
 | `recueil token` | Create, list and revoke scoped API tokens | 1 | — mint them over the API |
 | `recueil job` | List, follow, retry and cancel jobs generally | 1 | — `recueil queue` covers ingestion |
-| `recueil check` | Run the verification engine over a scope, or over a pasted reference list | 3 | — |
-| `recueil dedup` | File and record deduplication, dry run by default | 3 | — |
-| `recueil plugin` | Install, enable, disable, configure, list | 3 | — |
+| `recueil enrich` | Fill in metadata from PubMed, OpenAlex, Crossref and eight more sources | 3 | ✓ |
+| `recueil check` | Run the verification engine over the library, or audit a reference list (`--audit`) | 3 | ✓ |
+| `recueil dedup` | Record deduplication, dry run by default; `--apply`, `undo` | 3 | ✓ |
+| `recueil plugin` | List, enable, disable and configure plugins | 3 | ✓ — install from npm or a URL arrives with the registry (Phase 9) |
 | `recueil graph` | Build edges, run a deep dive, export a network | 5 | — |
 | `recueil sr` | Systematic review: search runs, screening, extraction, PRISMA counts | 7 | — |
 
@@ -90,19 +91,23 @@ recueil review list --json --database ./library.db --storage ./storage | jq '.en
 Audit a reference list that is not in your library — the peer-review deliverable:
 
 ```sh
-recueil check bibliography --file submitted-references.txt --format markdown > audit.md
+recueil plugin enable --builtin            # once, per library
+recueil check --audit submitted-references.txt --report audit.md
 ```
 
 Parse the list, resolve what can be resolved, and report on what cannot: malformed identifiers, DOIs
 that do not resolve, metadata that disagrees with the record, retractions and expressions of
 concern, preprints with a published version, and references with no identifier and no match in
-Crossref, OpenAlex, PubMed or Semantic Scholar — which is the polite way of saying possibly
-fabricated.
+Crossref or OpenAlex — which is the polite way of saying possibly fabricated. Plain-text lists
+are read with simple heuristics until a GROBID or AnyStyle sidecar is configured; BibTeX, RIS and
+CSL-JSON are read exactly.
 
 Look at what a dedup run would do before it does it:
 
 ```sh
-recueil dedup records --scope collection:phd --dry-run --json | jq '.merges | length'
+recueil dedup --json | jq '[.run.groups[] | select(.decision == "auto")] | length'
+recueil dedup --apply          # merge the certain ones, queue the rest for review
+recueil dedup undo <item-id>   # reverse a merge
 ```
 
 Refresh a bibliography for a manuscript (today: `recueil export biblatex --search '…'`; the

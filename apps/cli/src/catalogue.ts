@@ -28,7 +28,7 @@ export const PHASE_TITLES: Readonly<Record<number, string>> = {
 };
 
 /** The phase this build belongs to. Not every command in it is finished; see `implemented`. */
-export const CURRENT_PHASE = 2;
+export const CURRENT_PHASE = 3;
 
 export interface CommandSpec {
   /** The subcommand name, as typed. */
@@ -131,24 +131,31 @@ export const COMMANDS: readonly CommandSpec[] = [
     promise: 'Pull from and push to the zotero.org libraries an API key reaches, with a three-way merge and held conflicts (ADR-0025).',
   },
   {
+    name: 'enrich',
+    summary: 'Fill in metadata from the resolvers',
+    phase: 3,
+    implemented: true,
+    promise: 'Look items up in PubMed, OpenAlex, Crossref and the rest, and fill or overwrite fields that are not locked.',
+  },
+  {
     name: 'check',
     summary: 'Run the verification engine',
     phase: 3,
-    implemented: false,
+    implemented: true,
     promise: 'Run the checks over a scope, or audit a pasted reference list for existence, retraction and preprint status.',
   },
   {
     name: 'dedup',
     summary: 'Find and merge duplicates',
     phase: 3,
-    implemented: false,
+    implemented: true,
     promise: 'File and record deduplication, dry run by default, with a report of what a run would do.',
   },
   {
     name: 'plugin',
     summary: 'Manage plugins',
     phase: 3,
-    implemented: false,
+    implemented: true,
     promise: 'Install, enable, disable, configure and list plugins.',
   },
   {
