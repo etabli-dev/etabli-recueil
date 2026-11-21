@@ -11,7 +11,7 @@ and enriches references against the open scholarly graph, and exposes the whole
 library to R, Python and LLMs as data. Systematic reviews and bibliometric
 mapping are native workflows, not exports.
 
-**Status:** Phases 1–3 in the tree, unreleased. It builds and runs from a
+**Status:** Phases 1–4 in the tree, unreleased. It builds and runs from a
 source checkout; there is no tagged release, no image on `ghcr.io` and no
 published installable binary.
 
@@ -120,6 +120,17 @@ What has been exercised end to end here:
   behaviour of the three Zotero plugins this phase retires ([`spec/parity-zotero-plugins.md`](spec/parity-zotero-plugins.md)).
   The upstream sources are exercised against recorded responses, **not yet against the live
   services**, and no real manuscript audit has been delivered, so **M3 is not claimed**.
+
+- **Phase 4 — reading.** Annotations are records (`/api/v1/annotations`, ADR-0009): the reader
+  highlights a selection with an optional comment, lists every annotation in reading order, turns
+  one into a note that quotes it and ends in a Pandoc citation (`[@key, p. 12]`), and downloads the
+  PDF with all of them embedded (`/documents/{id}/annotated.pdf`; the stored file is untouched).
+  Saved searches take filters as well as text — types, tags, collection, years, files, retraction
+  status, failing checks — and smart collections list their items. `recueil check --audit
+  manuscript.pdf` reads the reference list through a GROBID sidecar (`RECUEIL_GROBID_URL`), whose
+  adapter has not been run against a live GROBID here. Not yet: the desktop shell's tray, URI
+  scheme and folder picker (they need new Rust crates and move to the platform step), and the
+  Meilisearch backend (it needs the job runner to keep its index in step).
 
 ### The hardening round
 

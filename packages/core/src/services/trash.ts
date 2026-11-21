@@ -23,6 +23,7 @@ import { ConflictError, NotFoundError, ValidationError } from '../errors.js';
 import { nowTimestamp } from '../time.js';
 import type { Actor } from './actor.js';
 import type { AnnotationService } from './annotations.js';
+import { findOpenTrashRecord, readRestorePayload } from './trash-record.js';
 import type { AuditService } from './audit.js';
 import type { CollectionService } from './collections.js';
 import type { CreatorService } from './creators.js';
@@ -156,8 +157,11 @@ export class TrashService {
         // One trashed on its own comes back on its own; one that went with its item comes back
         // with the item (I4), which `AnnotationService.restore` refuses with the reason.
         if (this.services.annotations !== undefined) {
-          this.services.annotations.restore(entityId, actor);
-          return;
+          const record = findOpenTrashRecord(this.db, 'annotation', entityId);
+          if (record !== undefined && readRestorePayload(record)['standalone'] === true) {
+            this.services.annotations.restore(entityId, actor);
+            return;
+          }
         }
         throw new ValidationError(
           `An annotation is restored with the item it belongs to, not by itself (I4).`,
