@@ -1,0 +1,48 @@
+{
+  "name": "@recueil/plugin-host",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The in-process plugin host (ADR-0012) and the engines it serves: enrichment through resolvers, the checks engine and the deduplication engine (CONCEPT \u00a75.4\u20135.6, \u00a75.13).",
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc --build tsconfig.build.json && node scripts/copy-schema.mjs",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --build tsconfig.build.json && tsc --noEmit -p tsconfig.json",
+    "test": "tsc --build tsconfig.build.json && node scripts/copy-schema.mjs && vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@recueil/core": "workspace:*",
+    "@recueil/formats": "workspace:*",
+    "@recueil/ingest": "workspace:*",
+    "@recueil/plugin-sdk": "workspace:*",
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
+    "drizzle-orm": "^0.45.4",
+    "semver": "^7.7.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "@types/semver": "^7.7.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.12"
+  }
+}

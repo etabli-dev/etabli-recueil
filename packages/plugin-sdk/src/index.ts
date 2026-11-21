@@ -10,3 +10,4 @@ export type * from './host-apis.js';
 export * from './errors.js';
 export type { PluginManifest, ManifestHook, ManifestEvent, RecueilPlugin } from './plugin.js';
 export { definePlugin } from './plugin.js';
+export { canonicalDoi, extraValues, nameKey, normaliseTitle, titleSimilarity, titleTokens } from './text.js';

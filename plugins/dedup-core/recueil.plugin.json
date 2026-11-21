@@ -1,0 +1,30 @@
+{
+  "$schema": "https://github.com/etabli-dev/etabli-recueil/raw/main/spec/plugin-manifest.schema.json",
+  "name": "@recueil/plugin-dedup-core",
+  "displayName": "Duplicate records",
+  "version": "1.0.0",
+  "description": "Finds duplicate items: an exact match on DOI, PMID, PMCID, arXiv id or ISBN, and a fuzzy match on title, year and first author that is only ever proposed for review.",
+  "author": { "name": "Établi" },
+  "licence": "AGPL-3.0-or-later",
+  "recueilApi": "^1.0.0",
+  "main": "./dist/index.js",
+  "permissions": [],
+  "hooks": [
+    {
+      "type": "dedupRule",
+      "id": "identifier",
+      "export": "identifierRule",
+      "title": "Same identifier",
+      "description": "Two items carrying the same normalised DOI, PMID, PMCID, arXiv id or ISBN are the same work.",
+      "priority": 10
+    },
+    {
+      "type": "dedupRule",
+      "id": "fuzzy",
+      "export": "fuzzyRule",
+      "title": "Same title, year and first author",
+      "description": "Near-identical titles from the same year (±1) by the same first author; proposed for review, never merged automatically.",
+      "priority": 50
+    }
+  ]
+}

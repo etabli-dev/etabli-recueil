@@ -419,6 +419,46 @@ importers:
         specifier: ^4.1.12
         version: 4.1.12(@types/node@22.20.5)(jsdom@30.0.1)(vite@8.2.4(@types/node@22.20.5)(esbuild@0.28.2)(tsx@4.23.15)(yaml@2.9.1))
 
+  packages/plugin-host:
+    dependencies:
+      '@recueil/core':
+        specifier: workspace:*
+        version: link:../core
+      '@recueil/formats':
+        specifier: workspace:*
+        version: link:../formats
+      '@recueil/ingest':
+        specifier: workspace:*
+        version: link:../ingest
+      '@recueil/plugin-sdk':
+        specifier: workspace:*
+        version: link:../plugin-sdk
+      ajv:
+        specifier: ^8.17.1
+        version: 8.20.0
+      ajv-formats:
+        specifier: ^3.0.1
+        version: 3.0.1(ajv@8.20.0)
+      drizzle-orm:
+        specifier: ^0.45.4
+        version: 0.45.4(@types/better-sqlite3@7.6.13)(better-sqlite3@13.0.3)
+      semver:
+        specifier: ^7.7.2
+        version: 7.8.6
+    devDependencies:
+      '@types/node':
+        specifier: ^22.20.5
+        version: 22.20.5
+      '@types/semver':
+        specifier: ^7.7.0
+        version: 7.8.0
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.12
+        version: 4.1.12(@types/node@22.20.5)(jsdom@30.0.1)(vite@8.2.4(@types/node@22.20.5)(esbuild@0.28.2)(tsx@4.23.15)(yaml@2.9.1))
+
   packages/plugin-sdk:
     devDependencies:
       '@types/node':
@@ -517,6 +557,22 @@ importers:
       drizzle-orm:
         specifier: ^0.45.4
         version: 0.45.4(@types/better-sqlite3@7.6.13)(better-sqlite3@13.0.3)
+    devDependencies:
+      '@types/node':
+        specifier: ^22.20.5
+        version: 22.20.5
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.12
+        version: 4.1.12(@types/node@22.20.5)(jsdom@30.0.1)(vite@8.2.4(@types/node@22.20.5)(esbuild@0.28.2)(tsx@4.23.15)(yaml@2.9.1))
+
+  plugins/dedup-core:
+    dependencies:
+      '@recueil/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
     devDependencies:
       '@types/node':
         specifier: ^22.20.5
@@ -1619,6 +1675,9 @@ packages:
 
   '@types/react@18.3.31':
     resolution: {integrity: sha512-vfEqpXTvwT91yhmwdfouStN2hSKwTvyRs8qpLfADyrq/kxDw0hZM7Wk9Ug1FELj8hIby+S/+kQCSRFF32nv2Qw==}
+
+  '@types/semver@7.8.0':
+    resolution: {integrity: sha512-1mAINjtQCXXeLkJ9ehXkwOcBpqtLxiVtKhpUf83DdRNdQKV0iXZpaHYqRr7nj+wvxuJzoAmAwXI+sCNMv1CzLQ==}
 
   '@typescript-eslint/eslint-plugin@8.72.1':
     resolution: {integrity: sha512-5CokTWXpmbylfFabsbvHC0CAw3XLaGnoa+nFJX5FR592h/LoZsENUE6p/rg5xvkKrFEXz6pYmgI29AgXc2N3BQ==}
@@ -3752,6 +3811,8 @@ snapshots:
     dependencies:
       '@types/prop-types': 15.7.15
       csstype: 3.2.3
+
+  '@types/semver@7.8.0': {}
 
   '@typescript-eslint/eslint-plugin@8.72.1(@typescript-eslint/parser@8.72.1(eslint@9.39.5)(typescript@5.9.3))(eslint@9.39.5)(typescript@5.9.3)':
     dependencies:
