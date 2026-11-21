@@ -15,7 +15,9 @@ import {
   EnrichmentEngine,
   checksReportCsv,
   checksReportMarkdown,
+  isPdf,
   readAuditInput,
+  readAuditPdf,
 } from '@recueil/plugin-host';
 import type { ChecksRun, EnrichResult, WinnerRule } from '@recueil/plugin-host';
 import { InvalidArgumentError } from 'commander';
@@ -211,7 +213,7 @@ export const registerCheck = (parent: Command, describe: (name: string) => strin
       .option('--item <id>', 'only this item (repeatable)', collect)
       .option('--checks <list>', 'only these checks, e.g. retraction,doi_resolves', list)
       .option('--offline', 'skip the checks that need the network', false)
-      .option('--audit <file>', 'audit a reference list (BibTeX, RIS, CSL-JSON or plain text) instead of the library')
+      .option('--audit <file>', 'audit a reference list (BibTeX, RIS, CSL-JSON, plain text, or a manuscript PDF via GROBID) instead of the library')
       .option('--report <file>', 'write a report: .md or .csv')
       .option('-n, --dry-run', 'run the checks, store nothing', false)
       .addHelpText(
@@ -240,7 +242,19 @@ export const registerCheck = (parent: Command, describe: (name: string) => strin
       let run: ChecksRun;
       let label = (id: string) => id;
       if (flags.audit !== undefined) {
-        const references = readAuditInput(readFileSync(flags.audit, 'utf8'));
+        const bytes = readFileSync(flags.audit);
+        let references;
+        if (isPdf(bytes)) {
+          // A manuscript PDF: its reference list comes from a GROBID sidecar (CONCEPT §5.5).
+          const grobidUrl = process.env['RECUEIL_GROBID_URL'];
+          if (grobidUrl === undefined || grobidUrl === '') {
+            throw new CliError('auditing a PDF needs a GROBID sidecar: set RECUEIL_GROBID_URL (deploy/docker-compose.sidecars.yml starts one)', {
+              exitCode: ExitCode.Usage,
+            });
+          }
+          references = await readAuditPdf(new Uint8Array(bytes), { grobidUrl });
+          ui().info(`GROBID found ${references.length} references`);
+        } else references = readAuditInput(bytes.toString('utf8'));
         run = await engine.audit(references, options);
         const byRef = new Map(references.map((ref, index) => [`ref-${String(index + 1).padStart(4, '0')}`, ref]));
         label = (id) => {

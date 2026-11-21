@@ -101,3 +101,87 @@ export const readAuditInput = (source: string, format: AuditFormat = detectAudit
     .filter((block) => block.length > 15)
     .map(parseTextReference);
 };
+
+/* -------------------------------------------------------------------------------------------- */
+/* A manuscript PDF, through GROBID                                                                */
+/* -------------------------------------------------------------------------------------------- */
+
+const MAX_TEI_BYTES = 16 * 1024 * 1024;
+
+const decodeXml = (text: string): string =>
+  text
+    .replace(/<[^>]+>/gu, '')
+    .replace(/&lt;/gu, '<')
+    .replace(/&gt;/gu, '>')
+    .replace(/&quot;/gu, '"')
+    .replace(/&apos;/gu, "'")
+    .replace(/&#(\d+);/gu, (_m, code: string) => String.fromCodePoint(Number(code)))
+    .replace(/&amp;/gu, '&')
+    .replace(/\s+/gu, ' ')
+    .trim();
+
+const first = (xml: string, pattern: RegExp): string | undefined => {
+  const match = pattern.exec(xml);
+  return match?.[1] === undefined ? undefined : decodeXml(match[1]);
+};
+
+/** GROBID's `<listBibl>` of `<biblStruct>`s → audit references. */
+export const parseTeiReferences = (tei: string): AuditReference[] => {
+  const out: AuditReference[] = [];
+  for (const match of tei.matchAll(/<biblStruct\b[^>]*>([\s\S]*?)<\/biblStruct>/gu)) {
+    const entry = match[1] ?? '';
+    const analytic = /<analytic>([\s\S]*?)<\/analytic>/u.exec(entry)?.[1] ?? '';
+    const monogr = /<monogr>([\s\S]*?)<\/monogr>/u.exec(entry)?.[1] ?? '';
+    const title = first(analytic, /<title\b[^>]*>([\s\S]*?)<\/title>/u) ?? first(monogr, /<title\b[^>]*>([\s\S]*?)<\/title>/u);
+    const container = analytic === '' ? undefined : first(monogr, /<title\b[^>]*>([\s\S]*?)<\/title>/u);
+    const year = Number(/<date\b[^>]*when="(\d{4})/u.exec(entry)?.[1]);
+    const identifiers: Identifier[] = [];
+    const doi = canonicalDoi(first(entry, /<idno type="DOI">([\s\S]*?)<\/idno>/iu) ?? '');
+    if (doi !== null) identifiers.push({ scheme: 'doi', value: doi });
+    const pmid = first(entry, /<idno type="PMID">(\d+)<\/idno>/iu);
+    if (pmid !== undefined) identifiers.push({ scheme: 'pmid', value: pmid });
+    const authors = [...(analytic === '' ? monogr : analytic).matchAll(/<persName\b[^>]*>([\s\S]*?)<\/persName>/gu)].map((person) => {
+      const family = first(person[1] ?? '', /<surname>([\s\S]*?)<\/surname>/u);
+      const given = first(person[1] ?? '', /<forename[^>]*>([\s\S]*?)<\/forename>/u);
+      return { ...(family === undefined ? {} : { family }), ...(given === undefined ? {} : { given }) };
+    });
+    const raw = first(entry, /<note type="raw_reference">([\s\S]*?)<\/note>/u);
+    if (title === undefined && identifiers.length === 0) continue;
+    out.push({
+      stub: {
+        identifiers,
+        ...(title === undefined ? {} : { title }),
+        ...(container === undefined ? {} : { containerTitle: container }),
+        ...(Number.isFinite(year) ? { issuedYear: year } : {}),
+        ...(authors.length === 0 ? {} : { authors }),
+      },
+      ...(raw === undefined ? {} : { rawString: raw }),
+      loose: false,
+    });
+  }
+  return out;
+};
+
+export const isPdf = (bytes: Uint8Array): boolean =>
+  bytes.byteLength > 4 && bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46;
+
+/** The reference list of a manuscript PDF, extracted by a GROBID sidecar (`processReferences`). */
+export const readAuditPdf = async (
+  bytes: Uint8Array,
+  options: { grobidUrl: string; fetch?: (input: string, init?: RequestInit) => Promise<Response>; timeoutMs?: number },
+): Promise<AuditReference[]> => {
+  const form = new FormData();
+  form.set('input', new Blob([bytes], { type: 'application/pdf' }), 'manuscript.pdf');
+  form.set('includeRawCitations', '1');
+  const fetchImpl = options.fetch ?? ((input: string, init?: RequestInit) => fetch(input, init));
+  const response = await fetchImpl(`${options.grobidUrl.replace(/\/+$/u, '')}/api/processReferences`, {
+    method: 'POST',
+    body: form,
+    headers: { Accept: 'application/xml' },
+    signal: AbortSignal.timeout(options.timeoutMs ?? 300_000),
+  });
+  if (!response.ok) throw new Error(`GROBID answered ${response.status}`);
+  const tei = await response.text();
+  if (tei.length > MAX_TEI_BYTES) throw new Error('GROBID sent more than 16 MiB of TEI; refused (ADR-0022)');
+  return parseTeiReferences(tei);
+};

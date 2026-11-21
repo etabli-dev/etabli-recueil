@@ -119,3 +119,27 @@ describe('library-wide checks', () => {
     expect(failing()).toBe(0);
   });
 });
+
+describe('GROBID references', () => {
+  it('reads a TEI reference list', async () => {
+    const { parseTeiReferences } = await import('../src/index.js');
+    const tei = `<TEI><text><back><div><listBibl>
+      <biblStruct xml:id="b0"><analytic><title level="a" type="main">Fracture healing in the elderly</title>
+        <author><persName><forename type="first">Ada</forename><surname>Lovelace</surname></persName></author>
+        <idno type="DOI">10.1234/ABC</idno></analytic>
+        <monogr><title level="j">Injury</title><imprint><date type="published" when="2020"/></imprint></monogr>
+        <note type="raw_reference">Lovelace A. Fracture healing in the elderly. Injury 2020.</note></biblStruct>
+      <biblStruct xml:id="b1"><monogr><title level="m">A book &amp; its title</title><imprint><date when="1999"/></imprint></monogr></biblStruct>
+    </listBibl></div></back></text></TEI>`;
+    const refs = parseTeiReferences(tei);
+    expect(refs).toHaveLength(2);
+    expect(refs[0]?.stub).toMatchObject({
+      title: 'Fracture healing in the elderly',
+      containerTitle: 'Injury',
+      issuedYear: 2020,
+      identifiers: [{ scheme: 'doi', value: '10.1234/abc' }],
+      authors: [{ family: 'Lovelace', given: 'Ada' }],
+    });
+    expect(refs[1]?.stub.title).toBe('A book & its title');
+  });
+});
