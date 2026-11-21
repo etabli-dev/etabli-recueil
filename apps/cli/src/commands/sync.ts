@@ -174,8 +174,10 @@ export const registerSync = (parent: Command, describe: (name: string) => string
     .description('List open conflicts')
     .option('-d, --database <url>', 'the Recueil library (RECUEIL_DATABASE_URL)')
     .option('-s, --storage <path>', 'the content-addressed store (RECUEIL_STORAGE_PATH)')
-    .action(async (flags: LibraryFlags) => {
-      await runConflicts(flags, ui());
+    // `--database` and `--storage` are also options of `zotero`, which takes them first; the
+    // merged view is the one the user typed, wherever commander filed it.
+    .action(async (_flags: LibraryFlags, command: Command) => {
+      await runConflicts(command.optsWithGlobals<LibraryFlags>(), ui());
     });
 
   zotero
@@ -185,8 +187,8 @@ export const registerSync = (parent: Command, describe: (name: string) => string
     .argument('<side>', 'zotero | recueil', oneOf(['zotero', 'recueil'] as const, 'a side'))
     .option('-d, --database <url>', 'the Recueil library (RECUEIL_DATABASE_URL)')
     .option('-s, --storage <path>', 'the content-addressed store (RECUEIL_STORAGE_PATH)')
-    .action(async (id: string, side: 'zotero' | 'recueil', flags: LibraryFlags) => {
-      await runResolve(id, side, flags, ui());
+    .action(async (id: string, side: 'zotero' | 'recueil', _flags: LibraryFlags, command: Command) => {
+      await runResolve(id, side, command.optsWithGlobals<LibraryFlags>(), ui());
     });
 
   return sync;

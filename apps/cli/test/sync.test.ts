@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -33,10 +33,17 @@ describe('recueil sync zotero', () => {
     expect(unknown.code).not.toBe(0);
   });
 
-  it('lists no conflicts in a library that has none', async () => {
+  it('reads the library it is pointed at, and refuses one that does not exist', async () => {
     const database = join(dir, 'lib.sqlite');
-    const result = await runCli(['sync', 'zotero', 'conflicts', '--database', database]);
-    // The library must exist; a missing one is a clear refusal, not an empty answer.
-    expect(result.code).not.toBe(0);
+    const storage = join(dir, 'store');
+    const missing = await runCli(['sync', 'zotero', 'conflicts', '--database', database, '--storage', storage]);
+    expect(missing.code).not.toBe(0);
+    expect(missing.stderr).toContain(database);
+
+    writeFileSync(join(dir, 'refs.bib'), '@article{a,title={T},year={2020}}\n');
+    await runCli(['import', 'bibtex', join(dir, 'refs.bib'), '--database', database, '--storage', storage]);
+    const empty = await runCli(['sync', 'zotero', 'conflicts', '--database', database, '--storage', storage]);
+    expect(empty.code).toBe(0);
+    expect(empty.stdout).toContain('No open conflicts.');
   });
 });

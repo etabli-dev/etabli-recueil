@@ -419,7 +419,7 @@ export class ZoteroSync {
       const result = this.merge('collection', remote.key, collectionId, remote.data.name, base, local, flatCollection(remoteProjection));
       this.applyCollection(collectionId!, result, remoteProjection);
 
-      if (result.toZotero.length > 0) {
+      if (result.toZotero.length > 0 && this.direction !== 'pull') {
         this.queueCollection(collectionId!, remote.key, remote.data, remote.version, result);
       } else {
         this.state.saveLink({
@@ -522,6 +522,14 @@ export class ZoteroSync {
     return projectRecueilItem(this.recueil, itemId, (collectionId) => this.collectionKeyOf(collectionId, true));
   }
 
+  /*
+   * A merge whose result Zotero does not hold yet is queued for this run's push. When this run does
+   * not push (`direction: 'pull'`, as in the pull half of `syncZoteroLibraries`), the link takes
+   * Zotero's current object as its base instead: the merged values then read as Recueil-side
+   * changes against the newest version, and the next push sends them with a version Zotero
+   * accepts. Keeping the old base there would push against a stale version and be refused (412)
+   * on every run.
+   */
   private pullItem(remote: ZoteroObject<ZoteroItemData>): void {
     this.handled.add(`item:${remote.key}`);
     const link = this.state.linkByKey(this.libraryRow.id, 'item', remote.key);
@@ -558,7 +566,7 @@ export class ZoteroSync {
     const result = this.merge('item', remote.key, itemId, subject, base, local, flatItem(remoteProjection), locked);
     this.applyItem(itemId, result, remote.data);
 
-    if (result.toZotero.length > 0) {
+    if (result.toZotero.length > 0 && this.direction !== 'pull') {
       this.queueItem(itemId, remote.key, remote.data, remote.version, result, subject);
     } else {
       this.state.saveLink({
@@ -922,7 +930,7 @@ export class ZoteroSync {
     const local = flatNote(this.localNote(noteId));
     const result = this.merge('note', remote.key, noteId, null, base, local, flatNote(remoteProjection));
     this.applyNote(noteId, result, remote.data);
-    if (result.toZotero.length > 0) {
+    if (result.toZotero.length > 0 && this.direction !== 'pull') {
       this.queueNote(noteId, remote.key, remote.data, remote.version, result);
     } else {
       this.state.saveLink({
@@ -1068,7 +1076,7 @@ export class ZoteroSync {
         const replaced = await this.replaceAttachmentFile(link.recueilId, remote);
         if (replaced) fileMd5 = remoteMd5;
       }
-      if (result.toZotero.length > 0) {
+      if (result.toZotero.length > 0 && this.direction !== 'pull') {
         this.queueAttachmentUpdate(link.recueilId, remote.key, remote.data, remote.version, result);
       } else {
         this.state.saveLink({

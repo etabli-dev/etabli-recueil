@@ -499,3 +499,25 @@ describe('dry run over several libraries', () => {
     expect(links.n).toBe(0);
   });
 });
+
+describe('pull and push in separate passes', () => {
+  it('settles a two-sided merge when every library is pulled before any is pushed', async () => {
+    const { syncZoteroLibraries } = await import('../src/index.js');
+    const item = h.zotero.put('items', article());
+    await syncZoteroLibraries(h.recueil, h.client, {});
+    const itemId = linkedItemId(h, item.key);
+    h.zotero.edit(item.key, { title: 'Title from Zotero' });
+    h.recueil.library.updateItem(itemId, { bibliographic: { volume: '14' } }, h.recueil.actor);
+
+    const [first] = await syncZoteroLibraries(h.recueil, h.client, {});
+    expect(first?.deferred).toEqual([]);
+    expect(h.zotero.get(item.key)?.['volume']).toBe('14');
+    expect(h.zotero.get(item.key)?.['title']).toBe('Title from Zotero');
+
+    const writes = h.zotero.writes().length;
+    const [second] = await syncZoteroLibraries(h.recueil, h.client, {});
+    expect(second?.deferred).toEqual([]);
+    expect(second?.errors).toEqual([]);
+    expect(h.zotero.writes().length).toBe(writes);
+  });
+});
