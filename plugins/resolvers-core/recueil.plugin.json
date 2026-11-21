@@ -1,0 +1,169 @@
+{
+  "$schema": "https://github.com/etabli-dev/etabli-recueil/raw/main/spec/plugin-manifest.schema.json",
+  "name": "@recueil/plugin-resolvers-core",
+  "displayName": "Scholarly resolvers",
+  "version": "1.0.0",
+  "description": "Looks works up by DOI, PMID, PMCID, arXiv id, ISBN or CRAN URL in PubMed, OpenAlex, Crossref, DataCite, Semantic Scholar, arXiv, OpenAIRE, Unpaywall, CORE, CRAN and Open Library.",
+  "author": {
+    "name": "Établi"
+  },
+  "licence": "AGPL-3.0-or-later",
+  "recueilApi": "^1.0.0",
+  "main": "./dist/index.js",
+  "permissions": [
+    "network:outbound"
+  ],
+  "permissionNotes": {
+    "network:outbound": "Queries the public APIs of the listed metadata sources; nothing from the library is sent except the identifier being looked up and, where you set one, your contact address."
+  },
+  "hooks": [
+    {
+      "type": "resolver",
+      "id": "pubmed",
+      "export": "pubmed",
+      "title": "PubMed",
+      "priority": 10,
+      "provides": [
+        "pubmed"
+      ]
+    },
+    {
+      "type": "resolver",
+      "id": "openalex",
+      "export": "openalex",
+      "title": "OpenAlex",
+      "priority": 20,
+      "provides": [
+        "openalex"
+      ]
+    },
+    {
+      "type": "resolver",
+      "id": "crossref",
+      "export": "crossref",
+      "title": "Crossref",
+      "priority": 30,
+      "provides": [
+        "crossref"
+      ]
+    },
+    {
+      "type": "resolver",
+      "id": "datacite",
+      "export": "datacite",
+      "title": "DataCite",
+      "priority": 35,
+      "provides": [
+        "datacite"
+      ]
+    },
+    {
+      "type": "resolver",
+      "id": "semanticscholar",
+      "export": "semanticScholar",
+      "title": "Semantic Scholar",
+      "priority": 40,
+      "provides": [
+        "semanticscholar"
+      ]
+    },
+    {
+      "type": "resolver",
+      "id": "arxiv",
+      "export": "arxiv",
+      "title": "arXiv",
+      "priority": 45,
+      "provides": [
+        "arxiv"
+      ]
+    },
+    {
+      "type": "resolver",
+      "id": "openaire",
+      "export": "openaire",
+      "title": "OpenAIRE",
+      "priority": 50,
+      "provides": [
+        "openaire"
+      ]
+    },
+    {
+      "type": "resolver",
+      "id": "unpaywall",
+      "export": "unpaywall",
+      "title": "Unpaywall",
+      "priority": 60,
+      "provides": [
+        "unpaywall"
+      ]
+    },
+    {
+      "type": "resolver",
+      "id": "core",
+      "export": "core",
+      "title": "CORE",
+      "priority": 70,
+      "provides": [
+        "core"
+      ]
+    },
+    {
+      "type": "resolver",
+      "id": "cran",
+      "export": "cran",
+      "title": "CRAN",
+      "priority": 80,
+      "provides": [
+        "cran"
+      ]
+    },
+    {
+      "type": "resolver",
+      "id": "openlibrary",
+      "export": "openlibrary",
+      "title": "Open Library",
+      "priority": 90,
+      "provides": [
+        "openlibrary"
+      ]
+    }
+  ],
+  "settings": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "mailto": {
+        "type": "string",
+        "format": "email",
+        "title": "Contact address",
+        "description": "Sent to Crossref, Unpaywall and the others as the polite-pool contact; Unpaywall is not asked without it."
+      },
+      "openalexKey": {
+        "type": "string",
+        "title": "OpenAlex API key",
+        "x-recueil-secret": true
+      },
+      "ncbiKey": {
+        "type": "string",
+        "title": "NCBI API key",
+        "x-recueil-secret": true
+      },
+      "crossrefPlusToken": {
+        "type": "string",
+        "title": "Crossref Plus token",
+        "x-recueil-secret": true
+      },
+      "semanticScholarKey": {
+        "type": "string",
+        "title": "Semantic Scholar API key",
+        "x-recueil-secret": true
+      },
+      "coreKey": {
+        "type": "string",
+        "title": "CORE API key",
+        "description": "CORE is not asked without one.",
+        "x-recueil-secret": true
+      }
+    }
+  }
+}

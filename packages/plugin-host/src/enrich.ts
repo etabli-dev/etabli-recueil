@@ -61,6 +61,16 @@ export interface EnrichResult {
   errors: Record<string, string>;
 }
 
+const CRAN_NAME = /^[A-Za-z][A-Za-z0-9.]*$/u;
+const CRAN_URL =
+  /^https?:\/\/cran\.r-project\.org\/(?:package=([A-Za-z][A-Za-z0-9.]*)\/?|web\/packages\/([A-Za-z][A-Za-z0-9.]*)(?:\/(?:index\.html)?)?)(?:[?#].*)?$/iu;
+const cranPackageOf = (url: string): string | undefined => {
+  const match = CRAN_URL.exec(url.trim());
+  return match?.[1] ?? match?.[2];
+};
+const isCran = (identifiers: readonly Identifier[]): boolean =>
+  identifiers.some((id) => id.scheme === 'url' && cranPackageOf(id.value) !== undefined);
+
 const COLUMN_OF_FIELD = (path: string): string | null =>
   path.startsWith('bibliographic.') ? path.slice('bibliographic.'.length) : null;
 
@@ -101,6 +111,17 @@ export const itemIdentifiers = (
   if (!isBlank(bib?.pmcid)) identifiers.push({ scheme: 'pmcid', value: String(bib?.pmcid) });
   if (!isBlank(bib?.arxivId)) identifiers.push({ scheme: 'arxiv', value: String(bib?.arxivId) });
   if (!isBlank(bib?.isbn)) identifiers.push({ scheme: 'isbn', value: String(bib?.isbn) });
+
+  // A CRAN package: the URL field or an Extra `CRAN: name` line (MM 1.2). Names must agree.
+  const cranNames = new Set<string>();
+  const fromUrl = typeof bib?.url === 'string' ? cranPackageOf(bib.url) : undefined;
+  if (fromUrl !== undefined) cranNames.add(fromUrl);
+  for (const value of extraValues(record.item.extra, 'CRAN')) {
+    if (!CRAN_NAME.test(value)) return { identifiers: [], problem: 'CRAN identifiers are invalid or conflict; review before lookup' };
+    cranNames.add(value);
+  }
+  if (cranNames.size > 1) return { identifiers: [], problem: 'CRAN identifiers are invalid or conflict; review before lookup' };
+  for (const name of cranNames) identifiers.push({ scheme: 'url', value: `https://cran.r-project.org/package=${name}` });
   return { identifiers, problem: null };
 };
 
@@ -183,7 +204,9 @@ export class EnrichmentEngine {
     };
 
     const accepted: { source: string; record: ResolverRecord }[] = [];
-    const resolvers = this.orderedResolvers(options);
+    // A CRAN package is asked of CRAN only, even when it also has a DOI (MM 1.2).
+    const cranOnly = isCran(identifiers);
+    const resolvers = this.orderedResolvers(options).filter((hook) => !cranOnly || hook.impl.source === 'cran');
     for (const hook of resolvers) {
       const usable = identifiers.filter((id) => hook.impl.supports.lookup.includes(id.scheme));
       if (usable.length === 0) continue;
@@ -200,7 +223,8 @@ export class EnrichmentEngine {
           continue;
         }
         const best = [...records].sort((left, right) => right.score - left.score)[0]!;
-        const conflict = identityProblem(best, identity, options.titleThreshold ?? 0.8);
+        // CRAN records are matched on the package name, which is not a title (MM 1.4).
+        const conflict = source === 'cran' ? null : identityProblem(best, identity, options.titleThreshold ?? 0.8);
         if (conflict !== null) {
           result.sources[source] = 'conflict';
           result.errors[source] = `metadata conflicts with the current reference: ${conflict}`;
