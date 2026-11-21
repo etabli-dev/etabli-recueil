@@ -15,3 +15,12 @@ data/
 *.log
 
 .DS_Store
+
+# Agent and orchestration files never enter the repository
+CLAUDE.md
+AGENTS.md
+.claude/
+.codex/
+.cursor/
+.mcp.json
+.pnpm-store/

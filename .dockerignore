@@ -38,3 +38,11 @@
 # These two committed synthetic Zotero libraries are source fixtures.
 !fixtures/zotero/zotero.sqlite
 !fixtures/zotero/better-bibtex.sqlite
+# Agent and orchestration files are not build inputs
+**/CLAUDE.md
+**/AGENTS.md
+**/.claude
+**/.codex
+**/.cursor
+**/.mcp.json
+**/.pnpm-store
