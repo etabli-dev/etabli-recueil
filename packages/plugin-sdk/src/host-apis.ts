@@ -86,6 +86,8 @@ export interface LibraryApi {
   getItem(itemId: string): Promise<ItemSnapshot | null>;
   /** Items carrying any of these identifiers (normalised as `Identifier.value`). */
   findByIdentifier(scheme: string, value: string): Promise<string[]>;
+  /** Every live item, a page at a time, oldest first. For library-scoped checks. */
+  listItems(options?: { cursor?: string; limit?: number }): Promise<{ records: ItemSnapshot[]; cursor?: string }>;
 }
 
 export interface SearchApi {
@@ -105,6 +107,8 @@ export interface EventsApi {
 /** Content-store reads, permission `storage:read`. */
 export interface StorageApi {
   exists(sha256: string): Promise<boolean>;
+  /** The stored size in bytes, or null when the blob is not in the store. */
+  size(sha256: string): Promise<number | null>;
 }
 
 /** Arrives with Phase 5. */

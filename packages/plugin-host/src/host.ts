@@ -43,8 +43,9 @@ import type {
   RecueilPlugin,
   Resolver,
   SettingsHandle,
+  StorageApi,
 } from '@recueil/plugin-sdk';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, asc, eq, gt, isNull } from 'drizzle-orm';
 
 import { AdaptiveLimiter, parseRetryAfter } from './limiter.js';
 import { isCompatible, readManifest, validateManifest } from './manifest.js';
@@ -508,6 +509,7 @@ export class PluginHost {
     };
     if (permissions.has('network:outbound')) ctx['http'] = this.httpApi(entry, hook, signal);
     if (permissions.has('items:read')) ctx['library'] = this.libraryApi();
+    if (permissions.has('storage:read') || permissions.has('documents:read')) ctx['storage'] = this.storageApi();
     return ctx;
   }
 
@@ -625,9 +627,30 @@ export class PluginHost {
     };
   }
 
+  private storageApi(): StorageApi {
+    const storage = this.recueil.storage;
+    return {
+      exists: async (sha256) => storage.has(sha256),
+      size: async (sha256) => (await storage.stat(sha256))?.size ?? null,
+    };
+  }
+
   private libraryApi(): LibraryApi {
     const recueil = this.recueil;
     return {
+      listItems: async (options = {}) => {
+        const limit = Math.min(Math.max(options.limit ?? 200, 1), 1000);
+        const rows = recueil.db
+          .select({ id: schema.items.id })
+          .from(schema.items)
+          .where(options.cursor === undefined ? isNull(schema.items.trashedAt) : and(isNull(schema.items.trashedAt), gt(schema.items.id, options.cursor)))
+          .orderBy(asc(schema.items.id))
+          .limit(limit + 1)
+          .all();
+        const page = rows.slice(0, limit);
+        const records = page.map((row) => snapshotItem(recueil, row.id)).filter((record): record is ItemSnapshot => record !== null);
+        return rows.length > limit ? { records, cursor: page.at(-1)!.id } : { records };
+      },
       getItem: async (itemId) => snapshotItem(recueil, itemId),
       findByIdentifier: async (scheme, value) => {
         const column = IDENTIFIER_COLUMNS[scheme];
