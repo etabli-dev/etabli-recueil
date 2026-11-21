@@ -124,6 +124,13 @@ export const COMMANDS: readonly CommandSpec[] = [
     promise: 'Validate a rule set and run it over a corpus without writing anything.',
   },
   {
+    name: 'sync',
+    summary: 'Sync with zotero.org, both ways',
+    phase: 2,
+    implemented: true,
+    promise: 'Pull from and push to the zotero.org libraries an API key reaches, with a three-way merge and held conflicts (ADR-0025).',
+  },
+  {
     name: 'check',
     summary: 'Run the verification engine',
     phase: 3,

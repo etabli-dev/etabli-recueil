@@ -69,6 +69,9 @@ importers:
       '@recueil/server':
         specifier: workspace:*
         version: link:../server
+      '@recueil/sync-zotero':
+        specifier: workspace:*
+        version: link:../../packages/sync-zotero
       commander:
         specifier: ^15.1.0
         version: 15.1.0
@@ -474,6 +477,34 @@ importers:
       '@recueil/core':
         specifier: workspace:*
         version: link:../core
+    devDependencies:
+      '@types/node':
+        specifier: ^22.20.5
+        version: 22.20.5
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.12
+        version: 4.1.12(@types/node@22.20.5)(jsdom@30.0.1)(vite@8.2.4(@types/node@22.20.5)(esbuild@0.28.2)(tsx@4.23.15)(yaml@2.9.1))
+
+  packages/sync-zotero:
+    dependencies:
+      '@recueil/core':
+        specifier: workspace:*
+        version: link:../core
+      '@recueil/formats':
+        specifier: workspace:*
+        version: link:../formats
+      '@recueil/import-zotero':
+        specifier: workspace:*
+        version: link:../import-zotero
+      '@recueil/schemas':
+        specifier: workspace:*
+        version: link:../schemas
+      drizzle-orm:
+        specifier: ^0.45.4
+        version: 0.45.4(@types/better-sqlite3@7.6.13)(better-sqlite3@13.0.3)
     devDependencies:
       '@types/node':
         specifier: ^22.20.5

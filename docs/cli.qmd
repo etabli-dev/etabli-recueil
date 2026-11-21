@@ -31,6 +31,7 @@ Machine-readable output on every command via `--json`, so `jq` is the intended c
 | `recueil review` | Work the review queue: list, accept, reject | 2 | ✓ |
 | `recueil rules` | Validate a rule set, and dry-run it over a corpus | 2 | ✓ |
 | `recueil queue` | List, retry and cancel ingestion jobs | 2 | ✓ |
+| `recueil sync zotero` | Two-way sync with zotero.org libraries; `conflicts`, `resolve` (ADR-0025) | 2 | ✓ |
 | `recueil backup` / `restore` | Consistent snapshot and recovery | 1 | ✓ |
 | `recueil token` | Create, list and revoke scoped API tokens | 1 | — mint them over the API |
 | `recueil job` | List, follow, retry and cancel jobs generally | 1 | — `recueil queue` covers ingestion |

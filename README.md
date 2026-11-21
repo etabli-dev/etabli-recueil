@@ -103,6 +103,14 @@ What has been exercised end to end here:
   OCR, GROBID, Paperless-ngx, WebDAV, S3 and IMAP are each behind an interface
   with an in-process fake.
 
+- **`recueil sync zotero`** syncs the library with the zotero.org libraries an API key
+  reaches, both ways ([ADR-0025](spec/adr/0025-two-way-zotero-sync.md)): a per-field three-way
+  merge against the last agreed state, conflicts held on both sides until decided with
+  `recueil sync zotero resolve`, fields locked in Recueil never overwritten by a pull, every write
+  conditional on the version last seen, files checked against Zotero's MD5, and a dry run that
+  writes nothing to either side. Tested against an in-process fake of the Web API, **not yet
+  against a real zotero.org account**.
+
 ### The hardening round
 
 An adversarial review between Phase 2 and Phase 3 returned 8 critical, 8 major and
@@ -177,6 +185,7 @@ nothing else yet.
 | `packages/formats` | BibTeX, BibLaTeX, RIS, CSL-JSON and citation keys |
 | `packages/import-zotero` | the Zotero migrator and its verification report |
 | `packages/import-paperless` | the Paperless-ngx migrator and its verification report |
+| `packages/sync-zotero` | two-way sync with zotero.org through the Web API ([ADR-0025](spec/adr/0025-two-way-zotero-sync.md)) |
 | `packages/ingest` | the ten-stage ingestion pipeline of CONCEPT.md §5.3 |
 | `packages/ingest-sources` | watched folders, the WebDAV feed and the IMAP mailbox |
 | `packages/rules` | the YAML/JSON rule language, its engine and the dry-run report |

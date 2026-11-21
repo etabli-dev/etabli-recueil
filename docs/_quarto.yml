@@ -4,6 +4,7 @@ project:
   render:
     - "*.qmd"
     - "platform-roadmap.md"
+    - "transition-plan.md"
 
 lang: en-GB
 
@@ -54,6 +55,8 @@ website:
             href: roadmap.qmd
           - text: "Platform roadmap"
             href: platform-roadmap.md
+          - text: "Transition plan"
+            href: transition-plan.md
           - text: "Decision records"
             href: adr.qmd
           - text: "Contributing"
@@ -86,6 +89,7 @@ website:
         contents:
           - roadmap.qmd
           - platform-roadmap.md
+          - transition-plan.md
           - adr.qmd
           - contributing.qmd
 

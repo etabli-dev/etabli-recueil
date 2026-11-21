@@ -43,6 +43,7 @@
     "@recueil/rules": "workspace:*",
     "@recueil/schemas": "workspace:*",
     "@recueil/server": "workspace:*",
+    "@recueil/sync-zotero": "workspace:*",
     "commander": "^15.1.0",
     "drizzle-orm": "^0.45.4",
     "picocolors": "^1.1.1",

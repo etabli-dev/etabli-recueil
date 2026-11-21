@@ -11,6 +11,7 @@ import { registerRestore } from './commands/restore.js';
 import { registerReview } from './commands/review.js';
 import { registerRules } from './commands/rules.js';
 import { registerServe } from './commands/serve.js';
+import { registerSync } from './commands/sync.js';
 import { Ui } from './ui.js';
 import { VERSION } from './version.js';
 
@@ -42,7 +43,7 @@ const HELP_EPILOGUE = [
   '  RECUEIL_PROFILE  named profile from ~/.config/recueil/config.toml',
   '',
   '  The data commands — `serve`, `import`, `export`, `backup`, `restore`, `ingest`, `queue`,',
-  '  `review` — work on the library directly rather than through the API, and read RECUEIL_HOST,',
+  '  `review`, `sync` — work on the library directly rather than through the API, and read RECUEIL_HOST,',
   '  RECUEIL_PORT, RECUEIL_DATABASE_URL and RECUEIL_STORAGE_PATH instead. `rules test` reads',
   '  neither: the evaluator is a pure function. See deploy/.env.example.',
   '',
@@ -123,6 +124,7 @@ export const buildProgram = (): BuiltProgram => {
     queue: registerQueue,
     review: registerReview,
     rules: registerRules,
+    sync: registerSync,
   };
 
   for (const spec of COMMANDS) {

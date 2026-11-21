@@ -29,6 +29,13 @@
       "when": 1787397028723,
       "tag": "0003_trash_merge_scope",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1795244991666,
+      "tag": "0004_zotero_sync",
+      "breakpoints": true
     }
   ]
 }

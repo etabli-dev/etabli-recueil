@@ -1551,9 +1551,134 @@ export const trash = sqliteTable(
   ],
 );
 
+/* ============================================================================================== */
+/* 7. The zotero.org bridge (ADR-0025)                                                             */
+/* ============================================================================================== */
+
+export const ZOTERO_LIBRARY_TYPES = ['user', 'group'] as const;
+export const ZOTERO_OBJECT_TYPES = ['collection', 'item', 'note', 'attachment'] as const;
+export const ZOTERO_CONFLICT_STATES = [
+  'open',
+  'resolved_zotero',
+  'resolved_recueil',
+  'resolved_manual',
+] as const;
+
+/**
+ * `zotero_sync_libraries` — one row per zotero.org library this library is bridged to.
+ *
+ * `version` is Zotero's library version as of the last completed pull: the `since` of the next
+ * one. It only moves forward, and only after the objects up to it have been applied, so an
+ * interrupted pull repeats rather than skips.
+ */
+export const zoteroSyncLibraries = sqliteTable(
+  'zotero_sync_libraries',
+  {
+    id: text('id').primaryKey(),
+    libraryType: text('library_type', { enum: ZOTERO_LIBRARY_TYPES }).notNull(),
+    /** The numeric user or group id, as text. */
+    libraryId: text('library_id').notNull(),
+    name: text('name'),
+    version: integer('version').notNull().default(0),
+    lastPulledAt: text('last_pulled_at'),
+    lastPushedAt: text('last_pushed_at'),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('ux_zotero_sync_libraries').on(table.libraryType, table.libraryId),
+    oneOf('ck_zotero_sync_libraries_type', 'library_type', ZOTERO_LIBRARY_TYPES),
+    check('ck_zotero_sync_libraries_version', sql`"version" >= 0`),
+  ],
+);
+
+/**
+ * `zotero_sync_links` — which Recueil row a Zotero object is, and what the two last agreed on.
+ *
+ * `base` is the Zotero JSON (`data`) both sides held after the last successful exchange. It is the
+ * common ancestor of the three-way merge: a side has changed a field when its value differs from
+ * the base's. Keeping the whole JSON, not only the fields Recueil models, is what lets a push
+ * return every field Recueil has no column for exactly as Zotero sent it.
+ *
+ * `recueil_id` is polymorphic over `object_type` and so carries no SQL foreign key, like
+ * `field_provenance.entity_id`.
+ */
+export const zoteroSyncLinks = sqliteTable(
+  'zotero_sync_links',
+  {
+    id: text('id').primaryKey(),
+    syncLibraryId: text('sync_library_id')
+      .notNull()
+      .references(() => zoteroSyncLibraries.id, { onDelete: 'cascade' }),
+    objectType: text('object_type', { enum: ZOTERO_OBJECT_TYPES }).notNull(),
+    zoteroKey: text('zotero_key').notNull(),
+    recueilId: text('recueil_id').notNull(),
+    /** The object version Zotero reported with `base`. Sent back as the precondition of a write. */
+    zoteroVersion: integer('zotero_version').notNull().default(0),
+    base: text('base').notNull().default('{}'),
+    /** For attachments: the MD5 of the file both sides hold, if any. */
+    fileMd5: text('file_md5'),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('ux_zotero_sync_links_key').on(
+      table.syncLibraryId,
+      table.objectType,
+      table.zoteroKey,
+    ),
+    uniqueIndex('ux_zotero_sync_links_recueil').on(
+      table.syncLibraryId,
+      table.objectType,
+      table.recueilId,
+    ),
+    index('ix_zotero_sync_links_recueil').on(table.recueilId),
+    oneOf('ck_zotero_sync_links_type', 'object_type', ZOTERO_OBJECT_TYPES),
+    jsonValid('ck_zotero_sync_links_base_json', 'base'),
+  ],
+);
+
+/**
+ * `zotero_sync_conflicts` — a field both sides changed to different values (ADR-0025 §5).
+ *
+ * Under the default policy neither value is written anywhere until the conflict is resolved, so
+ * the row carries all three values and nothing else has to be consulted to decide it.
+ */
+export const zoteroSyncConflicts = sqliteTable(
+  'zotero_sync_conflicts',
+  {
+    id: text('id').primaryKey(),
+    syncLibraryId: text('sync_library_id')
+      .notNull()
+      .references(() => zoteroSyncLibraries.id, { onDelete: 'cascade' }),
+    objectType: text('object_type', { enum: ZOTERO_OBJECT_TYPES }).notNull(),
+    zoteroKey: text('zotero_key').notNull(),
+    recueilId: text('recueil_id'),
+    field: text('field').notNull(),
+    baseValue: text('base_value'),
+    recueilValue: text('recueil_value'),
+    zoteroValue: text('zotero_value'),
+    state: text('state', { enum: ZOTERO_CONFLICT_STATES }).notNull().default('open'),
+    detectedAt: text('detected_at').notNull(),
+    resolvedAt: text('resolved_at'),
+  },
+  (table) => [
+    /** One open conflict per field; a later sync updates it rather than piling up copies. */
+    uniqueIndex('ux_zotero_sync_conflicts_open')
+      .on(table.syncLibraryId, table.objectType, table.zoteroKey, table.field)
+      .where(sql`state = 'open'`),
+    oneOf('ck_zotero_sync_conflicts_type', 'object_type', ZOTERO_OBJECT_TYPES),
+    oneOf('ck_zotero_sync_conflicts_state', 'state', ZOTERO_CONFLICT_STATES),
+  ],
+);
+
 /* -------------------------------------------------------------------------------------------- */
 /* Row types                                                                                       */
 /* -------------------------------------------------------------------------------------------- */
+
+export type ZoteroSyncLibraryRow = typeof zoteroSyncLibraries.$inferSelect;
+export type ZoteroSyncLinkRow = typeof zoteroSyncLinks.$inferSelect;
+export type ZoteroSyncConflictRow = typeof zoteroSyncConflicts.$inferSelect;
 
 export type UserRow = typeof users.$inferSelect;
 export type ApiTokenRow = typeof apiTokens.$inferSelect;
