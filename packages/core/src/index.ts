@@ -43,6 +43,7 @@ import { NoteService } from './services/notes.js';
 import { ProvenanceService } from './services/provenance.js';
 import { SearchService } from './services/search.js';
 import { TagService } from './services/tags.js';
+import { ItemMergeService } from './services/merge.js';
 import { TrashService } from './services/trash.js';
 import { ensureLocalUser } from './services/users.js';
 import type { UserRow } from './db/schema.js';
@@ -88,6 +89,8 @@ export interface Recueil {
   search: SearchService;
   /** The bin, across every entity (P5, §6.6). */
   trash: TrashService;
+  /** Reversible item merges (CONCEPT §5.6). */
+  merges: ItemMergeService;
   /** The single local account every owned record belongs to in v1. */
   user: UserRow;
   /** An actor for that account, for callers that have no request context of their own. */
@@ -128,6 +131,7 @@ export const createRecueil = (options: CreateRecueilOptions): Recueil => {
   const notes = new NoteService(db, audit, user.id, indexer);
   const customFields = new CustomFieldService(db, audit);
   const creators = new CreatorService(db, audit, indexer);
+  const merges = new ItemMergeService(db, audit, { library, tags, collections, creators });
   const trash = new TrashService(db, audit, {
     library,
     collections,
@@ -153,6 +157,7 @@ export const createRecueil = (options: CreateRecueilOptions): Recueil => {
     provenance,
     search,
     trash,
+    merges,
     user,
     actor: userActor(user.id),
     close: () => {

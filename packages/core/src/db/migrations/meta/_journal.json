@@ -36,6 +36,13 @@
       "when": 1795244991666,
       "tag": "0004_zotero_sync",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1795254850505,
+      "tag": "0005_enrichment",
+      "breakpoints": true
     }
   ]
 }

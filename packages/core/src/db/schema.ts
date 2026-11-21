@@ -1672,10 +1672,143 @@ export const zoteroSyncConflicts = sqliteTable(
   ],
 );
 
+/* ============================================================================================== */
+/* 8. Enrichment, checks and plugins (`spec/data-model.md` §3.9, §6.2, §6.7; Phase 3)              */
+/* ============================================================================================== */
+
+export const PLUGIN_SOURCES = ['builtin', 'npm', 'url', 'local'] as const;
+export const PLUGIN_INSTALL_STATES = ['installed', 'pending_update', 'failed', 'incompatible'] as const;
+export const CHECK_SUBJECT_TYPES = ['item', 'attachment', 'document', 'creator', 'audit_reference', 'library'] as const;
+export const CHECK_STATUSES = ['pass', 'fail', 'warn', 'error', 'skipped'] as const;
+export const CHECK_SEVERITIES = ['info', 'warning', 'error'] as const;
+
+/** §6.7. A row is never deleted while anything it wrote references it (PL1). */
+export const plugins = sqliteTable(
+  'plugins',
+  {
+    id: text('id').primaryKey(),
+    name: text('name').notNull(),
+    version: text('version').notNull(),
+    pluginApiRange: text('plugin_api_range').notNull(),
+    source: text('source', { enum: PLUGIN_SOURCES }).notNull(),
+    sourceRef: text('source_ref'),
+    checksum: text('checksum'),
+    manifest: text('manifest').notNull(),
+    permissions: text('permissions').notNull().default('[]'),
+    hooks: text('hooks').notNull().default('[]'),
+    /** Validated against the manifest's schema. Secrets are names of variables, never values (PL2). */
+    settings: text('settings').notNull().default('{}'),
+    enabled: integer('enabled', { mode: 'boolean' }).notNull().default(false),
+    installState: text('install_state', { enum: PLUGIN_INSTALL_STATES }).notNull().default('installed'),
+    lastError: text('last_error'),
+    installedAt: text('installed_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('ux_plugins_name').on(table.name),
+    oneOf('ck_plugins_source', 'source', PLUGIN_SOURCES),
+    oneOf('ck_plugins_install_state', 'install_state', PLUGIN_INSTALL_STATES),
+    boolean01('ck_plugins_enabled_bool', 'enabled'),
+    jsonValid('ck_plugins_manifest_json', 'manifest'),
+    jsonValid('ck_plugins_permissions_json', 'permissions'),
+    jsonValid('ck_plugins_hooks_json', 'hooks'),
+    jsonValid('ck_plugins_settings_json', 'settings'),
+  ],
+);
+
+/**
+ * §6.2. One current result per check per subject per audit run. `run_scope_key` is the maintained
+ * `COALESCE(audit_run_id, '')`, so the library-wide scope is a plain unique index.
+ */
+export const checkResults = sqliteTable(
+  'check_results',
+  {
+    id: text('id').primaryKey(),
+    checkId: text('check_id').notNull(),
+    checkVersion: text('check_version'),
+    subjectType: text('subject_type', { enum: CHECK_SUBJECT_TYPES }).notNull(),
+    subjectId: text('subject_id').notNull(),
+    itemId: text('item_id').references(() => items.id, { onDelete: 'cascade' }),
+    status: text('status', { enum: CHECK_STATUSES }).notNull(),
+    severity: text('severity', { enum: CHECK_SEVERITIES }).notNull(),
+    message: text('message').notNull(),
+    detail: text('detail').notNull().default('{}'),
+    autoFixable: integer('auto_fixable', { mode: 'boolean' }).notNull().default(false),
+    autoFixPayload: text('auto_fix_payload'),
+    fixedAt: text('fixed_at'),
+    acknowledgedAt: text('acknowledged_at'),
+    acknowledgedByUserId: text('acknowledged_by_user_id').references(() => users.id, { onDelete: 'restrict' }),
+    runId: text('run_id').references(() => jobs.id, { onDelete: 'set null' }),
+    auditRunId: text('audit_run_id'),
+    runScopeKey: text('run_scope_key').notNull().default(''),
+    checkedAt: text('checked_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('ux_check_results_current').on(table.checkId, table.subjectType, table.subjectId, table.runScopeKey),
+    index('ix_check_results_item').on(table.itemId, table.checkId).where(sql`item_id is not null`),
+    index('ix_check_results_open')
+      .on(table.severity, table.checkedAt)
+      .where(sql`status in ('fail', 'warn') and acknowledged_at is null and fixed_at is null`),
+    index('ix_check_results_audit_run').on(table.auditRunId).where(sql`audit_run_id is not null`),
+    oneOf('ck_check_results_subject_type', 'subject_type', CHECK_SUBJECT_TYPES),
+    oneOf('ck_check_results_status', 'status', CHECK_STATUSES),
+    oneOf('ck_check_results_severity', 'severity', CHECK_SEVERITIES),
+    boolean01('ck_check_results_auto_fixable_bool', 'auto_fixable'),
+    jsonValid('ck_check_results_detail_json', 'detail'),
+    jsonValidOrNull('ck_check_results_fix_json', 'auto_fix_payload'),
+  ],
+);
+
+/** §3.9. Observations, never updated (M1). */
+export const itemMetrics = sqliteTable(
+  'item_metrics',
+  {
+    id: text('id').primaryKey(),
+    itemId: text('item_id')
+      .notNull()
+      .references(() => items.id, { onDelete: 'restrict' }),
+    metric: text('metric').notNull(),
+    metricValue: real('metric_value').notNull(),
+    source: text('source').notNull(),
+    observedAt: text('observed_at').notNull(),
+    sourceAsOf: text('source_as_of'),
+    jobId: text('job_id').references(() => jobs.id, { onDelete: 'set null' }),
+  },
+  (table) => [
+    uniqueIndex('ux_item_metrics_observation').on(table.itemId, table.metric, table.source, table.observedAt),
+    index('ix_item_metrics_item_metric').on(table.itemId, table.metric, table.observedAt),
+    index('ix_item_metrics_observed_at').on(table.observedAt),
+  ],
+);
+
+/**
+ * The plugin cache (`CacheApi`, spec/hooks.md §3.1): namespaced per plugin and version, TTL'd.
+ * Derived data — dropping the table loses nothing but upstream requests.
+ */
+export const pluginCache = sqliteTable(
+  'plugin_cache',
+  {
+    pluginName: text('plugin_name').notNull(),
+    pluginVersion: text('plugin_version').notNull(),
+    cacheKey: text('cache_key').notNull(),
+    value: text('value').notNull(),
+    expiresAt: text('expires_at').notNull(),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.pluginName, table.cacheKey] }),
+    index('ix_plugin_cache_expires').on(table.expiresAt),
+    jsonValid('ck_plugin_cache_value_json', 'value'),
+  ],
+);
+
 /* -------------------------------------------------------------------------------------------- */
 /* Row types                                                                                       */
 /* -------------------------------------------------------------------------------------------- */
 
+export type PluginRow = typeof plugins.$inferSelect;
+export type CheckResultRow = typeof checkResults.$inferSelect;
+export type ItemMetricRow = typeof itemMetrics.$inferSelect;
 export type ZoteroSyncLibraryRow = typeof zoteroSyncLibraries.$inferSelect;
 export type ZoteroSyncLinkRow = typeof zoteroSyncLinks.$inferSelect;
 export type ZoteroSyncConflictRow = typeof zoteroSyncConflicts.$inferSelect;

@@ -1,0 +1,43 @@
+{
+  "name": "@recueil/plugin-sdk",
+  "version": "1.0.0",
+  "private": true,
+  "description": "The typed plugin authoring surface: the hook interfaces, context objects, error hierarchy and test helpers of plugin API 1.0.0 (spec/plugin-api.md, spec/hooks.md).",
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "import": "./dist/testing.js",
+      "default": "./dist/testing.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "generate": "node scripts/generate-types.mjs",
+    "build": "node scripts/generate-types.mjs --check && tsc --build tsconfig.build.json",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --build tsconfig.build.json && tsc --noEmit -p tsconfig.json",
+    "test": "tsc --build tsconfig.build.json && vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.12"
+  }
+}

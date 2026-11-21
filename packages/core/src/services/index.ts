@@ -14,3 +14,4 @@ export * from './tags.js';
 export * from './trash-record.js';
 export * from './trash.js';
 export * from './users.js';
+export * from './merge.js';
