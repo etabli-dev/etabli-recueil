@@ -76,7 +76,7 @@ describe('GET /api/v1/documents/{id}/annotated.pdf', () => {
       const item = await createItem(h, { title: 'Annotated' });
       const itemId = String(item['id']);
       const { document } = await h.recueil.documents.ingestBuffer(original, { sourceKind: 'upload', declaredMimeType: 'application/pdf', attachTo: { itemId } });
-      const rect = { type: 'RectangleSelector', pageIndex: 1, rectangles: [{ x: 72, y: 700, width: 200, height: 12 }] } as const;
+      const rect = { type: 'RectangleSelector' as const, pageIndex: 1, rectangles: [{ x: 72, y: 700, width: 200, height: 12 }] };
       h.recueil.annotations.create({ documentId: document.id, itemId, annotationType: 'highlight', motivation: 'highlighting', selector: [rect], bodyText: 'Important', colour: '#ffcc00' }, h.recueil.actor);
       h.recueil.annotations.create({ documentId: document.id, itemId, annotationType: 'ink', motivation: 'highlighting', selector: [{ type: 'InkSelector', pageIndex: 0, paths: [[{ x: 1, y: 1 }, { x: 50, y: 60 }]] }] }, h.recueil.actor);
 

@@ -68,6 +68,7 @@ export const ReaderRoute = (): JSX.Element => {
         attachment={attachment.data}
         url={client.documentContentUrl(documentId)}
         onClose={back}
+        client={client}
       />
     </Suspense>
   );

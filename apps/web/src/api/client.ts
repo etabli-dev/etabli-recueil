@@ -23,6 +23,9 @@
  * correct in both and there is no environment-dependent origin to get wrong.
  */
 import type {
+  Annotation,
+  AnnotationCreate,
+  AnnotationUpdate,
   Attachment,
   Collection,
   CustomField,
@@ -337,6 +340,38 @@ export class RecueilClient {
 
   documentContentUrl(documentId: string): string {
     return this.url(`/documents/${encodeURIComponent(documentId)}/content`);
+  }
+
+  /* Annotations (ADR-0009) ---------------------------------------------------------------- */
+
+  listAnnotations(documentId: string, signal?: AbortSignal): Promise<Page<Annotation>> {
+    return this.api<Page<Annotation>>('/annotations', { query: { documentId }, signal });
+  }
+
+  createAnnotation(body: AnnotationCreate): Promise<Annotation> {
+    return this.api<Annotation>('/annotations', { method: 'POST', body });
+  }
+
+  updateAnnotation(id: string, patch: AnnotationUpdate, expectedVersion?: number): Promise<Annotation> {
+    return this.api<Annotation>(`/annotations/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: patch,
+      ...(expectedVersion === undefined ? {} : { expectedVersion }),
+    });
+  }
+
+  trashAnnotation(id: string): Promise<Annotation> {
+    return this.api<Annotation>(`/annotations/${encodeURIComponent(id)}/trash`, { method: 'POST', body: {} });
+  }
+
+  /** Annotate → note → cite: a note quoting the passage, ending in a Pandoc citation. */
+  noteFromAnnotation(id: string): Promise<Note> {
+    return this.api<Note>(`/annotations/${encodeURIComponent(id)}/note`, { method: 'POST', body: {} });
+  }
+
+  /** The PDF with every annotation embedded, as a download (AN1: the stored file is unchanged). */
+  annotatedPdfUrl(documentId: string): string {
+    return this.url(`/documents/${encodeURIComponent(documentId)}/annotated.pdf`);
   }
 
   listNotes(itemId: string, signal?: AbortSignal): Promise<Page<Note>> {

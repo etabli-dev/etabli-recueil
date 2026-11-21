@@ -1,11 +1,9 @@
 /**
- * The PDF reader (CONCEPT.md §7, Phase 1: "basic PDF viewing (no annotation yet)").
+ * The PDF reader (CONCEPT.md §7: basic viewing in Phase 1, annotation in Phase 4).
  *
- * Page navigation, zoom, real text selection and a text search — and deliberately nothing else.
- * There is no annotation layer here, and adding one is not a small change: ADR-0009 stores
- * annotations as W3C Web Annotation records against a selector, which is a data model, a set of
- * endpoints and an export path, and it is Phase 4's work. A half-built highlight tool that wrote
- * nothing anywhere would be worse than none.
+ * Page navigation, zoom, real text selection, a text search, and the annotation layer of ADR-0009:
+ * highlights stored as W3C Web Annotation records in PDF units, a panel listing them, "make note"
+ * (a quoting note with a Pandoc citation) and a download of the PDF with them embedded.
  *
  * One page is rendered at a time rather than a continuous scroll. That is the honest version of
  * "basic": a virtualised continuous view has to manage a canvas pool, and the Phase 4 caveat about
@@ -15,9 +13,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Attachment } from '@recueil/schemas';
 
+import type { RecueilClient } from '../api/client.js';
+
 import { ErrorState, LoadingState } from '../components/states.js';
 import { ShortcutHelp } from '../keyboard/shortcut-help.js';
 import { useShortcuts } from '../keyboard/use-shortcuts.js';
+import { AnnotationLayer, AnnotationsPanel, useAnnotations } from './annotations.js';
+import type { ViewportLike } from './annotation-geometry.js';
 import { TextLayer, getDocument } from './pdfjs.js';
 import type { PDFDocumentProxy } from './pdfjs.js';
 import { DEFAULT_ZOOM, clampPage, formatZoom, zoomIn, zoomOut } from './view-state.js';
@@ -29,9 +31,11 @@ export interface PdfReaderProps {
   /** Where the bytes are. Built by the API client; PDF.js fetches it itself. */
   url: string;
   onClose: () => void;
+  /** Annotations need the API; a reader without one is the Phase 1 viewer. */
+  client?: RecueilClient;
 }
 
-export const PdfReader = ({ attachment, url, onClose }: PdfReaderProps): JSX.Element => {
+export const PdfReader = ({ attachment, url, onClose, client }: PdfReaderProps): JSX.Element => {
   const [document_, setDocument] = useState<PDFDocumentProxy | null>(null);
   const [loadError, setLoadError] = useState<unknown>(null);
   const [pageNumber, setPageNumber] = useState(1);
@@ -42,6 +46,10 @@ export const PdfReader = ({ attachment, url, onClose }: PdfReaderProps): JSX.Ele
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const textLayerRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const pageRef = useRef<HTMLDivElement>(null);
+  const [viewport, setViewport] = useState<ViewportLike | null>(null);
+  const [selectedAnnotation, setSelectedAnnotation] = useState<string | null>(null);
+  const [comment, setComment] = useState('');
 
   /* Loading the document ---------------------------------------------------------------------- */
 
@@ -86,6 +94,7 @@ export const PdfReader = ({ attachment, url, onClose }: PdfReaderProps): JSX.Ele
       if (cancelled) return;
 
       const viewport = page.getViewport({ scale: zoom });
+      setViewport(viewport as unknown as ViewportLike);
       const context = canvas.getContext('2d');
       if (context === null) throw new Error('This browser did not provide a 2D canvas context.');
 
@@ -125,6 +134,15 @@ export const PdfReader = ({ attachment, url, onClose }: PdfReaderProps): JSX.Ele
   /* Searching --------------------------------------------------------------------------------- */
 
   const search = usePdfSearch(document_);
+
+  /* Annotations ------------------------------------------------------------------------------- */
+
+  const annotationsEnabled = client !== undefined && attachment.documentId != null;
+  const annotations = useAnnotations(
+    client ?? (null as unknown as RecueilClient),
+    annotationsEnabled ? attachment.documentId! : '',
+    attachment.itemId ?? null,
+  );
 
   /* Shortcuts --------------------------------------------------------------------------------- */
 
@@ -196,6 +214,33 @@ export const PdfReader = ({ attachment, url, onClose }: PdfReaderProps): JSX.Ele
           </button>
         </div>
 
+        {annotationsEnabled ? (
+          <div className="reader__annotate">
+            <input
+              className="field__input reader__comment"
+              type="text"
+              placeholder="Comment (optional)"
+              aria-label="Comment for the highlight"
+              value={comment}
+              onChange={(event) => setComment(event.target.value)}
+            />
+            <button
+              type="button"
+              className="button button--small"
+              onClick={() => {
+                if (pageRef.current === null || viewport === null) return;
+                void annotations
+                  .highlightSelection({ pageElement: pageRef.current, pageIndex: pageNumber - 1, viewport, comment })
+                  .then((made) => {
+                    if (made) setComment('');
+                  });
+              }}
+            >
+              Highlight
+            </button>
+          </div>
+        ) : null}
+
         <div className="reader__zoom">
           <button type="button" className="button button--small" onClick={() => setZoom(zoomOut)} aria-label="Zoom out">
             −
@@ -242,13 +287,31 @@ export const PdfReader = ({ attachment, url, onClose }: PdfReaderProps): JSX.Ele
               </ol>
             )
           ) : null}
+          {annotationsEnabled ? (
+            <AnnotationsPanel
+              state={annotations}
+              selected={selectedAnnotation}
+              onSelect={setSelectedAnnotation}
+              onGoto={goto}
+              downloadUrl={client!.annotatedPdfUrl(attachment.documentId!)}
+            />
+          ) : null}
         </aside>
 
         <div className="reader__canvas-wrap">
           {renderError === null ? null : <ErrorState label="Could not draw the page" error={renderError} />}
-          <div className="reader__page">
+          <div className="reader__page" ref={pageRef}>
             <canvas ref={canvasRef} className="reader__canvas" aria-label={`Page ${pageNumber}`} />
             <div ref={textLayerRef} className="textLayer" />
+            {annotationsEnabled ? (
+              <AnnotationLayer
+                annotations={annotations.annotations}
+                pageIndex={pageNumber - 1}
+                viewport={viewport}
+                selected={selectedAnnotation}
+                onSelect={setSelectedAnnotation}
+              />
+            ) : null}
           </div>
         </div>
       </div>
