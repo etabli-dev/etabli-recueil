@@ -22,7 +22,8 @@ import * as z from 'zod';
 
 import { ifMatchVersion, sendJson, versionEtag } from '../http.js';
 import { idPath, includeTrashedQuery, jsonBody, jsonResponse, operation, problems } from '../openapi-kit.js';
-import { coerceQuery, parseOrThrow } from '../validate.js';
+import { coerceQuery, parseOrThrow, refuse } from '../validate.js';
+import { embedAnnotations } from '../annotated-pdf.js';
 import { annotationToWire, noteToWire } from '../wire.js';
 
 const BASE = `${API_BASE_PATH}/annotations`;
@@ -114,6 +115,24 @@ export const annotationRoutes: FastifyPluginAsync = async (app) => {
     return sendJson(reply, AnnotationSchema, annotationToWire(recueil.annotations.trash(id, request.actor)));
   });
 
+  app.get(`${API_BASE_PATH}/documents/:id/annotated.pdf`, { config: { scope: 'documents:read' } }, async (request, reply) => {
+    const { id } = parseOrThrow(z.object({ id: IdSchema }), request.params, 'path');
+    const document = recueil.documents.getDocument(id);
+    if (document.mimeType !== 'application/pdf') {
+      refuse('path.id', `is a ${document.mimeType ?? 'file of unknown type'}, not a PDF.`);
+    }
+    const original = await recueil.documents.readBuffer(id);
+    const result = await embedAnnotations(new Uint8Array(original), recueil.annotations.list({ documentId: id }));
+    const name = (document.originalFilename ?? `${document.sha256.slice(0, 12)}.pdf`).replace(/\.pdf$/iu, '');
+    return reply
+      .code(200)
+      .header('content-type', 'application/pdf')
+      .header('content-disposition', `attachment; filename="${name.replace(/[^\w.-]+/gu, '_')}-annotated.pdf"`)
+      .header('x-recueil-embedded', String(result.embedded))
+      .header('x-recueil-skipped', String(result.skipped.length))
+      .send(Buffer.from(result.bytes));
+  });
+
   app.post(`${BASE}/:id/note`, { config: { scope: 'notes:write' } }, async (request, reply) => {
     const { id } = parseOrThrow(z.object({ id: IdSchema }), request.params, 'path');
     const body = parseOrThrow(NoteFromAnnotationSchema, request.body ?? {}, 'body');
@@ -174,6 +193,22 @@ export const annotationPaths: ZodOpenApiPathsObject = {
       scope: 'annotations:write',
       requestParams: { path: idPath() },
       responses: { '200': jsonResponse('The trashed annotation.', AnnotationSchema), ...problems('401', '403', '404', '422') },
+    }),
+  },
+  [`${API_BASE_PATH}/documents/{id}/annotated.pdf`]: {
+    get: operation({
+      operationId: 'getAnnotatedPdf',
+      summary: 'Download a PDF with its annotations embedded',
+      description:
+        'A new PDF carrying every live annotation as a standard PDF annotation, readable in any viewer. ' +
+        'The stored document is not modified (AN1). `X-Recueil-Embedded` and `X-Recueil-Skipped` count them.',
+      tags: TAGS,
+      scope: 'documents:read',
+      requestParams: { path: idPath() },
+      responses: {
+        '200': { description: 'The annotated PDF.', content: { 'application/pdf': { schema: z.string().meta({ format: 'binary' }) } } },
+        ...problems('401', '403', '404', '422'),
+      },
     }),
   },
   [`${BASE}/{id}/note`]: {

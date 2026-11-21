@@ -62,3 +62,42 @@ describe('/api/v1/annotations', () => {
     }
   });
 });
+
+describe('GET /api/v1/documents/{id}/annotated.pdf', () => {
+  it('embeds the annotations in a new PDF and leaves the stored one alone', async () => {
+    const { PDFDocument, PDFName, PDFArray } = await import('pdf-lib');
+    const source = await PDFDocument.create();
+    source.addPage([595, 842]);
+    source.addPage([595, 842]);
+    const original = Buffer.from(await source.save());
+
+    const h = await harness();
+    try {
+      const item = await createItem(h, { title: 'Annotated' });
+      const itemId = String(item['id']);
+      const { document } = await h.recueil.documents.ingestBuffer(original, { sourceKind: 'upload', declaredMimeType: 'application/pdf', attachTo: { itemId } });
+      const rect = { type: 'RectangleSelector', pageIndex: 1, rectangles: [{ x: 72, y: 700, width: 200, height: 12 }] } as const;
+      h.recueil.annotations.create({ documentId: document.id, itemId, annotationType: 'highlight', motivation: 'highlighting', selector: [rect], bodyText: 'Important', colour: '#ffcc00' }, h.recueil.actor);
+      h.recueil.annotations.create({ documentId: document.id, itemId, annotationType: 'ink', motivation: 'highlighting', selector: [{ type: 'InkSelector', pageIndex: 0, paths: [[{ x: 1, y: 1 }, { x: 50, y: 60 }]] }] }, h.recueil.actor);
+
+      const response = await h.app.inject({ method: 'GET', url: `/api/v1/documents/${document.id}/annotated.pdf` });
+      expect(response.statusCode).toBe(200);
+      expect(response.headers['content-type']).toBe('application/pdf');
+      expect(response.headers['x-recueil-embedded']).toBe('2');
+
+      const out = await PDFDocument.load(response.rawPayload);
+      const subtypes = out.getPages().map((page) => {
+        const annots = page.node.lookup(PDFName.of('Annots'));
+        return annots instanceof PDFArray ? annots.asArray().map((ref) => String(out.context.lookup(ref))) : [];
+      });
+      expect(subtypes[0]?.[0]).toContain('/Ink');
+      expect(subtypes[1]?.[0]).toContain('/Highlight');
+      expect(subtypes[1]?.[0]).toContain('Important');
+
+      const stored = await h.recueil.documents.readBuffer(document.id);
+      expect(Buffer.compare(stored, original)).toBe(0);
+    } finally {
+      await h.close();
+    }
+  });
+});
