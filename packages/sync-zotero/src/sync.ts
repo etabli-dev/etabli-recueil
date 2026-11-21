@@ -301,6 +301,9 @@ export class ZoteroSync {
     for (const key of deleted.value.items) this.guard('item', key, () => this.pullPermanentDeletion(key));
     for (const key of deleted.value.collections) this.guard('collection', key, () => this.pullCollectionDeletion(key));
 
+    // An object that failed is only fetched again if the cursor stays where it was. Everything that
+    // succeeded is re-read next time and found equal to its base, so holding back costs a re-read.
+    if (this.report.errors.length > 0) return since;
     return reached;
   }
 
@@ -347,11 +350,18 @@ export class ZoteroSync {
     if (this.isPurged('collection', collectionId)) return null;
     try {
       const row = this.recueil.collections.get(collectionId, { includeTrashed: true });
-      return {
-        name: row.name,
-        parent: row.parentId === null ? null : this.collectionKeyOf(row.parentId, true),
-        deleted: row.trashedAt !== null,
-      };
+      let parent: string | null = null;
+      if (row.parentId !== null) {
+        // A parent Zotero does not know (and will not this run) keeps whatever parent Zotero has:
+        // a collection is never moved to the top level because Recueil filed it somewhere local.
+        parent = this.collectionKeyOf(row.parentId);
+        if (parent === null) {
+          const own = this.state.linkByRecueilId(this.libraryRow.id, 'collection', collectionId);
+          const zoteroParent = own === undefined ? false : (JSON.parse(own.base) as ZoteroCollectionData).parentCollection;
+          parent = zoteroParent === false || zoteroParent === undefined ? null : zoteroParent;
+        }
+      }
+      return { name: row.name, parent, deleted: row.trashedAt !== null };
     } catch (error) {
       if (error instanceof NotFoundError) return null;
       throw error;
@@ -518,8 +528,13 @@ export class ZoteroSync {
     }
   }
 
+  /**
+   * A Recueil collection with no counterpart in this Zotero library — and none being created this
+   * run — is not part of the item's Zotero membership. Naming it would make the item look changed
+   * on every run without anything to send.
+   */
   private localItem(itemId: string): ItemProjection {
-    return projectRecueilItem(this.recueil, itemId, (collectionId) => this.collectionKeyOf(collectionId, true));
+    return projectRecueilItem(this.recueil, itemId, (collectionId) => this.collectionKeyOf(collectionId));
   }
 
   /*
@@ -1008,6 +1023,25 @@ export class ZoteroSync {
       this.report.toRecueil.note.restored += 1;
     }
     const live = this.recueil.notes.get(noteId, { includeTrashed: true }).trashedAt === null;
+    if (live && fields.has('markdown') && (merged['markdown'] ?? '') === '') {
+      // Recueil cannot hold an empty note (N1). Holding the field as a conflict keeps both sides as
+      // they are — the next push must not quietly put the old text back into Zotero.
+      const key = this.state.linkByRecueilId(this.libraryRow.id, 'note', noteId)?.zoteroKey ?? remote.key;
+      this.state.recordConflict(this.libraryRow.id, 'note', key, noteId, {
+        field: 'markdown',
+        base: null,
+        recueil: normaliseMarkdown(current.contentMarkdown),
+        zotero: '',
+      });
+      this.report.review.push({
+        objectType: 'note',
+        key,
+        recueilId: noteId,
+        subject: current.title,
+        message: 'the note was emptied in Zotero; Recueil cannot hold an empty note, so both sides are held until you decide',
+      });
+      fields.delete('markdown');
+    }
     if (live && (fields.has('markdown') || fields.has('parent'))) {
       const patch: { contentHtml?: string; contentMarkdown?: string; itemId?: string | null } = {};
       if (fields.has('markdown')) {

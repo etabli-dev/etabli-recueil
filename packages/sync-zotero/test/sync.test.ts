@@ -521,3 +521,46 @@ describe('pull and push in separate passes', () => {
     expect(h.zotero.writes().length).toBe(writes);
   });
 });
+
+describe('found in the audit', () => {
+  it('fetches again an item whose pull failed', async () => {
+    h.zotero.put('items', article());
+    const original = h.recueil.library.createItem.bind(h.recueil.library);
+    let fail = true;
+    h.recueil.library.createItem = ((...args: Parameters<typeof original>) => {
+      if (fail) {
+        fail = false;
+        throw new Error('boom');
+      }
+      return original(...args);
+    }) as typeof original;
+    const first = await h.sync();
+    expect(first.errors).toHaveLength(1);
+    const second = await h.sync();
+    expect(second.toRecueil.item.created).toBe(1);
+  });
+
+  it('does not write on every run for a collection Zotero does not know', async () => {
+    const item = h.zotero.put('items', article());
+    await h.sync({ home: false });
+    const local = h.recueil.collections.create({ name: 'Local only' }, h.recueil.actor);
+    h.recueil.collections.addItems(local.id, [linkedItemId(h, item.key)], h.recueil.actor);
+    await h.sync({ home: false });
+    const writes = h.zotero.writes().length;
+    await h.sync({ home: false });
+    await h.sync({ home: false });
+    expect(h.zotero.writes().length).toBe(writes);
+  });
+
+  it('holds a note emptied in Zotero instead of putting the old text back', async () => {
+    const item = h.zotero.put('items', article());
+    const note = h.zotero.put('items', { itemType: 'note', parentItem: item.key, note: '<p>Hello</p>' });
+    await h.sync();
+    h.zotero.edit(note.key, { note: '' });
+    const report = await h.sync();
+    expect(report.review.some((event) => event.message.includes('emptied'))).toBe(true);
+    await h.sync();
+    expect(h.zotero.get(note.key)?.['note']).toBe('');
+    expect(h.recueil.notes.get(linkedId(h, 'note', note.key)).contentMarkdown).toContain('Hello');
+  });
+});
