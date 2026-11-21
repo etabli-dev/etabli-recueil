@@ -3836,6 +3836,369 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/annotations:
+    get:
+      operationId: listAnnotations
+      summary: List annotations
+      description: |-
+        By document, or by item (every document the item carries, AN3), in reading order.
+
+        **Scope:** `annotations:read`.
+      tags:
+        - Reading
+      parameters:
+        - in: query
+          name: includeTrashed
+          schema:
+            description: 'Include trashed records. Off by default: the trash is not the library (P5).'
+            type: boolean
+          description: 'Include trashed records. Off by default: the trash is not the library (P5).'
+        - in: query
+          name: documentId
+          schema:
+            description: Every annotation on this document.
+            $ref: '#/components/schemas/Id'
+          description: Every annotation on this document.
+        - in: query
+          name: itemId
+          schema:
+            description: Every annotation on every document this item carries (AN3).
+            $ref: '#/components/schemas/Id'
+          description: Every annotation on every document this item carries (AN3).
+      responses:
+        '200':
+          description: The annotations, in reading order.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnnotationPage'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+    post:
+      operationId: createAnnotation
+      summary: Create an annotation
+      description: >-
+        One selector must resolve without the text layer (AN4); an `itemId` must carry the document
+        (AN2).
+
+
+        **Scope:** `annotations:write`.
+      tags:
+        - Reading
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnnotationCreate'
+      responses:
+        '201':
+          description: The annotation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Annotation'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: The write is refused by a uniqueness rule, a state rule or a data-model invariant.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/annotations/{id}:
+    get:
+      operationId: getAnnotation
+      summary: Fetch one annotation
+      description: |-
+        The `ETag` is the version; send it back as `If-Match` to write.
+
+        **Scope:** `annotations:read`.
+      tags:
+        - Reading
+      parameters:
+        - in: path
+          name: id
+          schema:
+            description: The record id (a ULID).
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: The record id (a ULID).
+      responses:
+        '200':
+          description: The annotation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Annotation'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+    patch:
+      operationId: updateAnnotation
+      summary: Update an annotation
+      description: |-
+        The target never moves. A stale `If-Match` is refused with 412.
+
+        **Scope:** `annotations:write`.
+      tags:
+        - Reading
+      parameters:
+        - in: path
+          name: id
+          schema:
+            description: The record id (a ULID).
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: The record id (a ULID).
+        - in: header
+          name: if-match
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnnotationUpdate'
+      responses:
+        '200':
+          description: The annotation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Annotation'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '412':
+          description: The `If-Match` version is stale. Re-read and retry; nothing was merged (P1).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/annotations/{id}/trash:
+    post:
+      operationId: trashAnnotation
+      summary: Move an annotation to the trash
+      description: |-
+        Nothing is deleted (P5); the trash restores it.
+
+        **Scope:** `annotations:write`.
+      tags:
+        - Reading
+      parameters:
+        - in: path
+          name: id
+          schema:
+            description: The record id (a ULID).
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: The record id (a ULID).
+      responses:
+        '200':
+          description: The trashed annotation.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Annotation'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/annotations/{id}/note:
+    post:
+      operationId: noteFromAnnotation
+      summary: Make a note from an annotation
+      description: >-
+        The note quotes the passage, carries the comment, and ends with a Pandoc citation such as
+        `[@key, p. 12]`.
+
+
+        **Scope:** `notes:write`.
+      tags:
+        - Reading
+      parameters:
+        - in: path
+          name: id
+          schema:
+            description: The record id (a ULID).
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: The record id (a ULID).
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NoteFromAnnotation'
+      responses:
+        '201':
+          description: The note.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Note'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
   /api/v1/fields:
     get:
       operationId: listCustomFields
@@ -8158,6 +8521,14 @@ components:
         - loserId
       additionalProperties: false
       title: MergeRequest
+    NoteFromAnnotation:
+      type: object
+      properties:
+        itemId:
+          description: Defaults to the annotation’s own reading context.
+          $ref: '#/components/schemas/Id'
+      additionalProperties: false
+      title: NoteFromAnnotation
     FieldValueWrite:
       type: object
       properties:
@@ -12826,6 +13197,102 @@ components:
       title: Annotation
       description: A reading annotation as a record. The document bytes are never modified to store one;
         export to embedded PDF annotations produces a new document with its own hash (AN1).
+    AnnotationCreate:
+      type: object
+      properties:
+        documentId:
+          description: The W3C target source. The annotation belongs to the bytes (ADR-0009).
+          $ref: '#/components/schemas/Id'
+        itemId:
+          description: Reading context. A live attachment must exist for (itemId, documentId) (AN2).
+          anyOf:
+            - $ref: '#/components/schemas/Id'
+            - type: 'null'
+        attachmentId:
+          description: The route by which the document was read.
+          anyOf:
+            - $ref: '#/components/schemas/Id'
+            - type: 'null'
+        annotationType:
+          $ref: '#/components/schemas/AnnotationType'
+        motivation:
+          $ref: '#/components/schemas/AnnotationMotivation'
+        selector:
+          $ref: '#/components/schemas/AnnotationSelectorSet'
+        bodyText:
+          description: The comment attached to the annotation.
+          anyOf:
+            - type: string
+              maxLength: 1000000
+            - type: 'null'
+        bodyFormat:
+          description: Defaults to `markdown`.
+          $ref: '#/components/schemas/AnnotationBodyFormat'
+        colour:
+          anyOf:
+            - $ref: '#/components/schemas/HexColour'
+            - type: 'null'
+        pageIndex:
+          description: Zero-based physical page.
+          anyOf:
+            - type: integer
+              minimum: 0
+              maximum: 9007199254740991
+            - type: 'null'
+        pageLabel:
+          description: The printed page label, which is frequently not the physical index.
+          anyOf:
+            - type: string
+              maxLength: 32
+            - type: 'null'
+        authorName:
+          description: For annotations imported from someone else.
+          anyOf:
+            - type: string
+              minLength: 1
+              maxLength: 1024
+            - type: 'null'
+        isExternal:
+          type: boolean
+        externalRef:
+          anyOf:
+            - type: string
+              maxLength: 255
+            - type: 'null'
+      required:
+        - documentId
+        - annotationType
+        - motivation
+        - selector
+      additionalProperties: false
+      title: AnnotationCreate
+    AnnotationUpdate:
+      type: object
+      properties:
+        annotationType:
+          $ref: '#/components/schemas/AnnotationType'
+        motivation:
+          $ref: '#/components/schemas/AnnotationMotivation'
+        selector:
+          $ref: '#/components/schemas/AnnotationSelectorSet'
+        bodyText:
+          anyOf:
+            - type: string
+              maxLength: 1000000
+            - type: 'null'
+        bodyFormat:
+          $ref: '#/components/schemas/AnnotationBodyFormat'
+        colour:
+          anyOf:
+            - $ref: '#/components/schemas/HexColour'
+            - type: 'null'
+        pageLabel:
+          anyOf:
+            - type: string
+              maxLength: 32
+            - type: 'null'
+      additionalProperties: false
+      title: AnnotationUpdate
     TextualBody:
       type: object
       properties:
@@ -15582,6 +16049,20 @@ components:
         - page
       additionalProperties: false
       title: NotePage
+    AnnotationPage:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Annotation'
+        page:
+          $ref: '#/components/schemas/PageInfo'
+      required:
+        - data
+        - page
+      additionalProperties: false
+      title: AnnotationPage
     CreatorPage:
       type: object
       properties:
@@ -16000,102 +16481,6 @@ components:
           type: boolean
       additionalProperties: false
       title: FieldValueUpdate
-    AnnotationCreate:
-      type: object
-      properties:
-        documentId:
-          description: The W3C target source. The annotation belongs to the bytes (ADR-0009).
-          $ref: '#/components/schemas/Id'
-        itemId:
-          description: Reading context. A live attachment must exist for (itemId, documentId) (AN2).
-          anyOf:
-            - $ref: '#/components/schemas/Id'
-            - type: 'null'
-        attachmentId:
-          description: The route by which the document was read.
-          anyOf:
-            - $ref: '#/components/schemas/Id'
-            - type: 'null'
-        annotationType:
-          $ref: '#/components/schemas/AnnotationType'
-        motivation:
-          $ref: '#/components/schemas/AnnotationMotivation'
-        selector:
-          $ref: '#/components/schemas/AnnotationSelectorSet'
-        bodyText:
-          description: The comment attached to the annotation.
-          anyOf:
-            - type: string
-              maxLength: 1000000
-            - type: 'null'
-        bodyFormat:
-          description: Defaults to `markdown`.
-          $ref: '#/components/schemas/AnnotationBodyFormat'
-        colour:
-          anyOf:
-            - $ref: '#/components/schemas/HexColour'
-            - type: 'null'
-        pageIndex:
-          description: Zero-based physical page.
-          anyOf:
-            - type: integer
-              minimum: 0
-              maximum: 9007199254740991
-            - type: 'null'
-        pageLabel:
-          description: The printed page label, which is frequently not the physical index.
-          anyOf:
-            - type: string
-              maxLength: 32
-            - type: 'null'
-        authorName:
-          description: For annotations imported from someone else.
-          anyOf:
-            - type: string
-              minLength: 1
-              maxLength: 1024
-            - type: 'null'
-        isExternal:
-          type: boolean
-        externalRef:
-          anyOf:
-            - type: string
-              maxLength: 255
-            - type: 'null'
-      required:
-        - documentId
-        - annotationType
-        - motivation
-        - selector
-      additionalProperties: false
-      title: AnnotationCreate
-    AnnotationUpdate:
-      type: object
-      properties:
-        annotationType:
-          $ref: '#/components/schemas/AnnotationType'
-        motivation:
-          $ref: '#/components/schemas/AnnotationMotivation'
-        selector:
-          $ref: '#/components/schemas/AnnotationSelectorSet'
-        bodyText:
-          anyOf:
-            - type: string
-              maxLength: 1000000
-            - type: 'null'
-        bodyFormat:
-          $ref: '#/components/schemas/AnnotationBodyFormat'
-        colour:
-          anyOf:
-            - $ref: '#/components/schemas/HexColour'
-            - type: 'null'
-        pageLabel:
-          anyOf:
-            - type: string
-              maxLength: 32
-            - type: 'null'
-      additionalProperties: false
-      title: AnnotationUpdate
     WebAnnotation:
       type: object
       properties:
@@ -16261,20 +16646,6 @@ components:
         - page
       additionalProperties: false
       title: DocumentPage
-    AnnotationPage:
-      type: object
-      properties:
-        data:
-          type: array
-          items:
-            $ref: '#/components/schemas/Annotation'
-        page:
-          $ref: '#/components/schemas/PageInfo'
-      required:
-        - data
-        - page
-      additionalProperties: false
-      title: AnnotationPage
   securitySchemes:
     bearerAuth:
       type: http

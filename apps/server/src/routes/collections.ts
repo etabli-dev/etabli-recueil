@@ -31,6 +31,7 @@ import {
   pageQuery,
   problems,
 } from '../openapi-kit.js';
+import { MAX_EXPORT_ITEMS, smartCollectionItems } from '../export.js';
 import { summariseItems } from '../queries.js';
 import {
   CollectionMembershipChangeSchema,
@@ -161,7 +162,33 @@ export const collectionRoutes: FastifyPluginAsync = async (app) => {
     const { id } = parseOrThrow(z.object({ id: IdSchema }), request.params, 'path');
     const query = parseOrThrow(z.object(includeTrashedQuery), coerceQuery(request.query), 'query');
     const page = resolvePageParams(request.query);
-    recueil.collections.get(id, { includeTrashed: true });
+    const collection = recueil.collections.get(id, { includeTrashed: true });
+
+    if (collection.kind === 'smart') {
+      // A saved search has no rows to page (C2): its membership is its query, run now. The result
+      // is ranked, so the cursor is an offset into that ranking.
+      const ids = smartCollectionItems(recueil, collection, MAX_EXPORT_ITEMS);
+      const offset = page.cursor === undefined ? 0 : Number.parseInt(Buffer.from(page.cursor, 'base64url').toString('utf8'), 10) || 0;
+      const limit = page.limit;
+      const slice = ids.slice(offset, offset + limit);
+      const rows = slice
+        .map((itemId) => {
+          try {
+            return recueil.library.getItem(itemId).item;
+          } catch {
+            return null;
+          }
+        })
+        .filter((row): row is NonNullable<typeof row> => row !== null);
+      const hasMore = offset + limit < ids.length;
+      return sendJson(reply, ItemSummaryPageSchema, {
+        data: summariseItems(recueil.db, rows),
+        page: pageInfo(
+          { nextCursor: hasMore ? Buffer.from(String(offset + limit), 'utf8').toString('base64url') : null, hasMore, limit },
+          ids.length,
+        ),
+      });
+    }
 
     const result = recueil.collections.listItems(id, {
       ...page,

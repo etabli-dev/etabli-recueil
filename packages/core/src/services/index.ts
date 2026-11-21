@@ -15,3 +15,6 @@ export * from './trash-record.js';
 export * from './trash.js';
 export * from './users.js';
 export * from './merge.js';
+export * from './annotations.js';
+export * from './annotation-note.js';
+export * from './saved-search.js';

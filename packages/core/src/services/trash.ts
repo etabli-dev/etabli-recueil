@@ -22,6 +22,7 @@ import type { TrashRow } from '../db/schema.js';
 import { ConflictError, NotFoundError, ValidationError } from '../errors.js';
 import { nowTimestamp } from '../time.js';
 import type { Actor } from './actor.js';
+import type { AnnotationService } from './annotations.js';
 import type { AuditService } from './audit.js';
 import type { CollectionService } from './collections.js';
 import type { CreatorService } from './creators.js';
@@ -44,6 +45,7 @@ export interface ListTrashOptions {
 
 /** The services `restore` dispatches to. Every one of them is optional so a partial wiring works. */
 export interface TrashDependencies {
+  annotations?: AnnotationService;
   library?: LibraryService;
   collections?: CollectionService;
   tags?: TagService;
@@ -151,7 +153,12 @@ export class TrashService {
         this.require(this.services.documents, entityType).restoreAttachment(entityId, actor);
         return;
       case 'annotation':
-        // Restored as part of the item it hangs off (I4), never on its own.
+        // One trashed on its own comes back on its own; one that went with its item comes back
+        // with the item (I4), which `AnnotationService.restore` refuses with the reason.
+        if (this.services.annotations !== undefined) {
+          this.services.annotations.restore(entityId, actor);
+          return;
+        }
         throw new ValidationError(
           `An annotation is restored with the item it belongs to, not by itself (I4).`,
           { entityType, entityId },

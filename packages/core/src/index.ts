@@ -43,6 +43,7 @@ import { NoteService } from './services/notes.js';
 import { ProvenanceService } from './services/provenance.js';
 import { SearchService } from './services/search.js';
 import { TagService } from './services/tags.js';
+import { AnnotationService } from './services/annotations.js';
 import { ItemMergeService } from './services/merge.js';
 import { TrashService } from './services/trash.js';
 import { ensureLocalUser } from './services/users.js';
@@ -91,6 +92,8 @@ export interface Recueil {
   trash: TrashService;
   /** Reversible item merges (CONCEPT §5.6). */
   merges: ItemMergeService;
+  /** Reading annotations as records (ADR-0009). */
+  annotations: AnnotationService;
   /** The single local account every owned record belongs to in v1. */
   user: UserRow;
   /** An actor for that account, for callers that have no request context of their own. */
@@ -131,6 +134,7 @@ export const createRecueil = (options: CreateRecueilOptions): Recueil => {
   const notes = new NoteService(db, audit, user.id, indexer);
   const customFields = new CustomFieldService(db, audit);
   const creators = new CreatorService(db, audit, indexer);
+  const annotations = new AnnotationService(db, audit, user.id);
   const merges = new ItemMergeService(db, audit, { library, tags, collections, creators });
   const trash = new TrashService(db, audit, {
     library,
@@ -139,6 +143,7 @@ export const createRecueil = (options: CreateRecueilOptions): Recueil => {
     notes,
     creators,
     documents,
+    annotations,
   });
 
   let closed = false;
@@ -158,6 +163,7 @@ export const createRecueil = (options: CreateRecueilOptions): Recueil => {
     search,
     trash,
     merges,
+    annotations,
     user,
     actor: userActor(user.id),
     close: () => {
