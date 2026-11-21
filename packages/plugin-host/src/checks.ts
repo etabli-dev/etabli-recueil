@@ -148,7 +148,13 @@ export class ChecksEngine {
     }
 
     const results = (await this.pool(tasks, options.concurrency ?? 4)).flat();
-    if (options.dryRun !== true) this.store(results, null);
+    if (options.dryRun !== true) {
+      this.store(results, null);
+      this.clearResolved(
+        checks.filter((hook) => hook.impl.subjectTypes.includes('library')).map((hook) => hook.impl.id),
+        results,
+      );
+    }
     return { auditRunId: null, results: this.decorate(results, checks), subjects: itemIds.length };
   }
 
@@ -224,6 +230,30 @@ export class ChecksEngine {
         else this.recueil.db.update(schema.checkResults).set(values).where(eq(schema.checkResults.id, existing.id)).run();
       }
     })();
+  }
+
+  /**
+   * A library-wide check reports only the subjects it found a problem with. A subject it reported
+   * last time and not this time has been fixed: its row becomes a `pass`, so the report does not
+   * keep showing a problem that is gone (CK1).
+   */
+  private clearResolved(libraryCheckIds: readonly string[], results: readonly CheckResult[]): void {
+    if (libraryCheckIds.length === 0) return;
+    const current = new Set(results.map((result) => `${result.checkId}\u0000${result.subjectId}`));
+    const now = new Date().toISOString();
+    const stale = this.recueil.db
+      .select()
+      .from(schema.checkResults)
+      .where(and(inArray(schema.checkResults.checkId, [...libraryCheckIds]), eq(schema.checkResults.runScopeKey, '')))
+      .all()
+      .filter((row) => row.status !== 'pass' && !current.has(`${row.checkId}\u0000${row.subjectId}`));
+    for (const row of stale) {
+      this.recueil.db
+        .update(schema.checkResults)
+        .set({ status: 'pass', severity: 'info', message: 'no longer found', checkedAt: now, acknowledgedAt: null })
+        .where(eq(schema.checkResults.id, row.id))
+        .run();
+    }
   }
 
   /** Accept a failure as expected (`acknowledged_at`). */

@@ -102,3 +102,20 @@ describe('the checks engine', () => {
     expect(['skipped', 'fail']).toContain(run.results[0]?.status);
   });
 });
+
+describe('library-wide checks', () => {
+  it('clears a problem that has been fixed since the last run', async () => {
+    const make = (key: string) =>
+      recueil.library.createItem({ itemType: 'article', title: key, bibliographic: { title: key, citationKey: key } }, recueil.actor).item.id;
+    make('smith2020');
+    const b = make('Smith2020');
+    const checks = await engine();
+    await checks.runLibrary({ checkIds: ['citation_key'], offline: true });
+    const failing = () =>
+      (recueil.connection.prepare(`select count(*) as n from check_results where check_id = 'citation_key' and status = 'fail'`).get() as { n: number }).n;
+    expect(failing()).toBe(2);
+    recueil.library.updateItem(b, { bibliographic: { citationKey: 'jones2021' } }, recueil.actor);
+    await checks.runLibrary({ checkIds: ['citation_key'], offline: true });
+    expect(failing()).toBe(0);
+  });
+});
