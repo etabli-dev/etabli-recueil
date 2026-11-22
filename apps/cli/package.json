@@ -35,6 +35,7 @@
   },
   "dependencies": {
     "@recueil/analytics": "workspace:*",
+    "@recueil/sr": "workspace:*",
     "@recueil/core": "workspace:*",
     "@recueil/formats": "workspace:*",
     "@recueil/import-paperless": "workspace:*",

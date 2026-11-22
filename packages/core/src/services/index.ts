@@ -20,3 +20,6 @@ export * from './annotation-note.js';
 export * from './saved-search.js';
 export * from './graph.js';
 export * from './curated.js';
+export * from './review.js';
+export * from './extraction.js';
+export * from './rob-instruments.js';

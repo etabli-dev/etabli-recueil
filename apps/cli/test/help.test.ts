@@ -58,6 +58,7 @@ describe('recueil --help', () => {
       'plugin',
       'graph',
       'network',
+      'sr',
     ]);
     for (const spec of shipped) {
       expect(commandEntry(stdout, spec.name), `\`${spec.name}\` works`).not.toContain('not implemented');

@@ -13,6 +13,7 @@ import { registerRules } from './commands/rules.js';
 import { registerServe } from './commands/serve.js';
 import { registerGraph } from './commands/graph.js';
 import { registerNetwork } from './commands/network.js';
+import { registerSr } from './commands/sr.js';
 import { registerSync } from './commands/sync.js';
 import { registerCheck, registerDedup, registerEnrich, registerPlugin } from './commands/phase3.js';
 import { Ui } from './ui.js';
@@ -134,6 +135,7 @@ export const buildProgram = (): BuiltProgram => {
     plugin: registerPlugin,
     graph: registerGraph,
     network: registerNetwork,
+    sr: registerSr,
   };
 
   for (const spec of COMMANDS) {

@@ -28,7 +28,7 @@ export const PHASE_TITLES: Readonly<Record<number, string>> = {
 };
 
 /** The phase this build belongs to. Not every command in it is finished; see `implemented`. */
-export const CURRENT_PHASE = 6;
+export const CURRENT_PHASE = 7;
 
 export interface CommandSpec {
   /** The subcommand name, as typed. */
@@ -176,7 +176,7 @@ export const COMMANDS: readonly CommandSpec[] = [
     name: 'sr',
     summary: 'Run a systematic review',
     phase: 7,
-    implemented: false,
+    implemented: true,
     promise: 'Search runs, screening, extraction, risk of bias and PRISMA counts.',
   },
 ];

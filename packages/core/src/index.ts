@@ -46,6 +46,8 @@ import { TagService } from './services/tags.js';
 import { AnnotationService } from './services/annotations.js';
 import { CuratedNetworkService } from './services/curated.js';
 import { GraphService } from './services/graph.js';
+import { ExtractionService } from './services/extraction.js';
+import { ReviewService } from './services/review.js';
 import { ItemMergeService } from './services/merge.js';
 import { TrashService } from './services/trash.js';
 import { ensureLocalUser } from './services/users.js';
@@ -100,6 +102,10 @@ export interface Recueil {
   graph: GraphService;
   /** Curated networks: versioned publication figures (CONCEPT §5.9). */
   curated: CuratedNetworkService;
+  /** Systematic reviews: searches, records, screening, PRISMA (CONCEPT §5.10). */
+  reviews: ReviewService;
+  /** Extraction forms and values, and risk-of-bias assessments (CONCEPT §5.10). */
+  extraction: ExtractionService;
   /** The single local account every owned record belongs to in v1. */
   user: UserRow;
   /** An actor for that account, for callers that have no request context of their own. */
@@ -143,6 +149,8 @@ export const createRecueil = (options: CreateRecueilOptions): Recueil => {
   const annotations = new AnnotationService(db, audit, user.id);
   const graph = new GraphService(db, library);
   const curated = new CuratedNetworkService(db, creators, user.id);
+  const reviews = new ReviewService(db, audit, library, creators, user.id);
+  const extraction = new ExtractionService(db, audit, customFields, reviews, user.id);
   const merges = new ItemMergeService(db, audit, { library, tags, collections, creators });
   const trash = new TrashService(db, audit, {
     library,
@@ -174,6 +182,8 @@ export const createRecueil = (options: CreateRecueilOptions): Recueil => {
     annotations,
     graph,
     curated,
+    reviews,
+    extraction,
     user,
     actor: userActor(user.id),
     close: () => {

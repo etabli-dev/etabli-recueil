@@ -43,6 +43,14 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm check:spec
       - run: pnpm test
+      # Fixtures the R client tests read are written by the TypeScript tests that produce them
+      # (packages/sr); when one is new or stale, this is the copy to commit.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always() && matrix.node == '22'
+        with:
+          name: r-fixtures
+          path: clients/r/tests/testthat/fixtures/
+          retention-days: 3
       - run: pnpm audit --audit-level high
   browser:
     name: Built client against real API and SQLite

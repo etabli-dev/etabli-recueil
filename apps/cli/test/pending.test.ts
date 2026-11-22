@@ -50,24 +50,24 @@ describe('commands that are not implemented yet', () => {
   );
 
   it('answers with the phase even when given arguments it cannot understand', async () => {
-    const result = await runCli(['sr', 'screen', '--scope', 'everything', '--rule', 'r.json']);
+    const result = await runCli(['token', 'create', '--scope', 'everything', '--rule', 'r.json']);
     expect(result.code).toBe(1);
     expect(result.stderr).toContain('is not implemented yet');
     expect(result.stderr).not.toContain('unknown option');
   });
 
   it('reports itself in JSON when asked to', async () => {
-    const result = await runCli(['--json', 'sr']);
+    const result = await runCli(['--json', 'token']);
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
     expect(payload['error']).toBe('not_implemented');
-    expect(payload['command']).toBe('sr');
-    expect(payload['phase']).toBe(7);
+    expect(payload['command']).toBe('token');
+    expect(payload['phase']).toBe(1);
     expect(payload['currentPhase']).toBe(CURRENT_PHASE);
   });
 
   it('survives --quiet without becoming silent about the failure', async () => {
-    const result = await runCli(['--quiet', 'sr']);
+    const result = await runCli(['--quiet', 'token']);
     expect(result.code).toBe(1);
     expect(result.stderr).toContain('is not implemented yet');
   });

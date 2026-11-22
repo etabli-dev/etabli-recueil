@@ -52,6 +52,12 @@ export const SCOPE_RESOURCES = [
   'connector',
   'tokens',
   'system',
+  // Phases 4–7: reading annotations, the analytics and graph exports, curated networks, and
+  // systematic reviews (`sr` covers searches, screening, extraction, risk of bias and PRISMA).
+  'annotations',
+  'analytics',
+  'networks',
+  'sr',
 ] as const;
 
 export type ScopeResource = (typeof SCOPE_RESOURCES)[number];

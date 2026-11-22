@@ -40,6 +40,7 @@
     "@fastify/multipart": "^9.2.1",
     "@fastify/sensible": "^6.0.7",
     "@recueil/analytics": "workspace:*",
+    "@recueil/sr": "workspace:*",
     "@recueil/core": "workspace:*",
     "@recueil/formats": "workspace:*",
     "@recueil/ingest": "workspace:*",

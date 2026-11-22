@@ -1023,8 +1023,8 @@ export const customFields = sqliteTable(
  * the absence of a row.
  *
  * The `review_id`, `extraction_form_id` and their two scope-key mirrors belong to the
- * systematic-review phase and are added by `0007_sr` (§11), so the slot key here is the Phase 1
- * one: field, item, repeatable group, ordinal.
+ * systematic-review phase (`0008_systematic_review`): the slot key is field, item, review, form
+ * version, repeatable group, ordinal — so one item extracted in two reviews keeps two values (EF2).
  */
 export const fieldValues = sqliteTable(
   'field_values',
@@ -1036,6 +1036,12 @@ export const fieldValues = sqliteTable(
     itemId: text('item_id')
       .notNull()
       .references(() => items.id, { onDelete: 'cascade' }),
+    /** Extraction data (Phase 7): the review the value was extracted in, and under which form version. */
+    reviewId: text('review_id').references((): AnySQLiteColumn => reviews.id, { onDelete: 'cascade' }),
+    extractionFormId: text('extraction_form_id').references((): AnySQLiteColumn => extractionForms.id, { onDelete: 'restrict' }),
+    /** `COALESCE(review_id, '')` and `COALESCE(extraction_form_id, '')`; part of the slot key. */
+    reviewScopeKey: text('review_scope_key').notNull().default(''),
+    formScopeKey: text('form_scope_key').notNull().default(''),
     /** The repeatable group instance: `arm:intervention`, `outcome:mortality_30d`. */
     groupKey: text('group_key'),
     /** `COALESCE(group_key, '')`; see §1.1. */
@@ -1057,9 +1063,14 @@ export const fieldValues = sqliteTable(
     uniqueIndex('ux_field_values_slot').on(
       table.fieldId,
       table.itemId,
+      table.reviewScopeKey,
+      table.formScopeKey,
       table.groupScopeKey,
       table.ordinal,
     ),
+    index('ix_field_values_review').on(table.reviewId, table.itemId).where(sql`review_id is not null`),
+    check('ck_field_values_review_scope_key', sql`"review_scope_key" = coalesce("review_id", '')`),
+    check('ck_field_values_form_scope_key', sql`"form_scope_key" = coalesce("extraction_form_id", '')`),
     index('ix_field_values_item').on(table.itemId, table.fieldId),
     index('ix_field_values_field_text')
       .on(table.fieldId, table.valueText)
@@ -2092,6 +2103,323 @@ export const curatedNetworkVersions = sqliteTable(
     jsonValidOrNull('ck_curated_network_versions_snapshot_json', 'frozen_snapshot'),
   ],
 );
+
+
+/* ============================================================================================== */
+/* 11. Systematic review (`spec/data-model.md` §8, `spec/systematic-review.md`; Phase 7)          */
+/* ============================================================================================== */
+
+export const REVIEW_STATUSES = ['draft', 'searching', 'screening', 'full_text', 'extraction', 'analysis', 'complete', 'archived'] as const;
+export const REVIEW_CONFLICT_POLICIES = ['discuss', 'third_screener', 'inclusive'] as const;
+export const REVIEW_RECORD_STAGES = ['identified', 'deduplicated', 'title_abstract', 'full_text', 'included', 'excluded'] as const;
+export const REVIEW_DEDUP_STATUSES = ['unique', 'duplicate', 'merged_master'] as const;
+export const SCREENING_STATUSES = ['pending', 'included', 'excluded', 'maybe', 'conflict'] as const;
+export const RETRIEVAL_STATUSES = ['not_attempted', 'sought', 'retrieved', 'not_retrieved'] as const;
+export const EXTRACTION_STATUSES = ['not_started', 'in_progress', 'complete', 'not_applicable'] as const;
+export const SCREENING_STAGES = ['title_abstract', 'full_text'] as const;
+export const SCREENING_DECISIONS = ['include', 'exclude', 'maybe'] as const;
+export const EXTRACTION_FORM_STATUSES = ['draft', 'active', 'locked'] as const;
+export const EXTRACTION_TEMPLATES = ['rct', 'observational', 'diagnostic', 'qualitative', 'custom'] as const;
+export const PRISMA_STAGE_KEYS = [
+  'records_identified_databases',
+  'records_identified_registers',
+  'records_identified_other',
+  'records_removed_duplicates',
+  'records_removed_automation',
+  'records_removed_other',
+  'records_screened',
+  'records_excluded',
+  'reports_sought',
+  'reports_not_retrieved',
+  'reports_assessed',
+  'reports_excluded',
+  'studies_included',
+  'reports_of_included_studies',
+] as const;
+export const PRISMA_COMPUTED_BY = ['live', 'frozen'] as const;
+
+/** §8.1. */
+export const reviews = sqliteTable(
+  'reviews',
+  {
+    id: text('id').primaryKey(),
+    publicId: text('public_id').notNull(),
+    title: text('title').notNull(),
+    question: text('question'),
+    protocol: text('protocol').notNull().default('{}'),
+    registrationId: text('registration_id'),
+    registrationUrl: text('registration_url'),
+    status: text('status', { enum: REVIEW_STATUSES }).notNull().default('draft'),
+    screenerCount: integer('screener_count').notNull().default(1),
+    blindMode: integer('blind_mode', { mode: 'boolean' }).notNull().default(false),
+    conflictPolicy: text('conflict_policy', { enum: REVIEW_CONFLICT_POLICIES }),
+    /** Ordered `{code, label, stage}`: PRISMA reports reasons in a fixed order. */
+    exclusionReasons: text('exclusion_reasons').notNull().default('[]'),
+    automationDisclosure: integer('automation_disclosure', { mode: 'boolean' }).notNull().default(false),
+    ownerUserId: text('owner_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+    trashedAt: text('trashed_at'),
+  },
+  (table) => [
+    uniqueIndex('ux_reviews_public_id').on(table.publicId),
+    oneOf('ck_reviews_status', 'status', REVIEW_STATUSES),
+    oneOfOrNull('ck_reviews_conflict_policy', 'conflict_policy', REVIEW_CONFLICT_POLICIES),
+    check('ck_reviews_screener_count', sql`"screener_count" in (1, 2)`),
+    boolean01('ck_reviews_blind_mode_bool', 'blind_mode'),
+    boolean01('ck_reviews_automation_disclosure_bool', 'automation_disclosure'),
+    jsonValid('ck_reviews_protocol_json', 'protocol'),
+    jsonValid('ck_reviews_exclusion_reasons_json', 'exclusion_reasons'),
+  ],
+);
+
+/** §8.2. SR1: `records_returned` is what the database said; SR2: no delete once records cite it. */
+export const searchRuns = sqliteTable(
+  'search_runs',
+  {
+    id: text('id').primaryKey(),
+    reviewId: text('review_id')
+      .notNull()
+      .references(() => reviews.id, { onDelete: 'cascade' }),
+    sourceDatabase: text('source_database').notNull(),
+    interface: text('interface'),
+    queryString: text('query_string').notNull(),
+    queryTranslated: text('query_translated'),
+    filters: text('filters').notNull().default('{}'),
+    dateLimitFrom: text('date_limit_from'),
+    dateLimitTo: text('date_limit_to'),
+    executedAt: text('executed_at').notNull(),
+    executedByUserId: text('executed_by_user_id').references(() => users.id, { onDelete: 'restrict' }),
+    recordsReturned: integer('records_returned'),
+    recordsImported: integer('records_imported'),
+    duplicatesRemoved: integer('duplicates_removed'),
+    sourceFileDocumentId: text('source_file_document_id').references(() => documents.id, { onDelete: 'restrict' }),
+    importJobId: text('import_job_id').references(() => jobs.id, { onDelete: 'set null' }),
+    rerunOfSearchRunId: text('rerun_of_search_run_id').references((): AnySQLiteColumn => searchRuns.id, { onDelete: 'restrict' }),
+    notes: text('notes'),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => [index('ix_search_runs_review').on(table.reviewId, table.executedAt), jsonValid('ck_search_runs_filters_json', 'filters')],
+);
+
+/** §8.3. The unit PRISMA counts. RR2: the screening columns are caches of `screening_decisions`. */
+export const reviewRecords = sqliteTable(
+  'review_records',
+  {
+    id: text('id').primaryKey(),
+    reviewId: text('review_id')
+      .notNull()
+      .references(() => reviews.id, { onDelete: 'cascade' }),
+    itemId: text('item_id')
+      .notNull()
+      .references(() => items.id, { onDelete: 'restrict' }),
+    stage: text('stage', { enum: REVIEW_RECORD_STAGES }).notNull().default('identified'),
+    dedupStatus: text('dedup_status', { enum: REVIEW_DEDUP_STATUSES }).notNull().default('unique'),
+    duplicateOfId: text('duplicate_of_id').references((): AnySQLiteColumn => reviewRecords.id, { onDelete: 'restrict' }),
+    screeningStatus: text('screening_status', { enum: SCREENING_STATUSES }).notNull().default('pending'),
+    exclusionReasonCode: text('exclusion_reason_code'),
+    retrievalStatus: text('retrieval_status', { enum: RETRIEVAL_STATUSES }).notNull().default('not_attempted'),
+    retrievalNote: text('retrieval_note'),
+    fullTextDocumentId: text('full_text_document_id').references(() => documents.id, { onDelete: 'set null' }),
+    extractionStatus: text('extraction_status', { enum: EXTRACTION_STATUSES }).notNull().default('not_started'),
+    isSnowballed: integer('is_snowballed', { mode: 'boolean' }).notNull().default(false),
+    snowballFromItemId: text('snowball_from_item_id').references(() => items.id, { onDelete: 'restrict' }),
+    studyGroupKey: text('study_group_key'),
+    addedAt: text('added_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('ux_review_records_review_item').on(table.reviewId, table.itemId),
+    index('ix_review_records_worklist').on(table.reviewId, table.screeningStatus, table.addedAt),
+    index('ix_review_records_item').on(table.itemId),
+    index('ix_review_records_stage').on(table.reviewId, table.stage),
+    index('ix_review_records_study_group').on(table.reviewId, table.studyGroupKey).where(sql`study_group_key is not null`),
+    check('ck_review_records_duplicate', sql`("dedup_status" = 'duplicate') = ("duplicate_of_id" is not null)`),
+    oneOf('ck_review_records_stage', 'stage', REVIEW_RECORD_STAGES),
+    oneOf('ck_review_records_dedup_status', 'dedup_status', REVIEW_DEDUP_STATUSES),
+    oneOf('ck_review_records_screening_status', 'screening_status', SCREENING_STATUSES),
+    oneOf('ck_review_records_retrieval_status', 'retrieval_status', RETRIEVAL_STATUSES),
+    oneOf('ck_review_records_extraction_status', 'extraction_status', EXTRACTION_STATUSES),
+    boolean01('ck_review_records_is_snowballed_bool', 'is_snowballed'),
+  ],
+);
+
+/** §8.4. Which searches found a record; exactly one primary source per record. */
+export const reviewRecordSources = sqliteTable(
+  'review_record_sources',
+  {
+    reviewRecordId: text('review_record_id')
+      .notNull()
+      .references(() => reviewRecords.id, { onDelete: 'cascade' }),
+    searchRunId: text('search_run_id')
+      .notNull()
+      .references(() => searchRuns.id, { onDelete: 'restrict' }),
+    externalRecordId: text('external_record_id'),
+    rawRecord: text('raw_record'),
+    isPrimarySource: integer('is_primary_source', { mode: 'boolean' }).notNull().default(false),
+    importedAt: text('imported_at').notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.reviewRecordId, table.searchRunId] }),
+    uniqueIndex('ux_review_record_sources_primary').on(table.reviewRecordId).where(sql`is_primary_source = 1`),
+    index('ix_review_record_sources_run').on(table.searchRunId),
+    boolean01('ck_review_record_sources_primary_bool', 'is_primary_source'),
+    jsonValidOrNull('ck_review_record_sources_raw_json', 'raw_record'),
+  ],
+);
+
+/** §8.5. Append-only (SD1); `tool_assisted` comes from the actor, never the client (SD2). */
+export const screeningDecisions = sqliteTable(
+  'screening_decisions',
+  {
+    id: text('id').primaryKey(),
+    reviewId: text('review_id')
+      .notNull()
+      .references(() => reviews.id, { onDelete: 'cascade' }),
+    reviewRecordId: text('review_record_id')
+      .notNull()
+      .references(() => reviewRecords.id, { onDelete: 'cascade' }),
+    stage: text('stage', { enum: SCREENING_STAGES }).notNull(),
+    screenerUserId: text('screener_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    decision: text('decision', { enum: SCREENING_DECISIONS }).notNull(),
+    exclusionReasonCode: text('exclusion_reason_code'),
+    exclusionReasonNote: text('exclusion_reason_note'),
+    decidedAt: text('decided_at').notNull(),
+    durationMs: integer('duration_ms'),
+    isCurrent: integer('is_current', { mode: 'boolean' }).notNull().default(true),
+    supersedesId: text('supersedes_id').references((): AnySQLiteColumn => screeningDecisions.id, { onDelete: 'set null' }),
+    supersededById: text('superseded_by_id').references((): AnySQLiteColumn => screeningDecisions.id, { onDelete: 'set null' }),
+    toolAssisted: integer('tool_assisted', { mode: 'boolean' }).notNull().default(false),
+    toolDetail: text('tool_detail'),
+    isConflictResolution: integer('is_conflict_resolution', { mode: 'boolean' }).notNull().default(false),
+    resolvesConflictBetween: text('resolves_conflict_between'),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('ux_screening_decisions_current').on(table.reviewRecordId, table.stage, table.screenerUserId).where(sql`is_current = 1`),
+    index('ix_screening_decisions_record').on(table.reviewRecordId, table.stage),
+    index('ix_screening_decisions_review_current').on(table.reviewId, table.stage, table.decision).where(sql`is_current = 1`),
+    index('ix_screening_decisions_screener').on(table.screenerUserId, table.decidedAt),
+    check('ck_screening_full_text_reason', sql`not ("stage" = 'full_text' and "decision" = 'exclude' and "exclusion_reason_code" is null)`),
+    oneOf('ck_screening_decisions_stage', 'stage', SCREENING_STAGES),
+    oneOf('ck_screening_decisions_decision', 'decision', SCREENING_DECISIONS),
+    boolean01('ck_screening_decisions_is_current_bool', 'is_current'),
+    boolean01('ck_screening_decisions_tool_assisted_bool', 'tool_assisted'),
+    boolean01('ck_screening_decisions_conflict_bool', 'is_conflict_resolution'),
+    jsonValidOrNull('ck_screening_decisions_tool_detail_json', 'tool_detail'),
+    jsonValidOrNull('ck_screening_decisions_resolves_json', 'resolves_conflict_between'),
+  ],
+);
+
+/** §8.6. A form references custom fields (EF1); locked after the first complete extraction (EF2). */
+export const extractionForms = sqliteTable(
+  'extraction_forms',
+  {
+    id: text('id').primaryKey(),
+    reviewId: text('review_id')
+      .notNull()
+      .references(() => reviews.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    version: integer('version').notNull().default(1),
+    template: text('template', { enum: EXTRACTION_TEMPLATES }),
+    schemaJson: text('schema_json').notNull(),
+    repeatableGroups: text('repeatable_groups').notNull().default('[]'),
+    status: text('status', { enum: EXTRACTION_FORM_STATUSES }).notNull().default('draft'),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('ux_extraction_forms_version').on(table.reviewId, table.name, table.version),
+    check('ck_extraction_forms_version', sql`"version" >= 1`),
+    oneOf('ck_extraction_forms_status', 'status', EXTRACTION_FORM_STATUSES),
+    oneOfOrNull('ck_extraction_forms_template', 'template', EXTRACTION_TEMPLATES),
+    jsonValid('ck_extraction_forms_schema_json', 'schema_json'),
+    jsonValid('ck_extraction_forms_groups_json', 'repeatable_groups'),
+  ],
+);
+
+/** §8.7. The instrument is copied in, so a later revision cannot rewrite old judgements. */
+export const robAssessments = sqliteTable(
+  'rob_assessments',
+  {
+    id: text('id').primaryKey(),
+    reviewId: text('review_id')
+      .notNull()
+      .references(() => reviews.id, { onDelete: 'cascade' }),
+    reviewRecordId: text('review_record_id')
+      .notNull()
+      .references(() => reviewRecords.id, { onDelete: 'cascade' }),
+    tool: text('tool').notNull(),
+    toolVersion: text('tool_version'),
+    instrument: text('instrument').notNull(),
+    signallingAnswers: text('signalling_answers').notNull().default('{}'),
+    domainJudgements: text('domain_judgements').notNull().default('{}'),
+    overallJudgement: text('overall_judgement'),
+    outcomeLabel: text('outcome_label'),
+    /** `COALESCE(outcome_label, '')`. */
+    outcomeKey: text('outcome_key').notNull().default(''),
+    armLabel: text('arm_label'),
+    assessorUserId: text('assessor_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    assessedAt: text('assessed_at').notNull(),
+    isCurrent: integer('is_current', { mode: 'boolean' }).notNull().default(true),
+    supersededById: text('superseded_by_id').references((): AnySQLiteColumn => robAssessments.id, { onDelete: 'set null' }),
+    notes: text('notes'),
+  },
+  (table) => [
+    uniqueIndex('ux_rob_assessments_current').on(table.reviewRecordId, table.tool, table.outcomeKey, table.assessorUserId).where(sql`is_current = 1`),
+    index('ix_rob_assessments_review').on(table.reviewId, table.tool),
+    check('ck_rob_assessments_outcome_key', sql`"outcome_key" = coalesce("outcome_label", '')`),
+    boolean01('ck_rob_assessments_is_current_bool', 'is_current'),
+    jsonValid('ck_rob_assessments_instrument_json', 'instrument'),
+    jsonValid('ck_rob_assessments_answers_json', 'signalling_answers'),
+    jsonValid('ck_rob_assessments_domains_json', 'domain_judgements'),
+  ],
+);
+
+/** §8.8. Frozen PRISMA snapshots; a snapshot is never recomputed (PC1). */
+export const prismaCounts = sqliteTable(
+  'prisma_counts',
+  {
+    id: text('id').primaryKey(),
+    reviewId: text('review_id')
+      .notNull()
+      .references(() => reviews.id, { onDelete: 'cascade' }),
+    snapshotAt: text('snapshot_at').notNull(),
+    snapshotLabel: text('snapshot_label'),
+    stageKey: text('stage_key', { enum: PRISMA_STAGE_KEYS }).notNull(),
+    sourceLabel: text('source_label'),
+    sourceScopeKey: text('source_scope_key').notNull().default(''),
+    searchRunId: text('search_run_id').references(() => searchRuns.id, { onDelete: 'set null' }),
+    exclusionReasonCode: text('exclusion_reason_code'),
+    reasonScopeKey: text('reason_scope_key').notNull().default(''),
+    countValue: integer('count_value').notNull(),
+    computedBy: text('computed_by', { enum: PRISMA_COMPUTED_BY }).notNull(),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('ux_prisma_counts_cell').on(table.reviewId, table.snapshotAt, table.stageKey, table.sourceScopeKey, table.reasonScopeKey),
+    check('ck_prisma_counts_source_scope', sql`"source_scope_key" = coalesce("source_label", '')`),
+    check('ck_prisma_counts_reason_scope', sql`"reason_scope_key" = coalesce("exclusion_reason_code", '')`),
+    check('ck_prisma_counts_count', sql`"count_value" >= 0`),
+    oneOf('ck_prisma_counts_stage_key', 'stage_key', PRISMA_STAGE_KEYS),
+    oneOf('ck_prisma_counts_computed_by', 'computed_by', PRISMA_COMPUTED_BY),
+  ],
+);
+
+export type ReviewRow = typeof reviews.$inferSelect;
+export type SearchRunRow = typeof searchRuns.$inferSelect;
+export type ReviewRecordRow = typeof reviewRecords.$inferSelect;
+export type ReviewRecordSourceRow = typeof reviewRecordSources.$inferSelect;
+export type ScreeningDecisionRow = typeof screeningDecisions.$inferSelect;
+export type ExtractionFormRow = typeof extractionForms.$inferSelect;
+export type RobAssessmentRow = typeof robAssessments.$inferSelect;
+export type PrismaCountRow = typeof prismaCounts.$inferSelect;
 
 /* -------------------------------------------------------------------------------------------- */
 /* Row types                                                                                       */

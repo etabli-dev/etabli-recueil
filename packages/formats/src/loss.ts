@@ -11,12 +11,15 @@
 /** The serialisation formats this package speaks. */
 export const FORMAT_NAMES = ['bibtex', 'biblatex', 'ris', 'csl-json'] as const;
 export type FormatName = (typeof FORMAT_NAMES)[number];
+/** Formats Recueil reads and never writes: search exports from bibliographic databases. */
+export const IMPORT_ONLY_FORMATS = ['medline'] as const;
+export type ImportOnlyFormat = (typeof IMPORT_ONLY_FORMATS)[number];
 
 /** One thing a conversion could not carry. */
 export interface LossEntry {
   /** `export` — Recueil had it and the format cannot hold it. `import` — the file had it and the contract cannot. */
   readonly direction: 'export' | 'import';
-  readonly format: FormatName;
+  readonly format: FormatName | ImportOnlyFormat;
   /** Zero-based position of the record in the batch. */
   readonly recordIndex: number;
   /** The entry key, RIS `ID` or CSL `id`, when the record has one — the human handle for the row. */
@@ -52,7 +55,7 @@ export class LossReport {
 
   constructor(
     private readonly direction: 'export' | 'import',
-    private readonly format: FormatName,
+    private readonly format: FormatName | ImportOnlyFormat,
   ) {}
 
   add(recordIndex: number, field: string, reason: string, value?: unknown, recordKey?: string): void {
