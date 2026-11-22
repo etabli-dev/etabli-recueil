@@ -1,7 +1,8 @@
 name: Clients
 # The R and Python clients (clients/r, clients/python): their own tests, on every change to them.
 # The R job installs bibliometrix and checks that the Web of Science export converts unmodified,
-# which is the Phase 5 exit criterion (CONCEPT §7).
+# which is the Phase 5 exit criterion (CONCEPT §7), and that the systematic-review exports load into
+# PRISMA2020, robvis and metafor unmodified (Phase 7).
 on:
   push:
     branches: [main, 'transition/**']
@@ -31,6 +32,9 @@ jobs:
           extra-packages: |
             any::bibliometrix
             any::igraph
+            any::metafor
+            any::PRISMA2020
+            any::robvis
             any::tidygraph
             any::rcmdcheck
       - uses: r-lib/actions/check-r-package@f9a764fea8d5c63df6ef9a5c7795bf7deb5d7e05 # v2

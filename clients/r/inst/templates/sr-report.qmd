@@ -1,0 +1,111 @@
+---
+title: "Systematic review report"
+subtitle: "Drafted from the Recueil library"
+format:
+  html:
+    toc: true
+  docx: default
+params:
+  review: ""          # the review id: recueil sr list
+  snapshot: ""        # optional: a frozen PRISMA snapshot (recueil sr prisma --freeze <label>)
+  rob_tool: "rob2"
+execute:
+  echo: false
+  warning: false
+---
+
+<!--
+  Copy this template next to your manuscript:
+    file.copy(system.file("templates", "sr-report.qmd", package = "recueil"), ".")
+  then render it with the review id:
+    quarto render sr-report.qmd -P review:<id>
+  It needs RECUEIL_URL and RECUEIL_TOKEN (a token with sr:read) in the environment.
+  Everything below is a skeleton: the numbers come from the library, the prose is yours.
+-->
+
+```{r setup}
+library(recueil)
+con <- rc_connect()
+review <- params$review
+stopifnot(nzchar(review))
+snapshot <- if (nzchar(params$snapshot)) params$snapshot else NULL
+meta <- rc_sr_reviews(con)
+meta <- meta[meta$id == review, ]
+counts <- rc_sr_prisma(con, review, snapshot = snapshot, template = FALSE)
+n <- function(key) counts$n[counts$data == key]
+```
+
+# `r meta$title`
+
+**Question.** `r meta$question`
+
+## Methods
+
+### Information sources and search
+
+```{r searches}
+runs <- recueil:::rc_json(con, paste0("/reviews/", review, "/searches"))$data
+knitr::kable(runs[, c("sourceDatabase", "interface", "executedAt", "recordsReturned", "recordsImported", "duplicatesRemoved")],
+             col.names = c("Database", "Interface", "Date", "Returned", "Imported", "Duplicates"))
+```
+
+The full search strategies, verbatim, are in the supplement (PRISMA-S item 8):
+
+```{r strategies, results = "asis"}
+for (i in seq_len(nrow(runs))) cat(sprintf("**%s** (%s)\n\n```\n%s\n```\n\n", runs$sourceDatabase[i], substr(runs$executedAt[i], 1, 10), runs$queryString[i]))
+```
+
+### Selection process
+
+Records were deduplicated (`r n("duplicates")` duplicates removed), then screened on title and
+abstract and, where they passed, on full text, with reasons recorded for every full-text exclusion.
+`r if (isTRUE(meta$automationDisclosure)) "Decisions assisted by software are flagged in the audit trail (supplement)." else ""`
+
+## Results
+
+### Study selection
+
+```{r prisma, fig.cap = "PRISMA 2020 flow diagram."}
+if (requireNamespace("PRISMA2020", quietly = TRUE)) {
+  PRISMA2020::PRISMA_flowdiagram(PRISMA2020::PRISMA_data(rc_sr_prisma(con, review, snapshot = snapshot)), interactive = FALSE, previous = FALSE, other = TRUE)
+} else {
+  knitr::kable(counts)
+}
+```
+
+The searches identified `r n("database_results")` records from databases and
+`r n("register_results")` from registers. After removing `r n("duplicates")` duplicates,
+`r n("records_screened")` records were screened, `r n("records_excluded")` excluded on title and
+abstract, `r n("dbr_assessed")` reports assessed in full, and `r n("new_studies")` studies
+(`r n("new_reports")` reports) included.
+
+### Study characteristics
+
+```{r included}
+knitr::kable(rc_sr_included(con, review)[, c("study", "title", "year", "venue", "doi")])
+```
+
+### Risk of bias
+
+```{r rob, fig.cap = "Risk of bias."}
+rob <- tryCatch(rc_sr_rob(con, review, params$rob_tool), error = function(e) NULL)
+if (!is.null(rob) && nrow(rob) > 0 && requireNamespace("robvis", quietly = TRUE)) {
+  robvis::rob_traffic_light(rob, tool = toupper(sub("_", "-", params$rob_tool)))
+}
+```
+
+### Synthesis
+
+```{r synthesis}
+wide <- rc_sr_extraction(con, review, "wide")
+cols <- c("sr_events_treatment", "sr_n_treatment", "sr_events_control", "sr_n_control")
+if (requireNamespace("metafor", quietly = TRUE) && all(cols %in% names(wide))) {
+  outcome <- wide[!is.na(wide$group) & startsWith(wide$group, "outcome:") & stats::complete.cases(wide[, cols]), ]
+  if (nrow(outcome) >= 2) {
+    es <- metafor::escalc(measure = "RR", ai = sr_events_treatment, n1i = sr_n_treatment, ci = sr_events_control, n2i = sr_n_control, data = outcome, slab = study)
+    fit <- metafor::rma(yi, vi, data = es)
+    metafor::forest(fit, atransf = exp)
+    print(fit)
+  }
+}
+```

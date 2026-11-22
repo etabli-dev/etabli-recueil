@@ -84,6 +84,9 @@ importers:
       '@recueil/server':
         specifier: workspace:*
         version: link:../server
+      '@recueil/sr':
+        specifier: workspace:*
+        version: link:../../packages/sr
       '@recueil/sync-zotero':
         specifier: workspace:*
         version: link:../../packages/sync-zotero
@@ -170,6 +173,9 @@ importers:
       '@recueil/schemas':
         specifier: workspace:*
         version: link:../../packages/schemas
+      '@recueil/sr':
+        specifier: workspace:*
+        version: link:../../packages/sr
       '@recueil/storage-backends':
         specifier: workspace:*
         version: link:../../packages/storage-backends

@@ -1508,3 +1508,108 @@ kbd {
   font-size: 11px;
   pointer-events: none;
 }
+
+/* Screening (CONCEPT §5.10) */
+.screening {
+  padding: 1rem;
+}
+.screening-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+.screening-bar [role='tab'][aria-selected='true'] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+.screening-progress,
+.screening-exports {
+  color: var(--ink-quiet);
+}
+.screening-body {
+  display: grid;
+  grid-template-columns: 18rem minmax(0, 1fr) 16rem;
+  gap: 1rem;
+}
+.screening-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 75vh;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.screening-list li button {
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: none;
+  padding: 0.35rem 0.5rem;
+  font: inherit;
+  cursor: pointer;
+}
+.screening-list li[aria-current='true'] {
+  background: var(--accent-soft);
+}
+.screening-list li.include .mark {
+  color: var(--ok);
+}
+.screening-list li.exclude .mark {
+  color: var(--error);
+}
+.screening-list li.maybe .mark {
+  color: var(--warn);
+}
+.screening-record .meta,
+.screening-record .sources {
+  color: var(--ink-quiet);
+}
+.screening-record .abstract {
+  line-height: 1.55;
+  max-width: 48rem;
+  white-space: pre-wrap;
+}
+.screening-actions {
+  display: flex;
+  gap: var(--gap);
+  margin: 1rem 0;
+}
+.screening-actions kbd,
+.screening-reasons kbd {
+  font-family: ui-monospace, monospace;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 0 0.3em;
+  background: var(--paper-sunk);
+}
+.screening-reasons {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap);
+}
+.screening-prisma table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.screening-prisma th {
+  text-align: left;
+  font-weight: normal;
+  color: var(--ink-quiet);
+}
+.screening-prisma td {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 60rem) {
+  .screening-body {
+    grid-template-columns: 1fr;
+  }
+  .screening-list {
+    max-height: 12rem;
+  }
+}

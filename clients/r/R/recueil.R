@@ -164,3 +164,87 @@ rc_curated <- function(con, id, version = NULL) {
   net$positions <- NULL
   network_from_json(net)
 }
+
+# Systematic reviews (CONCEPT §5.10, spec/systematic-review.md) ----------------------------------
+
+#' The reviews in the library
+#'
+#' @param con A connection from [rc_connect()].
+#' @return A data frame: `id`, `title`, `status`, ….
+#' @export
+rc_sr_reviews <- function(con) rc_json(con, "/reviews")$data
+
+#' PRISMA 2020 counts for the PRISMA2020 package
+#'
+#' Downloads the live counts (or a frozen snapshot) keyed by the names of the PRISMA2020 package's
+#' template, and fills that template, so [PRISMA2020::PRISMA_data()] and
+#' `PRISMA2020::PRISMA_flowdiagram()` take the result as it is.
+#'
+#' @param con A connection from [rc_connect()].
+#' @param review The review id.
+#' @param snapshot Optional `snapshotAt` of a frozen snapshot.
+#' @param template Fill the PRISMA2020 template when the package is installed; otherwise return
+#'   the `data`/`n` pairs.
+#' @return A data frame.
+#' @export
+rc_sr_prisma <- function(con, review, snapshot = NULL, template = TRUE) {
+  query <- if (is.null(snapshot)) list() else list(snapshot = snapshot)
+  counts <- utils::read.csv(text = rc_text(con, paste0("/reviews/", review, "/prisma.csv"), query), stringsAsFactors = FALSE, colClasses = "character", na.strings = "")
+  if (template) sr_prisma_template(counts) else counts
+}
+
+#' Fill the PRISMA2020 template with exported counts
+#'
+#' @param counts A data frame with `data` and `n` columns, as `rc_sr_prisma(template = FALSE)` returns.
+#' @return The template with its `n` column replaced where the counts name a row; the counts
+#'   themselves when PRISMA2020 is not installed.
+#' @keywords internal
+sr_prisma_template <- function(counts) {
+  path <- if (requireNamespace("PRISMA2020", quietly = TRUE)) system.file("extdata", "PRISMA.csv", package = "PRISMA2020") else ""
+  if (!nzchar(path)) return(counts)
+  tmpl <- utils::read.csv(path, stringsAsFactors = FALSE)
+  hit <- match(tmpl$data, counts$data)
+  tmpl$n <- as.character(tmpl$n)
+  tmpl$n[!is.na(hit)] <- counts$n[hit[!is.na(hit)]]
+  tmpl
+}
+
+#' Extraction data
+#'
+#' `wide` is one row per study and group instance with the field keys as columns, which is what
+#' `metafor::escalc()` takes without reshaping; `long` is one row per value.
+#'
+#' @param con A connection from [rc_connect()].
+#' @param review The review id.
+#' @param shape `"wide"` (default) or `"long"`.
+#' @return A data frame.
+#' @export
+rc_sr_extraction <- function(con, review, shape = c("wide", "long")) {
+  shape <- match.arg(shape)
+  utils::read.csv(text = rc_text(con, paste0("/reviews/", review, "/extraction.csv"), list(shape = shape)), stringsAsFactors = FALSE, na.strings = "")
+}
+
+#' Risk-of-bias judgements in the robvis layout
+#'
+#' `Study, D1 … Dn, Overall, Weight`, with robvis's labels, so `robvis::rob_summary()` and
+#' `robvis::rob_traffic_light()` read it unmodified.
+#'
+#' @param con A connection from [rc_connect()].
+#' @param review The review id.
+#' @param tool `"rob2"`, `"robins_i"`, `"quadas2"` or `"newcastle_ottawa"`.
+#' @return A data frame.
+#' @export
+rc_sr_rob <- function(con, review, tool = c("rob2", "robins_i", "quadas2", "newcastle_ottawa")) {
+  tool <- match.arg(tool)
+  utils::read.csv(text = rc_text(con, paste0("/reviews/", review, "/rob/", tool, "/robvis.csv")), stringsAsFactors = FALSE, check.names = FALSE)
+}
+
+#' Included studies
+#'
+#' @param con A connection from [rc_connect()].
+#' @param review The review id.
+#' @return A data frame: study label, bibliographic core and extraction status.
+#' @export
+rc_sr_included <- function(con, review) {
+  utils::read.csv(text = rc_text(con, paste0("/reviews/", review, "/included.csv")), stringsAsFactors = FALSE, na.strings = "")
+}

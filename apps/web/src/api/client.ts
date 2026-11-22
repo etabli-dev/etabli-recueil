@@ -181,6 +181,46 @@ export interface GraphNetwork {
   description: string;
 }
 
+/** `GET /reviews/{id}` (CONCEPT §5.10). */
+export interface ReviewWire {
+  id: string;
+  title: string;
+  question: string | null;
+  status: string;
+  exclusionReasons: { code: string; label: string; stage: 'title_abstract' | 'full_text' | 'any' }[];
+  automationDisclosure: boolean;
+}
+
+export interface ScreeningDecisionWire {
+  id: string;
+  stage: string;
+  decision: 'include' | 'exclude' | 'maybe';
+  exclusionReasonCode: string | null;
+  decidedAt: string;
+}
+
+/** One record in a review's worklist. */
+export interface ReviewRecordWire {
+  id: string;
+  itemId: string;
+  stage: string;
+  screeningStatus: string;
+  retrievalStatus: string;
+  title: string | null;
+  abstract: string | null;
+  year: number | null;
+  venue: string | null;
+  doi: string | null;
+  authors: string[];
+  sources: string[];
+  titleAbstract: ScreeningDecisionWire | null;
+  fullText: ScreeningDecisionWire | null;
+}
+
+export interface PrismaWire {
+  cells: { stageKey: string; count: number; sourceLabel: string | null; exclusionReasonCode: string | null }[];
+}
+
 /** `GET /curated-networks/{id}`. */
 export interface CuratedNetworkWire {
   id: string;
@@ -382,6 +422,36 @@ export class RecueilClient {
 
   getGraphCoverage(signal?: AbortSignal): Promise<GraphCoverage> {
     return this.api<GraphCoverage>('/graph/coverage', { signal });
+  }
+
+  /* Systematic reviews (CONCEPT §5.10) --------------------------------------------------- */
+
+  listReviews(signal?: AbortSignal): Promise<{ data: ReviewWire[] }> {
+    return this.api('/reviews', { signal });
+  }
+
+  reviewWorklist(id: string, stage: 'title_abstract' | 'full_text', status: 'pending' | 'decided' | 'all', signal?: AbortSignal): Promise<{ total: number; pending: number; data: ReviewRecordWire[] }> {
+    return this.api(`/reviews/${encodeURIComponent(id)}/records`, { query: { stage, status, limit: '100' }, signal });
+  }
+
+  decideReviewRecord(id: string, recordId: string, body: { stage: string; decision: string; reasonCode?: string; durationMs?: number }): Promise<ReviewRecordWire> {
+    return this.api(`/reviews/${encodeURIComponent(id)}/records/${encodeURIComponent(recordId)}/decisions`, { method: 'POST', body });
+  }
+
+  undoReviewDecision(id: string, recordId: string, stage: string): Promise<ReviewRecordWire> {
+    return this.api(`/reviews/${encodeURIComponent(id)}/records/${encodeURIComponent(recordId)}/undo`, { method: 'POST', body: { stage } });
+  }
+
+  setReviewRetrieval(id: string, recordId: string, status: string, note?: string): Promise<ReviewRecordWire> {
+    return this.api(`/reviews/${encodeURIComponent(id)}/records/${encodeURIComponent(recordId)}/retrieval`, { method: 'PUT', body: { status, ...(note === undefined ? {} : { note }) } });
+  }
+
+  reviewPrisma(id: string, signal?: AbortSignal): Promise<PrismaWire> {
+    return this.api(`/reviews/${encodeURIComponent(id)}/prisma`, { signal });
+  }
+
+  reviewExportUrl(id: string, what: 'prisma.csv' | 'prisma.svg' | 'included.csv' | 'audit.csv' | 'extraction.csv'): string {
+    return this.url(`/reviews/${encodeURIComponent(id)}/${what}`);
   }
 
   /* Curated networks (CONCEPT §5.9) ------------------------------------------------------ */
