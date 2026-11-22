@@ -17,3 +17,5 @@ export type { DedupGroup, DedupOptions, DedupPair, DedupRun, WinnerRule } from '
 export { canonicalDoi, extraValues, nameKey, normaliseTitle, titleSimilarity, titleTokens } from '@recueil/plugin-sdk';
 export { detectAuditFormat, isPdf, parseTeiReferences, parseTextReference, readAuditInput, readAuditPdf } from './audit-input.js';
 export type { AuditFormat, AuditReference } from './audit-input.js';
+export { CitationEngine } from './citations.js';
+export type { CollectOptions, CollectResult } from './citations.js';

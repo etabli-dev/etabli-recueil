@@ -44,6 +44,7 @@ import { ProvenanceService } from './services/provenance.js';
 import { SearchService } from './services/search.js';
 import { TagService } from './services/tags.js';
 import { AnnotationService } from './services/annotations.js';
+import { GraphService } from './services/graph.js';
 import { ItemMergeService } from './services/merge.js';
 import { TrashService } from './services/trash.js';
 import { ensureLocalUser } from './services/users.js';
@@ -94,6 +95,8 @@ export interface Recueil {
   merges: ItemMergeService;
   /** Reading annotations as records (ADR-0009). */
   annotations: AnnotationService;
+  /** The bibliometric graph (CONCEPT §5.8). */
+  graph: GraphService;
   /** The single local account every owned record belongs to in v1. */
   user: UserRow;
   /** An actor for that account, for callers that have no request context of their own. */
@@ -135,6 +138,7 @@ export const createRecueil = (options: CreateRecueilOptions): Recueil => {
   const customFields = new CustomFieldService(db, audit);
   const creators = new CreatorService(db, audit, indexer);
   const annotations = new AnnotationService(db, audit, user.id);
+  const graph = new GraphService(db, library);
   const merges = new ItemMergeService(db, audit, { library, tags, collections, creators });
   const trash = new TrashService(db, audit, {
     library,
@@ -164,6 +168,7 @@ export const createRecueil = (options: CreateRecueilOptions): Recueil => {
     trash,
     merges,
     annotations,
+    graph,
     user,
     actor: userActor(user.id),
     close: () => {

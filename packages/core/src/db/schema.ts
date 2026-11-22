@@ -1802,10 +1802,250 @@ export const pluginCache = sqliteTable(
   ],
 );
 
+/* ============================================================================================== */
+/* 9. Vocabulary and graph (`spec/data-model.md` §5.3–5.8; Phase 5)                                 */
+/* ============================================================================================== */
+
+export const SHADOW_DISCOVERED_VIA = ['reference_list', 'cited_by', 'deep_dive', 'search', 'import'] as const;
+export const SHADOW_PROMOTION = ['none', 'queued', 'promoted', 'rejected'] as const;
+export const GRAPH_NODE_TYPES = ['item', 'shadow_work', 'creator', 'venue', 'term', 'institution', 'funder'] as const;
+export const EDGE_DERIVATIONS = ['asserted', 'derived'] as const;
+export const EDGE_NORMALISATIONS = ['none', 'association_strength', 'salton', 'jaccard', 'fractional', 'inclusion'] as const;
+export const EVIDENCE_KINDS = ['citation_context', 'reference_string', 'api_record'] as const;
+
+/** §5.3. */
+export const terms = sqliteTable(
+  'terms',
+  {
+    id: text('id').primaryKey(),
+    scheme: text('scheme').notNull(),
+    code: text('code'),
+    label: text('label').notNull(),
+    normalisedLabel: text('normalised_label').notNull(),
+    parentId: text('parent_id').references((): AnySQLiteColumn => terms.id, { onDelete: 'restrict' }),
+    preferredTermId: text('preferred_term_id').references((): AnySQLiteColumn => terms.id, { onDelete: 'restrict' }),
+    treeNumbers: text('tree_numbers'),
+    depth: integer('depth'),
+    externalUri: text('external_uri'),
+    scopeNote: text('scope_note'),
+    isActive: integer('is_active', { mode: 'boolean' }).notNull().default(true),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('ux_terms_scheme_code').on(table.scheme, table.code).where(sql`code is not null`),
+    uniqueIndex('ux_terms_scheme_label').on(table.scheme, table.normalisedLabel),
+    index('ix_terms_parent_id').on(table.parentId),
+    index('ix_terms_preferred_term_id').on(table.preferredTermId).where(sql`preferred_term_id is not null`),
+    index('ix_terms_normalised_label').on(table.normalisedLabel),
+    check('ck_terms_preferred_not_self', sql`"preferred_term_id" is null or "preferred_term_id" <> "id"`),
+    boolean01('ck_terms_is_active_bool', 'is_active'),
+    jsonValidOrNull('ck_terms_tree_numbers_json', 'tree_numbers'),
+  ],
+);
+
+/** §5.4. */
+export const itemTerms = sqliteTable(
+  'item_terms',
+  {
+    itemId: text('item_id')
+      .notNull()
+      .references(() => items.id, { onDelete: 'cascade' }),
+    termId: text('term_id')
+      .notNull()
+      .references(() => terms.id, { onDelete: 'restrict' }),
+    qualifierKey: text('qualifier_key').notNull().default(''),
+    source: text('source').notNull(),
+    weight: real('weight'),
+    position: integer('position'),
+    isMajorTopic: integer('is_major_topic', { mode: 'boolean' }).notNull().default(false),
+    qualifierTermId: text('qualifier_term_id').references(() => terms.id, { onDelete: 'restrict' }),
+    confidence: real('confidence'),
+    addedAt: text('added_at').notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.itemId, table.termId, table.qualifierKey] }),
+    index('ix_item_terms_term_id').on(table.termId, table.itemId),
+    index('ix_item_terms_source').on(table.source),
+    boolean01('ck_item_terms_major_bool', 'is_major_topic'),
+  ],
+);
+
+/** §5.5. External works the graph needs and the library has not chosen (SW1: never in item queries). */
+export const shadowWorks = sqliteTable(
+  'shadow_works',
+  {
+    id: text('id').primaryKey(),
+    source: text('source').notNull(),
+    sourceId: text('source_id').notNull(),
+    doi: text('doi'),
+    pmid: text('pmid'),
+    arxivId: text('arxiv_id'),
+    openalexId: text('openalex_id'),
+    title: text('title'),
+    normalisedTitle: text('normalised_title'),
+    containerTitle: text('container_title'),
+    issuedYear: integer('issued_year'),
+    firstAuthorFamily: text('first_author_family'),
+    authors: text('authors').notNull().default('[]'),
+    rawRecord: text('raw_record'),
+    rawReferenceString: text('raw_reference_string'),
+    citedByCount: integer('cited_by_count'),
+    discoveredVia: text('discovered_via', { enum: SHADOW_DISCOVERED_VIA }).notNull(),
+    discoveredFromItemId: text('discovered_from_item_id').references(() => items.id, { onDelete: 'set null' }),
+    discoveredInJobId: text('discovered_in_job_id').references(() => jobs.id, { onDelete: 'set null' }),
+    firstSeenAt: text('first_seen_at').notNull(),
+    lastSeenAt: text('last_seen_at').notNull(),
+    seenCount: integer('seen_count').notNull().default(1),
+    promotionStatus: text('promotion_status', { enum: SHADOW_PROMOTION }).notNull().default('none'),
+    promotedItemId: text('promoted_item_id').references(() => items.id, { onDelete: 'set null' }),
+    promotedAt: text('promoted_at'),
+    matchedItemId: text('matched_item_id').references(() => items.id, { onDelete: 'set null' }),
+  },
+  (table) => [
+    uniqueIndex('ux_shadow_works_source').on(table.source, table.sourceId),
+    uniqueIndex('ux_shadow_works_doi').on(table.doi).where(sql`doi is not null`),
+    index('ix_shadow_works_match').on(table.normalisedTitle, table.issuedYear),
+    index('ix_shadow_works_matched_item').on(table.matchedItemId).where(sql`matched_item_id is not null`),
+    index('ix_shadow_works_seen_count').on(table.seenCount),
+    index('ix_shadow_works_discovered_from').on(table.discoveredFromItemId).where(sql`discovered_from_item_id is not null`),
+    oneOf('ck_shadow_works_discovered_via', 'discovered_via', SHADOW_DISCOVERED_VIA),
+    oneOf('ck_shadow_works_promotion_status', 'promotion_status', SHADOW_PROMOTION),
+    check('ck_shadow_works_promotion', sql`("promotion_status" = 'promoted') = ("promoted_item_id" is not null)`),
+    jsonValid('ck_shadow_works_authors_json', 'authors'),
+    jsonValidOrNull('ck_shadow_works_raw_json', 'raw_record'),
+  ],
+);
+
+/** §5.6. One node per underlying entity (GN1); derived, rebuildable (GN2). */
+export const graphNodes = sqliteTable(
+  'graph_nodes',
+  {
+    id: text('id').primaryKey(),
+    nodeType: text('node_type', { enum: GRAPH_NODE_TYPES }).notNull(),
+    itemId: text('item_id').references(() => items.id, { onDelete: 'cascade' }),
+    shadowWorkId: text('shadow_work_id').references(() => shadowWorks.id, { onDelete: 'cascade' }),
+    creatorId: text('creator_id').references(() => creators.id, { onDelete: 'cascade' }),
+    termId: text('term_id').references(() => terms.id, { onDelete: 'cascade' }),
+    externalScheme: text('external_scheme'),
+    externalId: text('external_id'),
+    label: text('label').notNull(),
+    externalIds: text('external_ids').notNull().default('{}'),
+    firstSeenAt: text('first_seen_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('ux_graph_nodes_item').on(table.itemId).where(sql`item_id is not null`),
+    uniqueIndex('ux_graph_nodes_shadow_work').on(table.shadowWorkId).where(sql`shadow_work_id is not null`),
+    uniqueIndex('ux_graph_nodes_creator').on(table.creatorId).where(sql`creator_id is not null`),
+    uniqueIndex('ux_graph_nodes_term').on(table.termId).where(sql`term_id is not null`),
+    uniqueIndex('ux_graph_nodes_external')
+      .on(table.nodeType, table.externalScheme, table.externalId)
+      .where(sql`external_id is not null`),
+    index('ix_graph_nodes_type_label').on(table.nodeType, table.label),
+    oneOf('ck_graph_nodes_type', 'node_type', GRAPH_NODE_TYPES),
+    check(
+      'ck_graph_nodes_ref',
+      sql`(("item_id" is not null) + ("shadow_work_id" is not null) + ("creator_id" is not null) + ("term_id" is not null) + ("external_id" is not null)) = 1
+        and ("node_type" <> 'item' or "item_id" is not null)
+        and ("node_type" <> 'shadow_work' or "shadow_work_id" is not null)
+        and ("node_type" <> 'creator' or "creator_id" is not null)
+        and ("node_type" <> 'term' or "term_id" is not null)
+        and ("node_type" not in ('venue', 'institution', 'funder') or ("external_scheme" is not null and "external_id" is not null))`,
+    ),
+    jsonValid('ck_graph_nodes_external_ids_json', 'external_ids'),
+  ],
+);
+
+/** §5.7. Asserted citations are kept per source (GE3); derived edges belong to a run (GE2). */
+export const graphEdges = sqliteTable(
+  'graph_edges',
+  {
+    id: text('id').primaryKey(),
+    edgeType: text('edge_type').notNull(),
+    sourceNodeId: text('source_node_id')
+      .notNull()
+      .references(() => graphNodes.id, { onDelete: 'cascade' }),
+    targetNodeId: text('target_node_id')
+      .notNull()
+      .references(() => graphNodes.id, { onDelete: 'cascade' }),
+    directed: integer('directed', { mode: 'boolean' }).notNull(),
+    weight: real('weight').notNull().default(1),
+    normalisedWeight: real('normalised_weight'),
+    normalisation: text('normalisation', { enum: EDGE_NORMALISATIONS }),
+    occurrences: integer('occurrences'),
+    scheme: text('scheme'),
+    schemeKey: text('scheme_key').notNull().default(''),
+    provenanceSource: text('provenance_source').notNull(),
+    provenanceFetchedAt: text('provenance_fetched_at').notNull(),
+    confidence: real('confidence'),
+    derivation: text('derivation', { enum: EDGE_DERIVATIONS }).notNull(),
+    runId: text('run_id'),
+    runKey: text('run_key').notNull().default(''),
+    paramsDigest: text('params_digest'),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('ux_graph_edges_identity').on(
+      table.edgeType,
+      table.sourceNodeId,
+      table.targetNodeId,
+      table.provenanceSource,
+      table.schemeKey,
+      table.runKey,
+    ),
+    index('ix_graph_edges_source').on(table.sourceNodeId, table.edgeType),
+    index('ix_graph_edges_target').on(table.targetNodeId, table.edgeType),
+    index('ix_graph_edges_type_run').on(table.edgeType, table.runId),
+    index('ix_graph_edges_asserted').on(table.edgeType).where(sql`derivation = 'asserted'`),
+    check('ck_graph_edges_no_self', sql`"source_node_id" <> "target_node_id"`),
+    check('ck_graph_edges_derived_run', sql`"derivation" <> 'derived' or "run_id" is not null`),
+    check('ck_graph_edges_undirected_order', sql`"directed" = 1 or "source_node_id" < "target_node_id"`),
+    check('ck_graph_edges_confidence', sql`"confidence" is null or ("confidence" >= 0 and "confidence" <= 1)`),
+    oneOf('ck_graph_edges_derivation', 'derivation', EDGE_DERIVATIONS),
+    oneOfOrNull('ck_graph_edges_normalisation', 'normalisation', EDGE_NORMALISATIONS),
+    boolean01('ck_graph_edges_directed_bool', 'directed'),
+  ],
+);
+
+/** §5.8. */
+export const edgeEvidence = sqliteTable(
+  'edge_evidence',
+  {
+    id: text('id').primaryKey(),
+    edgeId: text('edge_id')
+      .notNull()
+      .references(() => graphEdges.id, { onDelete: 'cascade' }),
+    kind: text('kind', { enum: EVIDENCE_KINDS }).notNull(),
+    documentId: text('document_id').references(() => documents.id, { onDelete: 'set null' }),
+    pageIndex: integer('page_index'),
+    charStart: integer('char_start'),
+    charEnd: integer('char_end'),
+    section: text('section'),
+    textExcerpt: text('text_excerpt'),
+    intent: text('intent'),
+    intentConfidence: real('intent_confidence'),
+    model: text('model'),
+    extractedAt: text('extracted_at').notNull(),
+  },
+  (table) => [
+    index('ix_edge_evidence_edge_id').on(table.edgeId),
+    index('ix_edge_evidence_intent').on(table.intent).where(sql`intent is not null`),
+    index('ix_edge_evidence_document_id').on(table.documentId).where(sql`document_id is not null`),
+    oneOf('ck_edge_evidence_kind', 'kind', EVIDENCE_KINDS),
+  ],
+);
+
 /* -------------------------------------------------------------------------------------------- */
 /* Row types                                                                                       */
 /* -------------------------------------------------------------------------------------------- */
 
+export type TermRow = typeof terms.$inferSelect;
+export type ItemTermRow = typeof itemTerms.$inferSelect;
+export type ShadowWorkRow = typeof shadowWorks.$inferSelect;
+export type GraphNodeRow = typeof graphNodes.$inferSelect;
+export type GraphEdgeRow = typeof graphEdges.$inferSelect;
+export type EdgeEvidenceRow = typeof edgeEvidence.$inferSelect;
 export type PluginRow = typeof plugins.$inferSelect;
 export type CheckResultRow = typeof checkResults.$inferSelect;
 export type ItemMetricRow = typeof itemMetrics.$inferSelect;

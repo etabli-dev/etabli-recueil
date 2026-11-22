@@ -18,3 +18,4 @@ export * from './merge.js';
 export * from './annotations.js';
 export * from './annotation-note.js';
 export * from './saved-search.js';
+export * from './graph.js';

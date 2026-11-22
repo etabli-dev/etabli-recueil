@@ -18,10 +18,12 @@ import type {
   HttpResponse,
   Identifier,
   MetricObservation,
+  Page,
   Provenance,
   Resolver,
   ResolverLookupRequest,
   ResolverRecord,
+  WorkStub,
 } from '@recueil/plugin-sdk';
 
 type JsonValue = null | boolean | number | string | JsonValue[] | { [k: string]: JsonValue };
@@ -214,10 +216,32 @@ export const invertedAbstract = (index: Json): string | undefined => {
   return text === '' ? undefined : text;
 };
 
+const openAlexStub = (work: Json): WorkStub => {
+  const ids = obj(work['ids']);
+  const identifiers: Identifier[] = [];
+  const openalexId = str(work['id'])?.split('/').pop();
+  if (openalexId !== undefined) identifiers.push({ scheme: 'openalex', value: openalexId });
+  const doi = canonicalDoi(str(work['doi']) ?? '');
+  if (doi !== null) identifiers.push({ scheme: 'doi', value: doi });
+  const pmid = /(?:\/|^)(\d+)\/?$/u.exec(str(ids['pmid']) ?? '')?.[1];
+  if (pmid !== undefined) identifiers.push({ scheme: 'pmid', value: pmid });
+  const year = work['publication_year'];
+  const container = str(obj(obj(work['primary_location'])['source'])['display_name']);
+  const title = str(work['title']) ?? str(work['display_name']);
+  return {
+    identifiers,
+    ...(title === undefined ? {} : { title }),
+    ...(container === undefined ? {} : { containerTitle: container }),
+    ...(typeof year === 'number' ? { issuedYear: year } : {}),
+    authors: arr(work['authorships']).map((authorship) => splitName(str(obj(obj(authorship)['author'])['display_name']) ?? '')).filter((a) => a.family !== undefined),
+    raw: { cited_by_count: typeof work['cited_by_count'] === 'number' ? work['cited_by_count'] : null },
+  };
+};
+
 export const openalex: Resolver = {
   id: 'openalex',
   source: 'openalex',
-  supports: supports(['doi', 'pmid'], ['cited_by_count', 'venue_2yr_mean_citedness']),
+  supports: { ...supports(['doi', 'pmid'], ['cited_by_count', 'venue_2yr_mean_citedness']), references: true },
   rateLimit: { requestsPerSecond: 10 },
   async lookup(request, ctx) {
     const data = await openAlexWork(request, ctx);
@@ -255,6 +279,25 @@ export const openalex: Resolver = {
       record.creator({ ...splitName(name), ...(orcid === undefined ? {} : { orcid }) });
     }
     return [record.build(undefined, { id: str(data['id']) ?? null })];
+  },
+  /** `referenced_works`, resolved to metadata 50 at a time; the cursor is an offset into the list. */
+  async references(request, ctx): Promise<Page<WorkStub>> {
+    const data = await openAlexWork({ identifiers: [request.identifier] }, ctx);
+    if (data === null) return { records: [] };
+    const all = arr(data['referenced_works']).map((id) => str(id)?.split('/').pop()).filter((id): id is string => id !== undefined && /^W\d+$/u.test(id));
+    const offset = request.cursor === undefined ? 0 : Number(request.cursor) || 0;
+    const slice = all.slice(offset, offset + Math.min(request.limit, 50));
+    if (slice.length === 0) return { records: [], total: all.length };
+    const s = await settings(ctx);
+    const headers: Record<string, string> = { ...userAgent(s.mailto) };
+    if (s.openalexKey) headers['Authorization'] = `Bearer ${s.openalexKey}`;
+    const select = 'id,doi,title,display_name,publication_year,authorships,primary_location,ids,cited_by_count';
+    const body = await getJson(ctx, `https://api.openalex.org/works?filter=openalex_id:${slice.join('|')}&per-page=50&select=${select}`, headers);
+    const byId = new Map(arr(body?.['results']).map((work) => [str(obj(work)['id'])?.split('/').pop(), obj(work)]));
+    // Order and completeness follow the reference list; an id OpenAlex did not return is kept bare.
+    const records = slice.map((id) => (byId.has(id) ? openAlexStub(byId.get(id)!) : { identifiers: [{ scheme: 'openalex' as const, value: id }] }));
+    const next = offset + slice.length;
+    return { records, total: all.length, ...(next < all.length ? { cursor: String(next) } : {}) };
   },
   async metrics(request, ctx) {
     const data = await openAlexWork(request, ctx);
@@ -313,7 +356,7 @@ const crossrefDate = (message: Json): string | undefined => {
 export const crossref: Resolver = {
   id: 'crossref',
   source: 'crossref',
-  supports: supports(['doi'], ['cited_by_count']),
+  supports: { ...supports(['doi'], ['cited_by_count']), references: true },
   rateLimit: { requestsPerSecond: 20 },
   async lookup(request, ctx) {
     const doi = idOf(request, 'doi');
@@ -348,6 +391,32 @@ export const crossref: Resolver = {
       record.creator({ family: str(entry['family']) ?? str(entry['name']) ?? '', given: str(entry['given']) ?? '', role: 'editor' });
     }
     return [record.build(str(message['type']))];
+  },
+  /** The deposited reference list, where the publisher deposited one; the cursor is an offset. */
+  async references(request, ctx): Promise<Page<WorkStub>> {
+    if (request.identifier.scheme !== 'doi') return { records: [] };
+    const message = await crossrefWork(request.identifier.value, ctx);
+    const all = arr(message?.['reference']).map((entry) => obj(entry));
+    const offset = request.cursor === undefined ? 0 : Number(request.cursor) || 0;
+    const slice = all.slice(offset, offset + request.limit);
+    const records: WorkStub[] = slice.map((entry) => {
+      const doi = canonicalDoi(str(entry['DOI']) ?? '');
+      const title = str(entry['article-title']) ?? str(entry['volume-title']);
+      const container = str(entry['journal-title']);
+      const year = Number(/\d{4}/u.exec(str(entry['year']) ?? '')?.[0]);
+      const author = str(entry['author']);
+      const unstructured = str(entry['unstructured']);
+      return {
+        identifiers: doi === null ? [] : [{ scheme: 'doi' as const, value: doi }],
+        ...(title === undefined ? {} : { title }),
+        ...(container === undefined ? {} : { containerTitle: container }),
+        ...(Number.isFinite(year) ? { issuedYear: year } : {}),
+        ...(author === undefined ? {} : { authors: [{ family: author }] }),
+        raw: { key: str(entry['key']) ?? null, unstructured: unstructured ?? null },
+      };
+    });
+    const next = offset + slice.length;
+    return { records, total: all.length, ...(next < all.length ? { cursor: String(next) } : {}) };
   },
   async metrics(request, ctx) {
     const doi = idOf(request, 'doi');

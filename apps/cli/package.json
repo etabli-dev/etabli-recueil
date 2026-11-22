@@ -34,6 +34,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@recueil/analytics": "workspace:*",
     "@recueil/core": "workspace:*",
     "@recueil/formats": "workspace:*",
     "@recueil/import-paperless": "workspace:*",
