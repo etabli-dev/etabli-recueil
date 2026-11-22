@@ -4570,6 +4570,359 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/curated-networks:
+    get:
+      operationId: listCuratedNetworks
+      summary: List curated networks
+      description: |-
+        Newest first.
+
+        **Scope:** `networks:read`.
+      tags:
+        - Curated networks
+      responses:
+        '200':
+          description: The networks.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CuratedNetworkSummary'
+                required:
+                  - data
+                additionalProperties: false
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+    post:
+      operationId: createCuratedNetwork
+      summary: Create a curated network
+      description: |-
+        Empty, from a document, or from a graph network (`fromGraph`).
+
+        **Scope:** `networks:write`.
+      tags:
+        - Curated networks
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CuratedNetworkCreate'
+      responses:
+        '201':
+          description: The network at version 1.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CuratedNetwork'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/curated-networks/{id}:
+    get:
+      operationId: getCuratedNetwork
+      summary: A curated network, resolved
+      description: >-
+        The head, or `?version=`. Live versions carry current item metadata; frozen ones their
+        snapshot (CN3).
+
+
+        **Scope:** `networks:read`.
+      tags:
+        - Curated networks
+      parameters:
+        - in: path
+          name: id
+          schema:
+            description: The record id (a ULID).
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: The record id (a ULID).
+        - in: query
+          name: version
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 9007199254740991
+      responses:
+        '200':
+          description: The network.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CuratedNetwork'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+    put:
+      operationId: saveCuratedNetwork
+      summary: Save a new version
+      description: >-
+        Every save is a new version on top of the head; `If-Match` with the version refuses a stale
+        save (412).
+
+
+        **Scope:** `networks:write`.
+      tags:
+        - Curated networks
+      parameters:
+        - in: path
+          name: id
+          schema:
+            description: The record id (a ULID).
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: The record id (a ULID).
+        - in: header
+          name: if-match
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CuratedNetworkSave'
+      responses:
+        '200':
+          description: The network at its new version.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CuratedNetwork'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '412':
+          description: The `If-Match` version is stale. Re-read and retry; nothing was merged (P1).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/curated-networks/{id}/freeze:
+    post:
+      operationId: freezeCuratedNetwork
+      summary: Freeze a version
+      description: |-
+        The document and the item metadata it shows are fixed for good (CN1).
+
+        **Scope:** `networks:write`.
+      tags:
+        - Curated networks
+      parameters:
+        - in: path
+          name: id
+          schema:
+            description: The record id (a ULID).
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: The record id (a ULID).
+        - in: query
+          name: version
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 9007199254740991
+      responses:
+        '200':
+          description: The frozen version.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CuratedNetwork'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/curated-networks/{id}/export:
+    get:
+      operationId: exportCuratedNetwork
+      summary: Export a curated network
+      description: >-
+        SVG (draft quality), TikZ, GraphML or GEXF with positions, or JSON. For publication, read
+        the GraphML into tidygraph and render with ggraph (ADR-0013).
+
+
+        **Scope:** `networks:read`.
+      tags:
+        - Curated networks
+      parameters:
+        - in: path
+          name: id
+          schema:
+            description: The record id (a ULID).
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: The record id (a ULID).
+        - in: query
+          name: version
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 9007199254740991
+        - in: query
+          name: format
+          schema:
+            type: string
+            enum:
+              - svg
+              - tikz
+              - graphml
+              - gexf
+              - json
+          required: true
+      responses:
+        '200':
+          description: The export.
+          content:
+            image/svg+xml:
+              schema:
+                type: string
+            text/x-tex:
+              schema:
+                type: string
+            application/graphml+xml:
+              schema:
+                type: string
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
   /api/v1/fields:
     get:
       operationId: listCustomFields
@@ -8900,6 +9253,48 @@ components:
           $ref: '#/components/schemas/Id'
       additionalProperties: false
       title: NoteFromAnnotation
+    CuratedNetworkCreate:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        description:
+          anyOf:
+            - type: string
+              maxLength: 4000
+            - type: 'null'
+        document:
+          $ref: '#/components/schemas/CuratedNetworkDocument'
+        fromGraph:
+          description: Start from a graph network instead of an empty document.
+          type: string
+          enum:
+            - citations
+            - local
+            - co-citation
+            - coupling
+      required:
+        - name
+      additionalProperties: false
+    CuratedNetworkDocument:
+      type: object
+      propertyNames:
+        type: string
+      additionalProperties: {}
+      description: 'A `recueil.curated-network/1` document: nodes, edges, layout, style, annotations (§7.2).'
+    CuratedNetworkSave:
+      type: object
+      properties:
+        document:
+          $ref: '#/components/schemas/CuratedNetworkDocument'
+        message:
+          type: string
+          maxLength: 500
+      required:
+        - document
+      additionalProperties: false
     FieldValueWrite:
       type: object
       properties:
@@ -14977,6 +15372,67 @@ components:
       additionalProperties: false
       title: ShadowWork
       description: A work the library cites that is not in it (SW1).
+    CuratedNetworkSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        updatedAt:
+          type: string
+      required:
+        - id
+        - name
+        - updatedAt
+      additionalProperties: false
+    CuratedNetwork:
+      type: object
+      properties:
+        id:
+          type: string
+        publicId:
+          type: string
+        name:
+          type: string
+        description:
+          type:
+            - string
+            - 'null'
+        version:
+          type: integer
+          minimum: -9007199254740991
+          maximum: 9007199254740991
+        isFrozen:
+          type: boolean
+        frozenAt:
+          type:
+            - string
+            - 'null'
+        message:
+          type:
+            - string
+            - 'null'
+        document:
+          $ref: '#/components/schemas/CuratedNetworkDocument'
+        items:
+          type: object
+          propertyNames:
+            type: string
+          additionalProperties: {}
+      required:
+        - id
+        - publicId
+        - name
+        - description
+        - version
+        - isFrozen
+        - frozenAt
+        - message
+        - document
+        - items
+      additionalProperties: false
+      title: CuratedNetwork
     CreatorMergeResult:
       type: object
       properties:
