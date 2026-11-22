@@ -88,6 +88,7 @@ export const describeNetwork = (recueil: Recueil, network: Network, description:
 };
 
 const xml = (text: string): string =>
+  // eslint-disable-next-line no-control-regex -- XML 1.0 forbids these characters; removing them is the point
   text.replace(/&/gu, '&amp;').replace(/</gu, '&lt;').replace(/>/gu, '&gt;').replace(/"/gu, '&quot;').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/gu, '');
 
 export const toGraphml = (network: ExportNetwork): string => {

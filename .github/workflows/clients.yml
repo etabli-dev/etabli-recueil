@@ -4,7 +4,7 @@ name: Clients
 # which is the Phase 5 exit criterion (CONCEPT §7).
 on:
   push:
-    branches: [main]
+    branches: [main, 'transition/**']
     paths: ['clients/**', '.github/workflows/clients.yml']
   pull_request:
     branches: [main]
