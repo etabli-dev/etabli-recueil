@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "The Recueil mobile shell: the web client in Capacitor for iOS, iPadOS and Android, with document scan, ISBN barcodes, the share sheet and an offline capture queue (ADR-0024).",
-  "license": "AGPL-3.0-or-later",
+  "license": "UNLICENSED",
   "type": "module",
   "engines": {
     "node": ">=22"

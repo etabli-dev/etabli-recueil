@@ -2,7 +2,7 @@
 
 The Recueil web client: a keyboard-first three-pane library, an item pane composed of registered
 sections, and a PDF.js reader. React 18, TypeScript, Vite, TanStack Query and TanStack Router
-(CONCEPT.md §5.14, §5.16). Licence AGPL-3.0-or-later.
+(CONCEPT.md §5.14, §5.16). Licence: proprietary, all rights reserved.
 
 This is a client of the REST contract and nothing else. There is no privileged back channel between
 the interface and the server: everything on screen came through `/api/v1`, exactly as the CLI, the

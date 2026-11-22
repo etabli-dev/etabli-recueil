@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "Recueil's own browser connector: save the scholarly page you are reading, with its PDF, to your Recueil server (Chromium, Firefox, Safari).",
-  "license": "AGPL-3.0-or-later",
+  "license": "UNLICENSED",
   "type": "module",
   "engines": {
     "node": ">=22"

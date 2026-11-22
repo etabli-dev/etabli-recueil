@@ -24,8 +24,8 @@ info:
     Phase 0 declares the schemas and the `/health` operation; the resource paths arrive with the
     features that serve them, from Phase 1 onwards (CONCEPT.md §7).
   license:
-    name: AGPL-3.0-or-later
-    identifier: AGPL-3.0-or-later
+    name: LicenseRef-Proprietary
+    identifier: LicenseRef-Proprietary
   contact:
     name: Recueil
     url: https://github.com/etabli/recueil
@@ -17831,7 +17831,7 @@ components:
           maxLength: 1024
         licence:
           type: string
-          const: AGPL-3.0-or-later
+          const: LicenseRef-Proprietary
       required:
         - name
         - package

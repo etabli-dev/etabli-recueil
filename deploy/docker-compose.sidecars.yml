@@ -58,7 +58,7 @@ services:
 
   # ===============================================================================================
   # zotero/translation-server — URL, DOI, PMID, ISBN and arXiv imports through the ~600 Zotero
-  # translators (ADR-0006). AGPL-3.0, which is one of the reasons Recueil is (ADR-0005).
+  # translators (ADR-0006). AGPL-3.0; it runs as a separate container and Recueil talks to it over HTTP.
   #
   # Zotero publishes no version tags for this image, only `latest`, so the digest is what to pin if
   # reproducibility matters:

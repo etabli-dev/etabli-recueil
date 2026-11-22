@@ -43,7 +43,7 @@ the top.
 | **Map** | Citation, co-citation, coupling, co-word and co-authorship networks built from OpenAlex, Crossref, Semantic Scholar and your own PDFs, with coverage statistics attached to every map, and a Parquet export that lands in R and Python as tables. |
 | **Review** | PRISMA 2020 as a first-class workflow: search runs, dedup with per-source tracking, screening, extraction forms, risk of bias, live flow counts. |
 
-It is one AGPL server with thin clients. Zotero's capture ecosystem, Paperless-ngx's ingestion
+It is one server with thin clients. Zotero's capture ecosystem, Paperless-ngx's ingestion
 model, bibliometrix and VOSviewer's analysis layer, and Covidence and Rayyan's screening workflow,
 in one place that you run yourself.
 
@@ -105,9 +105,9 @@ The full list of ten is in [CONCEPT.md §3](https://github.com/etabli-dev/etabli
 
 ## Licence and citation
 
-Recueil is licensed under **AGPL-3.0-or-later**. That choice is not incidental: reusing Zotero's
-translators and translation-server requires it, and it prevents a hosted fork that gives nothing
-back ([ADR-0005](adr.qmd)).
+Recueil is proprietary, **all rights reserved**, from 22 November 2026; versions published earlier
+remain available under AGPL-3.0-or-later. Zotero's translation-server runs as a separate container
+and keeps its own licence ([ADR-0026](adr.qmd)).
 
 A `CITATION.cff` file is in the repository root, and a Zenodo DOI will be minted at the first
 release.

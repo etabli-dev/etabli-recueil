@@ -268,4 +268,4 @@ question, not as an authoritative extraction; PDF.js arrives with the reader in 
 
 ## Licence
 
-AGPL-3.0-or-later.
+Proprietary, all rights reserved. See [`LICENSE`](../../LICENSE).

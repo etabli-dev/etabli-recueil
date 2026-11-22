@@ -157,4 +157,4 @@ pnpm --filter @recueil/formats run test       # vitest
 
 ## Licence
 
-AGPL-3.0-or-later.
+Proprietary, all rights reserved. See [`LICENSE`](../../LICENSE).

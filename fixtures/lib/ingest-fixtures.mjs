@@ -1,7 +1,7 @@
 /*
  * Recueil — fixtures
  * Copyright (C) 2026 the Recueil authors
- * SPDX-License-Identifier: AGPL-3.0-or-later
+ * SPDX-License-Identifier: LicenseRef-Proprietary
  */
 
 /**

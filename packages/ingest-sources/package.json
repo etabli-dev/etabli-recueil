@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "Where documents come from: the watched folder, the WebDAV feed and the IMAP mailbox of CONCEPT §5.3, each an ingestSource that produces candidates and lets the pipeline own everything downstream.",
-  "license": "AGPL-3.0-or-later",
+  "license": "UNLICENSED",
   "type": "module",
   "sideEffects": false,
   "exports": {

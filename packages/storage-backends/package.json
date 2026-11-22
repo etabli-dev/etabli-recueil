@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "The WebDAV and S3 storage backends, plus the conformance suite every backend — the local filesystem one included — has to pass.",
-  "license": "AGPL-3.0-or-later",
+  "license": "UNLICENSED",
   "type": "module",
   "sideEffects": false,
   "exports": {

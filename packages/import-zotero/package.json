@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "The Zotero migrator: reads zotero.sqlite read-only, maps it onto the Recueil model, resolves and hashes every attachment, and produces the verification report the M1 exit criterion names.",
-  "license": "AGPL-3.0-or-later",
+  "license": "UNLICENSED",
   "type": "module",
   "exports": {
     ".": {

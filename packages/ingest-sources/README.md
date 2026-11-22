@@ -333,4 +333,4 @@ test/fakes/           an in-process WebDAV feed server and an in-process IMAP se
 test/mail-corpus.test.ts   fixtures/mail/, end to end, against fixtures/expected-counts.json
 ```
 
-Licence: AGPL-3.0-or-later.
+Licence: proprietary, all rights reserved. See [`LICENSE`](../../LICENSE).

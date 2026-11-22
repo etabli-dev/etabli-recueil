@@ -101,7 +101,7 @@ website:
     left: >-
       Recueil — Gather. Verify. Map.
     center: >-
-      Licensed [AGPL-3.0-or-later](https://github.com/etabli-dev/etabli-recueil/blob/main/LICENSE).
+      All rights reserved · [Licence](https://github.com/etabli-dev/etabli-recueil/blob/main/LICENSE).
     right:
       - text: "Concept"
         href: "https://github.com/etabli-dev/etabli-recueil/blob/main/CONCEPT.md"

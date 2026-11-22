@@ -53,11 +53,11 @@
       "$ref": "#/$defs/person"
     },
     "licence": {
-      "description": "SPDX licence expression for the plugin's own source. Note the British spelling: this key is `licence`, not npm's `license`, and the two are independent — a plugin's `package.json` keeps its `license` field for npm. A plugin that links the Recueil server in-process is a derivative work of an AGPL-3.0-or-later program, so `AGPL-3.0-or-later` is the expected value; other values are permitted by this schema and audited by the registry, not by the host.",
+      "description": "SPDX licence expression for the plugin's own source. Note the British spelling: this key is `licence`, not npm's `license`, and the two are independent — a plugin's `package.json` keeps its `license` field for npm. First-party plugins use `LicenseRef-Proprietary`; a third-party plugin that links the Recueil server in-process needs a licence agreement with the copyright holder. Other values are permitted by this schema and audited by the registry, not by the host.",
       "type": "string",
       "minLength": 1,
       "maxLength": 200,
-      "examples": ["AGPL-3.0-or-later", "AGPL-3.0-only", "GPL-3.0-or-later"]
+      "examples": ["LicenseRef-Proprietary", "MIT", "Apache-2.0"]
     },
     "homepage": {
       "description": "URL of the plugin's documentation or landing page, linked from the plugin list.",
@@ -696,7 +696,7 @@
         "name": "Recueil maintainers",
         "url": "https://github.com/etabli/recueil"
       },
-      "licence": "AGPL-3.0-or-later",
+      "licence": "LicenseRef-Proprietary",
       "homepage": "https://etabli.github.io/recueil/plugins/resolver-openalex",
       "repository": "https://github.com/etabli/recueil",
       "keywords": ["resolver", "openalex", "bibliometrics", "citations"],
@@ -794,7 +794,7 @@
         "name": "Recueil maintainers",
         "url": "https://github.com/etabli/recueil"
       },
-      "licence": "AGPL-3.0-or-later",
+      "licence": "LicenseRef-Proprietary",
       "repository": "https://github.com/etabli/recueil",
       "keywords": ["storage", "s3", "minio", "backend"],
       "recueilApi": ">=1.0.0 <2.0.0",
@@ -899,7 +899,7 @@
         "email": "reviewer@example.org",
         "orcid": "0000-0002-1825-0097"
       },
-      "licence": "AGPL-3.0-or-later",
+      "licence": "LicenseRef-Proprietary",
       "repository": "https://github.com/example/recueil-plugin-cochrane-rob",
       "keywords": ["systematic-review", "risk-of-bias", "rob2", "robins-i"],
       "icon": "./assets/icon.svg",

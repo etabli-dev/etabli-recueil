@@ -2,7 +2,7 @@
 
 The Recueil desktop application for Linux, Windows and macOS: the web client (`apps/web`) in a
 Tauri 2 window, connected to a Recueil server (CONCEPT.md §5.14, ADR-0007). Licence
-AGPL-3.0-or-later.
+Proprietary, all rights reserved.
 
 ## Scope
 

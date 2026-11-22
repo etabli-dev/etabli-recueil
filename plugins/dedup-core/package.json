@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "description": "First-party record deduplication rules: identifier match and fuzzy title/year/author match (CONCEPT §5.6).",
-  "license": "AGPL-3.0-or-later",
+  "license": "UNLICENSED",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

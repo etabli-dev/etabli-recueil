@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "description": "Scaffold a Recueil plugin: a manifest the host accepts, one working check, its test and the build (npm create recueil-plugin).",
-  "license": "MIT",
+  "license": "UNLICENSED",
   "type": "module",
   "bin": { "create-recueil-plugin": "./bin/create.mjs" },
   "files": ["bin", "src"],

@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "The Recueil server: the Fastify application that serves the REST contract, the health endpoint and the generated OpenAPI document.",
-  "license": "AGPL-3.0-or-later",
+  "license": "UNLICENSED",
   "type": "module",
   "exports": {
     ".": {

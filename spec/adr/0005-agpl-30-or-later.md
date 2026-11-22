@@ -1,6 +1,6 @@
 # 0005 — AGPL-3.0-or-later
 
-- **Status:** Accepted
+- **Status:** Superseded (by ADR-0026)
 - **Date:** 2026-08-22
 - **Phase:** Phase 0
 

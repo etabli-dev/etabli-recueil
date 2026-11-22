@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "Zod schemas and the generated OpenAPI document — the shared contract every other Recueil package imports.",
-  "license": "AGPL-3.0-or-later",
+  "license": "UNLICENSED",
   "type": "module",
   "sideEffects": false,
   "exports": {

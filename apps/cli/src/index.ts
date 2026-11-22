@@ -2,7 +2,7 @@
 /**
  * `recueil` — the entry point.
  *
- * Copyright the Recueil contributors. Licensed under AGPL-3.0-or-later.
+ * Copyright (c) 2026 R. Heller. All rights reserved.
  */
 import { main } from './main.js';
 

@@ -6,7 +6,7 @@ time.
 ## Status: honest expectations first
 
 Recueil is written by one person to replace a stack they use daily. ADR-0014 sets when that changes:
-the repository is public and AGPL from the first commit, but the project is developed as a tool for
+the repository is public (proprietary, all rights reserved, since 22 November 2026), but the project is developed as a tool for
 its author through **M3** (end of Phase 3), and opens properly at **M4** (end of Phase 5). Until
 then:
 
@@ -161,10 +161,10 @@ a hard rule and pull requests carrying such lines will be asked to rewrite the h
 
 ## Developer Certificate of Origin
 
-Recueil uses the [Developer Certificate of Origin 1.1](https://developercertificate.org/) rather
-than a contributor licence agreement. There is nothing to sign and no copyright is assigned: you
-keep yours, and your contribution is licensed under AGPL-3.0-or-later like the rest of the
-repository.
+Recueil is proprietary (all rights reserved). Please open an issue before proposing changes;
+contributions can only be accepted under a separate written agreement with the copyright holder.
+Commits are additionally signed off under the
+[Developer Certificate of Origin 1.1](https://developercertificate.org/).
 
 Certify each commit by signing it off:
 
@@ -230,8 +230,8 @@ If it is a plugin, then:
   database handle, no direct access to the content store. This is what keeps a future move to a
   sandboxed host a change of host rather than a rewrite of every plugin (ADR-0018), and an import
   lint in the compatibility suite enforces it.
-- A plugin that links the server in-process is a derivative work of an AGPL-3.0-or-later program.
-  `AGPL-3.0-or-later` is the expected licence for a plugin's own source.
+- A plugin that links the server in-process needs a licence agreement with the copyright holder;
+  first-party plugins are `LicenseRef-Proprietary`.
 - Name it `recueil-plugin-<something>` on npm so it is findable. The `@recueil/` scope is reserved
   for first-party plugins in this repository.
 - **Where it lives:** community plugins live in their author's own repository, at their own release

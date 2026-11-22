@@ -148,7 +148,7 @@ ENV RECUEIL_VERSION=${RECUEIL_VERSION}
 
 LABEL org.opencontainers.image.title="Recueil" \
       org.opencontainers.image.description="Self-hosted, API-first document and reference manager with reference verification, bibliometrics and systematic-review workflow" \
-      org.opencontainers.image.licenses="AGPL-3.0-or-later" \
+      org.opencontainers.image.licenses="LicenseRef-Proprietary" \
       org.opencontainers.image.source="https://github.com/etabli-dev/etabli-recueil" \
       org.opencontainers.image.documentation="https://github.com/etabli-dev/etabli-recueil/blob/main/deploy/README.md" \
       org.opencontainers.image.version="${RECUEIL_VERSION}" \

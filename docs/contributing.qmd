@@ -8,7 +8,7 @@ subtitle: "What is welcome now, and what is not yet"
 
 Recueil is written by one person to replace a stack they use daily.
 [ADR-0014](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0014-tool-for-you-through-m3-open-repo-at-m4.md)
-sets when that changes: the repository is public and AGPL from the first commit, but the project is
+sets when that changes: the repository is public (proprietary, all rights reserved, since 22 November 2026), but the project is
 developed as a tool for its author through **M3** (the end of Phase 3) and opens properly at **M4**
 (the end of Phase 5). Until then:
 
@@ -99,9 +99,9 @@ write it.
 
 ## Developer Certificate of Origin
 
-Recueil uses the [DCO 1.1](https://developercertificate.org/) rather than a contributor licence
-agreement. Nothing to sign, no copyright assigned: you keep yours, and your contribution is licensed
-AGPL-3.0-or-later like the rest of the repository.
+Recueil is proprietary (all rights reserved). Please open an issue before proposing changes;
+contributions can only be accepted under a separate written agreement with the copyright holder.
+Commits are additionally signed off under the [DCO 1.1](https://developercertificate.org/).
 
 ```sh
 git commit -s -m "Add ISBN resolver"

@@ -401,4 +401,4 @@ parse this" is.
 
 ## Licence
 
-AGPL-3.0-or-later. See [`LICENSE`](../../LICENSE) and [ADR-0005](../../spec/adr/0005-agpl-30-or-later.md).
+Proprietary, all rights reserved. See [`LICENSE`](../../LICENSE).
