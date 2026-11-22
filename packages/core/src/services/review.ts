@@ -386,6 +386,11 @@ export class ReviewService {
       let itemId = this.matchItem(input.bibliographic);
       let itemCreated = false;
       if (itemId === undefined) {
+        // No identifier: the same file imported twice must not create the record twice.
+        const repeat = this.repeatInRun(searchRunId, input);
+        if (repeat !== undefined) return { record: repeat, outcome: 'repeat' as const, itemCreated: false };
+      }
+      if (itemId === undefined) {
         itemId = this.library.createItem(
           {
             itemType: input.itemType,
@@ -1071,6 +1076,29 @@ export class ReviewService {
   /* ---------------------------------------------------------------------------------------- */
   /* Internals                                                                                   */
   /* ---------------------------------------------------------------------------------------- */
+
+  /**
+   * A record this run already holds, for a record with no DOI or PMID: the same accession, or the
+   * same normalised title and year. Only within the run — across runs, near-duplicates are the
+   * dedup pass's to find, so each database keeps its own record until then.
+   */
+  private repeatInRun(searchRunId: string, input: ImportedRecordInput): ReviewRecordRow | undefined {
+    const title = input.bibliographic?.title ?? input.title ?? null;
+    const key = title === null ? null : [...tokens(title)].join(' ');
+    const year = input.bibliographic?.issuedYear ?? null;
+    const rows = this.db
+      .select({ record: reviewRecords, external: reviewRecordSources.externalRecordId, title: itemBibliographic.title, year: itemBibliographic.issuedYear })
+      .from(reviewRecordSources)
+      .innerJoin(reviewRecords, eq(reviewRecords.id, reviewRecordSources.reviewRecordId))
+      .leftJoin(itemBibliographic, eq(itemBibliographic.itemId, reviewRecords.itemId))
+      .where(eq(reviewRecordSources.searchRunId, searchRunId))
+      .all();
+    for (const row of rows) {
+      if (input.externalRecordId != null && row.external === input.externalRecordId) return row.record;
+      if (key !== null && key !== '' && row.title !== null && [...tokens(row.title)].join(' ') === key && (row.year ?? null) === year) return row.record;
+    }
+    return undefined;
+  }
 
   private matchItem(bibliographic: BibliographicInput | undefined): string | undefined {
     const live = (condition: ReturnType<typeof eq>) =>
