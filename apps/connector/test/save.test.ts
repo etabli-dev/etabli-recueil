@@ -78,7 +78,7 @@ describe('saving', () => {
       fetchPdf: async () => new Blob(['<html>'], { type: 'application/octet-stream' }),
     });
     expect(outcome.itemId).toBe('ITEM1');
-    expect(outcome.pdf).toEqual({ failed: expect.stringContaining('not a PDF') });
+    expect(outcome.pdf).toEqual({ failed: expect.stringContaining('did not return a PDF') });
   });
 
   it('reports the server’s refusal with its status', async () => {
