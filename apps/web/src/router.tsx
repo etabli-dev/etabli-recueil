@@ -12,6 +12,7 @@
  */
 import { createRootRoute, createRoute, createRouter } from '@tanstack/react-router';
 
+import { GraphRoute } from './routes/graph.js';
 import { LibraryRoute, validateLibrarySearch } from './routes/library.js';
 import type { LibrarySearch } from './routes/library.js';
 import { ReaderRoute } from './routes/reader.js';
@@ -61,6 +62,12 @@ const rulesRoute = createRoute({
   validateSearch: (search: Record<string, unknown>): RulesSearch => validateRulesSearch(search),
 });
 
+const graphRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/graph',
+  component: GraphRoute,
+});
+
 const shareRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/share',
@@ -74,6 +81,7 @@ export const routeTree = rootRoute.addChildren([
   reviewRoute,
   sourcesRoute,
   rulesRoute,
+  graphRoute,
   shareRoute,
 ]);
 

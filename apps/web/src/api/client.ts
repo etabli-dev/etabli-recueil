@@ -173,6 +173,21 @@ const buildQueryString = (query: RequestOptions['query']): string => {
   return rendered === '' ? '' : `?${rendered}`;
 };
 
+/** `GET /graph/network` as JSON. */
+export interface GraphNetwork {
+  nodes: { id: string; label: string; type: string; year: number | null; venue: string | null; doi: string | null; citedBy: number | null; inLibrary: boolean }[];
+  edges: { source: string; target: string; type: string; directed: boolean; weight: number; provenance: string }[];
+  generatedAt: string;
+  description: string;
+}
+
+/** `GET /graph/coverage`. */
+export interface GraphCoverage {
+  items: number;
+  withReferences: number;
+  bySource: { source: string; items: number; edges: number; lastFetchedAt: string | null }[];
+}
+
 export class RecueilClient {
   private readonly baseUrl: string;
 
@@ -340,6 +355,16 @@ export class RecueilClient {
 
   documentContentUrl(documentId: string): string {
     return this.url(`/documents/${encodeURIComponent(documentId)}/content`);
+  }
+
+  /* Graph (CONCEPT §5.8) -------------------------------------------------------------------- */
+
+  getNetwork(network: string, signal?: AbortSignal): Promise<GraphNetwork> {
+    return this.api<GraphNetwork>('/graph/network', { query: { network, format: 'json' }, signal });
+  }
+
+  getGraphCoverage(signal?: AbortSignal): Promise<GraphCoverage> {
+    return this.api<GraphCoverage>('/graph/coverage', { signal });
   }
 
   /* Annotations (ADR-0009) ---------------------------------------------------------------- */

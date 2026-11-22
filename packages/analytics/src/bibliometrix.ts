@@ -122,6 +122,13 @@ export const toWosPlaintext = (recueil: Recueil, itemIds: readonly string[]): st
       ...field('DT', [dt]),
       ...field('DE', [tags.join('; ')]),
       ...field('AB', [bib?.abstract ?? '']),
+      // bibliometrix's convert2df assumes every record has C1; without one it fails outright.
+      ...field('C1', (() => {
+        const affiliations = creators
+          .filter(({ appearance }) => appearance.affiliationRaw !== null && appearance.affiliationRaw.trim() !== '')
+          .map(({ creator, appearance }) => `[${creator.literalName ?? `${creator.familyName ?? ''}, ${creator.givenName ?? ''}`.replace(/, $/u, '')}] ${appearance.affiliationRaw!.trim()}`);
+        return affiliations.length > 0 ? affiliations : ['NA'];
+      })()),
       ...field('CR', references),
       ...field('NR', [String(references.length)]),
       ...field('TC', [cited.length === 0 ? '0' : String(Math.max(...cited.map((row) => row.value)))]),

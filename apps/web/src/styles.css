@@ -1468,3 +1468,39 @@ kbd {
 .reader__annotation-noted code {
   word-break: break-all;
 }
+
+/* Citation map (Phase 5) --------------------------------------------------------------------- */
+
+.graph__toolbar {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.graph__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 18rem;
+  gap: 1rem;
+}
+.graph__svg {
+  width: 100%;
+  height: auto;
+  border: 1px solid rgb(0 0 0 / 10%);
+  background: rgb(250 250 250);
+}
+.graph__edges line {
+  stroke: rgb(120 120 120 / 45%);
+}
+.graph__node {
+  fill: white;
+  stroke: rgb(60 90 160);
+  stroke-width: 1.5;
+  cursor: pointer;
+}
+.graph__node--library {
+  fill: rgb(60 90 160);
+}
+.graph__node--selected {
+  stroke: rgb(220 120 0);
+  stroke-width: 3;
+}

@@ -19,6 +19,7 @@ const SCREENS = [
   { to: '/review', label: 'Review queue' },
   { to: '/sources', label: 'Sources' },
   { to: '/rules', label: 'Rules' },
+  { to: '/graph', label: 'Citation map' },
 ] as const;
 
 export const RootLayout = (): JSX.Element => (

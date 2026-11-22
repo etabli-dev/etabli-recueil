@@ -4252,6 +4252,324 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/analytics/tables/{table}.csv:
+    get:
+      operationId: getAnalyticsTable
+      summary: One analytics table as CSV
+      description: >-
+        works, creators, works_creators, terms, works_terms, edges or metrics — flat, stable columns
+        for R, Python and DuckDB (ADR-0008).
+
+
+        **Scope:** `analytics:read`.
+      tags:
+        - Analytics
+      parameters:
+        - in: path
+          name: table
+          schema:
+            type: string
+            enum:
+              - works
+              - creators
+              - works_creators
+              - terms
+              - works_terms
+              - edges
+              - metrics
+          required: true
+      responses:
+        '200':
+          description: The table, RFC 4180 CSV with a header row.
+          content:
+            text/csv:
+              schema:
+                type: string
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/analytics/wos.txt:
+    get:
+      operationId: getWosPlaintext
+      summary: The library as Web of Science plain text
+      description: >-
+        What bibliometrix `convert2df(dbsource = "wos", format = "plaintext")` and biblioshiny read,
+        with the cited references from the graph.
+
+
+        **Scope:** `analytics:read`.
+      tags:
+        - Analytics
+      parameters:
+        - in: query
+          name: collectionId
+          schema:
+            description: Only this collection (or saved search).
+            $ref: '#/components/schemas/Id'
+          description: Only this collection (or saved search).
+        - in: query
+          name: q
+          schema:
+            description: Only items matching this full-text query.
+            type: string
+            maxLength: 512
+          description: Only items matching this full-text query.
+        - in: query
+          name: token
+          schema:
+            type: string
+            maxLength: 256
+      responses:
+        '200':
+          description: Web of Science plain text.
+          content:
+            text/plain:
+              schema:
+                type: string
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/graph/network:
+    get:
+      operationId: getGraphNetwork
+      summary: 'A network: citations, local citations, co-citation or coupling'
+      description: >-
+        As JSON, GraphML (igraph, tidygraph), GEXF (Gephi) or VOSviewer JSON. Derived networks come
+        from the latest `recueil graph derive` run.
+
+
+        **Scope:** `analytics:read`.
+      tags:
+        - Analytics
+      parameters:
+        - in: query
+          name: network
+          schema:
+            description: Default `citations`; `local` keeps only citations between library items.
+            type: string
+            enum:
+              - citations
+              - local
+              - co-citation
+              - coupling
+          description: Default `citations`; `local` keeps only citations between library items.
+        - in: query
+          name: format
+          schema:
+            description: Default `json`.
+            type: string
+            enum:
+              - json
+              - graphml
+              - gexf
+              - vosviewer
+          description: Default `json`.
+        - in: query
+          name: token
+          schema:
+            type: string
+            maxLength: 256
+      responses:
+        '200':
+          description: The network.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GraphNetwork'
+            application/graphml+xml:
+              schema:
+                type: string
+            application/gexf+xml:
+              schema:
+                type: string
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/graph/coverage:
+    get:
+      operationId: getGraphCoverage
+      summary: Reference-data coverage
+      description: |-
+        The statistic every map shows beside it (P4).
+
+        **Scope:** `analytics:read`.
+      tags:
+        - Analytics
+      responses:
+        '200':
+          description: Coverage.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GraphCoverage'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/graph/shadow-works:
+    get:
+      operationId: listShadowWorks
+      summary: The most-cited works not in the library
+      description: |-
+        Ranked by how often the library cites them: what to read next.
+
+        **Scope:** `analytics:read`.
+      tags:
+        - Analytics
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+      responses:
+        '200':
+          description: Shadow works.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ShadowWork'
+                required:
+                  - data
+                additionalProperties: false
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/graph/shadow-works/{id}/promote:
+    post:
+      operationId: promoteShadowWork
+      summary: Bring a cited work into the library
+      description: |-
+        Creates an item and rewrites the graph node in place, so no citation edge moves (GN1, SW2).
+
+        **Scope:** `items:write`.
+      tags:
+        - Analytics
+      parameters:
+        - in: path
+          name: id
+          schema:
+            description: The record id (a ULID).
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: The record id (a ULID).
+      responses:
+        '201':
+          description: The new item id.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  itemId:
+                    type: string
+                required:
+                  - itemId
+                additionalProperties: false
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
   /api/v1/fields:
     get:
       operationId: listCustomFields
@@ -14494,6 +14812,171 @@ components:
         - moved
       additionalProperties: false
       title: TagMergeResult
+    GraphNetwork:
+      type: object
+      properties:
+        nodes:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              label:
+                type: string
+              type:
+                type: string
+              year:
+                type:
+                  - number
+                  - 'null'
+              venue:
+                type:
+                  - string
+                  - 'null'
+              doi:
+                type:
+                  - string
+                  - 'null'
+              citedBy:
+                type:
+                  - number
+                  - 'null'
+              inLibrary:
+                type: boolean
+            required:
+              - id
+              - label
+              - type
+              - year
+              - venue
+              - doi
+              - citedBy
+              - inLibrary
+            additionalProperties: false
+        edges:
+          type: array
+          items:
+            type: object
+            properties:
+              source:
+                type: string
+              target:
+                type: string
+              type:
+                type: string
+              directed:
+                type: boolean
+              weight:
+                type: number
+              provenance:
+                type: string
+            required:
+              - source
+              - target
+              - type
+              - directed
+              - weight
+              - provenance
+            additionalProperties: false
+        generatedAt:
+          type: string
+        description:
+          type: string
+      required:
+        - nodes
+        - edges
+        - generatedAt
+        - description
+      additionalProperties: false
+      title: GraphNetwork
+    GraphCoverage:
+      type: object
+      properties:
+        items:
+          type: integer
+          minimum: -9007199254740991
+          maximum: 9007199254740991
+        withReferences:
+          type: integer
+          minimum: -9007199254740991
+          maximum: 9007199254740991
+        bySource:
+          type: array
+          items:
+            type: object
+            properties:
+              source:
+                type: string
+              items:
+                type: integer
+                minimum: -9007199254740991
+                maximum: 9007199254740991
+              edges:
+                type: integer
+                minimum: -9007199254740991
+                maximum: 9007199254740991
+              lastFetchedAt:
+                type:
+                  - string
+                  - 'null'
+            required:
+              - source
+              - items
+              - edges
+              - lastFetchedAt
+            additionalProperties: false
+      required:
+        - items
+        - withReferences
+        - bySource
+      additionalProperties: false
+      title: GraphCoverage
+      description: How many items have reference data, from which sources, fetched when (P4).
+    ShadowWork:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type:
+            - string
+            - 'null'
+        doi:
+          type:
+            - string
+            - 'null'
+        issuedYear:
+          anyOf:
+            - type: integer
+              minimum: -9007199254740991
+              maximum: 9007199254740991
+            - type: 'null'
+        containerTitle:
+          type:
+            - string
+            - 'null'
+        seenCount:
+          type: integer
+          minimum: -9007199254740991
+          maximum: 9007199254740991
+        citedByCount:
+          anyOf:
+            - type: integer
+              minimum: -9007199254740991
+              maximum: 9007199254740991
+            - type: 'null'
+      required:
+        - id
+        - title
+        - doi
+        - issuedYear
+        - containerTitle
+        - seenCount
+        - citedByCount
+      additionalProperties: false
+      title: ShadowWork
+      description: A work the library cites that is not in it (SW1).
     CreatorMergeResult:
       type: object
       properties:

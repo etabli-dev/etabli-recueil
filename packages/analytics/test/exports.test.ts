@@ -38,6 +38,7 @@ describe('exports', () => {
     expect(text).toContain('AU Lovelace, A\n');
     expect(text).toContain('AF Lovelace, Ada\n');
     expect(text).toContain('SO INJURY\n');
+    expect(text).toContain('C1 NA\n');
     expect(text).toContain('CR BABBAGE C, 1999, BONE, DOI 10.1000/X\n');
     expect(text).toContain('NR 1\n');
     expect(text).toContain('PY 2020\nVL 12\n');
