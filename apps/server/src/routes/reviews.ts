@@ -3,9 +3,10 @@
  * setup, search runs and their imports, deduplication, screening, full-text retrieval, the live
  * PRISMA 2020 counts and snapshots, extraction and risk of bias, and the exports R reads.
  */
-import type { ExclusionReason, Recueil, RecordView, ReviewRow, ScreeningDecisionRow, SearchRunRow, UpdateReviewInput } from '@recueil/core';
+import type { ExclusionReason, Recueil, RecordView, UpdateReviewInput, schema } from '@recueil/core';
 import { NotFoundError, ROB_INSTRUMENTS, ValidationError } from '@recueil/core';
 import { API_BASE_PATH, IdSchema } from '@recueil/schemas';
+
 import { extractionCsv, flowFromSnapshot, includedStudiesCsv, prismaCsv, prismaSvg, robvisCsv, screeningAuditCsv, storeAndImportSearchFile } from '@recueil/sr';
 import type { FastifyPluginAsync } from 'fastify';
 import type { ZodOpenApiPathsObject } from 'zod-openapi';
@@ -13,6 +14,10 @@ import * as z from 'zod';
 
 import { idPath, jsonBody, jsonResponse, operation, problems } from '../openapi-kit.js';
 import { coerceQuery, parseOrThrow } from '../validate.js';
+
+type ReviewRow = schema.ReviewRow;
+type SearchRunRow = schema.SearchRunRow;
+type ScreeningDecisionRow = schema.ScreeningDecisionRow;
 
 const BASE = `${API_BASE_PATH}/reviews`;
 const TAGS = ['Systematic reviews'] as const;
