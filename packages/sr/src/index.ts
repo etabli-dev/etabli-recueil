@@ -14,7 +14,7 @@ export type SearchFileFormat = 'ris' | 'medline' | 'bibtex' | 'csl-json';
 
 /** Guess the format of a search export from its first lines. */
 export const detectFormat = (text: string): SearchFileFormat | null => {
-  const head = text.replace(/^﻿/u, '').trimStart().slice(0, 4000);
+  const head = text.replace(/^\uFEFF/u, '').trimStart().slice(0, 4000);
   if (/^PMID-\s/mu.test(head)) return 'medline';
   if (/^TY {2}- /mu.test(head)) return 'ris';
   if (/^@\w+\s*[{(]/mu.test(head)) return 'bibtex';
