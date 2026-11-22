@@ -424,6 +424,11 @@ export class RecueilClient {
     return this.api<GraphCoverage>('/graph/coverage', { signal });
   }
 
+  /** A book item from an ISBN alone; enrichment fills in the rest (Phase 8 capture). */
+  createItemFromIsbn(isbn: string): Promise<{ id: string }> {
+    return this.api<{ id: string }>('/items', { method: 'POST', body: { itemType: 'book', bibliographic: { isbn } } });
+  }
+
   /* Systematic reviews (CONCEPT §5.10) --------------------------------------------------- */
 
   listReviews(signal?: AbortSignal): Promise<{ data: ReviewWire[] }> {

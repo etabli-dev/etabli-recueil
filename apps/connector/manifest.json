@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "Recueil connector",
+  "short_name": "Recueil",
+  "version": "0.1.0",
+  "description": "Save the scholarly page you are reading, with its PDF, to your own Recueil server.",
+  "action": { "default_title": "Save to Recueil", "default_popup": "popup.html" },
+  "options_ui": { "page": "options.html", "open_in_tab": true },
+  "permissions": ["activeTab", "scripting", "storage"],
+  "optional_host_permissions": ["https://*/*", "http://localhost/*", "http://127.0.0.1/*"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "minimum_chrome_version": "121"
+}

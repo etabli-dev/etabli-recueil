@@ -1,6 +1,6 @@
 # 0024 — Capacitor for the mobile shell
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-11-22, with the transition plan's recommendations)
 - **Date:** 2026-11-08
 - **Phase:** Phase 2 (governs Phase 8)
 

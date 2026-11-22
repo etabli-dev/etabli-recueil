@@ -14,6 +14,7 @@ import { createRootRoute, createRoute, createRouter } from '@tanstack/react-rout
 
 import { FiguresRoute } from './routes/figures.js';
 import { ScreeningRoute } from './routes/screening.js';
+import { CaptureRoute } from './routes/capture.js';
 import { GraphRoute } from './routes/graph.js';
 import { LibraryRoute, validateLibrarySearch } from './routes/library.js';
 import type { LibrarySearch } from './routes/library.js';
@@ -82,6 +83,12 @@ const screeningRoute = createRoute({
   component: ScreeningRoute,
 });
 
+const captureRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/capture',
+  component: CaptureRoute,
+});
+
 const shareRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/share',
@@ -98,6 +105,7 @@ export const routeTree = rootRoute.addChildren([
   graphRoute,
   figuresRoute,
   screeningRoute,
+  captureRoute,
   shareRoute,
 ]);
 

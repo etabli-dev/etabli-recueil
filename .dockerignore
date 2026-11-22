@@ -46,3 +46,9 @@
 **/.cursor
 **/.mcp.json
 **/.pnpm-store
+# The mobile shell's assembled web assets and native build output (apps/mobile).
+apps/mobile/www/
+apps/mobile/android/app/build/
+apps/mobile/android/.gradle/
+apps/mobile/ios/App/Pods/
+apps/mobile/ios/App/App/public/

@@ -1613,3 +1613,31 @@ kbd {
     max-height: 12rem;
   }
 }
+
+/* Capture (Phase 8) */
+.capture {
+  padding: 1rem;
+  max-width: 44rem;
+}
+.capture-actions,
+.capture-isbn {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap);
+  align-items: center;
+  margin: 1rem 0;
+}
+.capture-actions button {
+  min-height: 2.75rem;
+  padding: 0 1rem;
+}
+.capture-list {
+  padding-left: 1.2rem;
+}
+.capture-list.refused strong {
+  color: var(--error);
+}
+.capture .quiet,
+.capture-status {
+  color: var(--ink-quiet);
+}

@@ -43,7 +43,7 @@ the open-decision backlog in CONCEPT.md §10.
 | [0021](0021-a-verification-check-queries-both-sides.md) | A verification check queries both sides | Accepted | Phase 0 (governs every phase) |
 | [0022](0022-resource-budgets-on-untrusted-input.md) | Resource budgets on untrusted input | Accepted | Phase 0 (governs every phase) |
 | [0023](0023-desktop-shell-connects-before-it-bundles.md) | The desktop shell connects to a server before it bundles one | Proposed | Phase 2 (governs Phase 4) |
-| [0024](0024-capacitor-for-the-mobile-shell.md) | Capacitor for the mobile shell | Proposed | Phase 2 (governs Phase 8) |
+| [0024](0024-capacitor-for-the-mobile-shell.md) | Capacitor for the mobile shell | Accepted | Phase 2 (governs Phase 8) |
 | [0025](0025-two-way-zotero-sync.md) | Two-way sync with a zotero.org library | Accepted | Step Z, before Phase 3 |
 
 ## Adding a record

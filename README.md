@@ -169,6 +169,20 @@ What has been exercised end to end here:
   claimed**. Not yet: a second screener, automated prioritisation, Unpaywall retrieval from the
   server and the snowballing deep dive (both need the job queue), and Parquet.
 
+- **Phase 8 — capture on the phone, and Recueil's own connector.** The web app's *Capture* screen
+  scans or photographs a document, takes files, and reads or takes a typed ISBN; every capture goes
+  into an on-device queue (IndexedDB) and is uploaded when the server answers, and one the server
+  refuses stays with its reason. `apps/mobile` is the Capacitor 8 shell for iOS, iPadOS and Android
+  ([ADR-0024](spec/adr/0024-capacitor-for-the-mobile-shell.md), now accepted): the server address
+  in Preferences and the token in the Keychain or Keystore, ML Kit's document scanner on Android
+  and VisionKit on iOS through the app's own plugin, ML Kit barcodes, files shared into the app on
+  Android, and the queue flushing when the network returns. CI builds a debug APK and an iOS
+  simulator build. `apps/connector` is a Manifest V3 extension for Chromium and Firefox (Safari via
+  Apple's converter) that saves the page you are reading — Highwire, Dublin Core, JSON-LD or a DOI
+  — and its PDF through the REST API with a scoped token. **Not yet run on a phone and not listed
+  in any store**: the thirty-second capture exit and the Chrome Web Store listing need the owner's
+  devices and developer accounts. Not yet: an iOS share extension, cached reading offline.
+
 ### The hardening round
 
 An adversarial review between Phase 2 and Phase 3 returned 8 critical, 8 major and

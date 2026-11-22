@@ -45,7 +45,7 @@ This page is an index; the files are authoritative.
 | **0021** | [A verification check queries both sides](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0021-a-verification-check-queries-both-sides.md) | Each side of a check comes from an independent source, never from the producing code's own narration, and every blocking check ships with a test that makes it fail. | Accepted | Phase 0 (governs every phase) |
 | **0022** | [Resource budgets on untrusted input](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0022-resource-budgets-on-untrusted-input.md) | Every path that decompresses, parses or pattern-matches attacker-influenced input runs under an explicit budget enforced by the call. Declared sizes inform, never bound. | Accepted | Phase 0 (governs every phase) |
 | **0023** | [The desktop shell connects to a server before it bundles one](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0023-desktop-shell-connects-before-it-bundles.md) | Phase A: the web client in a Tauri window against a configured server — HTTPS or loopback only, token in the OS credential store, four commands and nothing from Tauri's core. Phase B: the sidecar of ADR-0001. | Proposed | Phase 2 (governs Phase 4) |
-| **0024** | [Capacitor for the mobile shell](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0024-capacitor-for-the-mobile-shell.md) | Recommends Capacitor over Tauri 2 mobile for iOS and Android, because the capture use cases have maintained plugins there; superseding ADR-0007 for mobile only once accepted. | Proposed | Phase 2 (governs Phase 8) |
+| **0024** | [Capacitor for the mobile shell](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0024-capacitor-for-the-mobile-shell.md) | Recommends Capacitor over Tauri 2 mobile for iOS and Android, because the capture use cases have maintained plugins there; superseding ADR-0007 for mobile only. | Accepted | Phase 2 (governs Phase 8) |
 | **0025** | [Two-way sync with a zotero.org library](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/adr/0025-two-way-zotero-sync.md) | A bridge to zotero.org through the Web API: per-field three-way merge against a stored base, conflicts held until decided, conditional writes, conservative deletion. Amends P1 for this bridge only. | Accepted | Step Z, before Phase 3 |
 
 :::
@@ -55,7 +55,7 @@ ADRs 0001–0012 are the technology decisions catalogued in
 0013–0020 resolve the open-decision backlog in §10 — the questions the concept document deliberately
 left open until they blocked something. ADRs 0021 and 0022 came out of the August 2026 hardening
 round: each records a fault three independent reviewers found in three separate places, which makes
-it a design rule rather than a set of bugs. ADRs 0023 and 0024, both still proposed, settle how the
+it a design rule rather than a set of bugs. ADR-0023 (still proposed) and ADR-0024 (accepted) settle how the
 desktop and mobile shells reach the server; the [platform roadmap](platform-roadmap.md) carries the
 plan they belong to.
 

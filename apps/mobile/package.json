@@ -1,0 +1,40 @@
+{
+  "name": "@recueil/mobile",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The Recueil mobile shell: the web client in Capacitor for iOS, iPadOS and Android, with document scan, ISBN barcodes, the share sheet and an offline capture queue (ADR-0024).",
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "node scripts/assemble.mjs",
+    "clean": "rm -rf www",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "cap": "cap",
+    "sync": "cap sync"
+  },
+  "dependencies": {
+    "@aparajita/capacitor-secure-storage": "8.0.1",
+    "@capacitor-mlkit/barcode-scanning": "8.2.2",
+    "@capacitor-mlkit/document-scanner": "8.2.2",
+    "@capacitor/android": "8.6.2",
+    "@capacitor/app": "8.1.2",
+    "@capacitor/core": "8.6.2",
+    "@capacitor/ios": "8.6.2",
+    "@capacitor/network": "8.0.1",
+    "@capacitor/preferences": "8.0.1",
+    "@capgo/capacitor-share-target": "8.0.68"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.6.2",
+    "@recueil/web": "workspace:*",
+    "@types/node": "^22.20.5",
+    "jsdom": "^30.0.1",
+    "typescript": "^5.9.3",
+    "vite": "^8.2.4",
+    "vitest": "^4.1.12"
+  }
+}

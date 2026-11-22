@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Recueil connector settings</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Recueil connector</h1>
+      <p>Your Recueil server and a token with the <code>items:write</code> and <code>documents:write</code> scopes (create one in Recueil under tokens, or over the API).</p>
+      <form id="settings">
+        <p><label>Server address<br /><input id="baseUrl" type="url" required placeholder="https://recueil.example.org" size="40" /></label></p>
+        <p><label>Token<br /><input id="token" type="password" required autocomplete="off" size="40" /></label></p>
+        <p><button type="submit">Save</button></p>
+      </form>
+      <p id="status" role="status" aria-live="polite"></p>
+    </main>
+    <script type="module" src="options.js"></script>
+  </body>
+</html>
