@@ -11,7 +11,7 @@ and enriches references against the open scholarly graph, and exposes the whole
 library to R, Python and LLMs as data. Systematic reviews and bibliometric
 mapping are native workflows, not exports.
 
-**Status:** Phases 1–4 in the tree, unreleased. It builds and runs from a
+**Status:** Phases 1–5 in the tree, unreleased. It builds and runs from a
 source checkout; there is no tagged release, no image on `ghcr.io` and no
 published installable binary.
 
@@ -131,6 +131,17 @@ What has been exercised end to end here:
   adapter has not been run against a live GROBID here. Not yet: the desktop shell's tray, URI
   scheme and folder picker (they need new Rust crates and move to the platform step), and the
   Meilisearch backend (it needs the job runner to keep its index in step).
+
+- **Phase 5 — graph and bibliometrics.** `recueil graph collect` reads reference lists from
+  OpenAlex and Crossref into a citation graph; cited works outside the library are shadow works,
+  matched to library items by DOI and PMID, so the local citation network falls out of it.
+  `recueil graph derive` builds co-citation and coupling (association strength or Salton).
+  Exports: Web of Science plain text that bibliometrix's `convert2df` reads (checked in CI with
+  bibliometrix itself), VOSviewer JSON, GEXF, GraphML and the analytics tables as CSV, through
+  the CLI and `/api/v1/analytics` and `/api/v1/graph`. `clients/r` (`rc_bibliometrix()`,
+  `rc_network()` as tidygraph) and `clients/python` (pandas, networkx) read them; the web app
+  draws the citation map with coverage beside it. Not yet: the MeSH vocabulary layer and co-word
+  maps, Parquet encoding of the tables (CSV for now), and the deep dive.
 
 ### The hardening round
 
