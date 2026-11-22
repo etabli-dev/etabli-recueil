@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -330,12 +330,11 @@ describe('extraction and risk of bias', () => {
   });
 });
 
-/** Fixtures the R client tests read: rewritten with UPDATE_FIXTURES=1, compared otherwise. */
+/**
+ * The files the R tests read (`clients/r/tests/testthat/test-sr.R`), written for CI to hand to
+ * PRISMA2020, robvis and metafor in the same run. They are outputs, never committed.
+ */
 const writeOrCompare = (name: string, content: string): void => {
-  const path = join(fixtures, name);
-  if (process.env['UPDATE_FIXTURES'] === '1' || !existsSync(path)) {
-    writeFileSync(path, content);
-    return;
-  }
-  expect(content).toBe(readFileSync(path, 'utf8'));
+  mkdirSync(fixtures, { recursive: true });
+  writeFileSync(join(fixtures, name), content);
 };

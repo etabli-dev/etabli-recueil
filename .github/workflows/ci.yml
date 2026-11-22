@@ -43,8 +43,28 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm check:spec
       - run: pnpm test
-      # Fixtures the R client tests read are written by the TypeScript tests that produce them
-      # (packages/sr); when one is new or stale, this is the copy to commit.
+      # The systematic-review exports, as the TypeScript tests just wrote them (packages/sr), read
+      # by the R packages that have to take them unmodified: PRISMA2020, robvis and metafor
+      # (CONCEPT §7 Phase 7 exit). The CSVs are produced here and never committed.
+      - uses: r-lib/actions/setup-r@f9a764fea8d5c63df6ef9a5c7795bf7deb5d7e05 # v2
+        if: matrix.node == '22'
+        with:
+          use-public-rspm: true
+      - uses: r-lib/actions/setup-r-dependencies@f9a764fea8d5c63df6ef9a5c7795bf7deb5d7e05 # v2
+        if: matrix.node == '22'
+        with:
+          working-directory: clients/r
+          dependencies: '"hard"'
+          extra-packages: |
+            any::testthat
+            any::metafor
+            any::PRISMA2020
+            any::robvis
+      - name: Systematic-review exports load in PRISMA2020, robvis and metafor
+        if: matrix.node == '22'
+        run: |
+          R CMD INSTALL clients/r
+          Rscript -e 'library(testthat); library(recueil); res <- as.data.frame(test_file("clients/r/tests/testthat/test-sr.R", reporter = "summary", stop_on_failure = TRUE)); if (any(res$skipped)) stop("a review export test was skipped: its fixture was not written")'
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always() && matrix.node == '22'
         with:
