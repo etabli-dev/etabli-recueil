@@ -37,7 +37,7 @@ describe('recueil sr', () => {
     const reviewId = created.stdout.trim();
 
     writeFileSync(join(dir, 'pubmed.nbib'), MEDLINE);
-    const search = await runCli(['--json', 'sr', 'search', reviewId, join(dir, 'pubmed.nbib'), '--database', 'pubmed', '--query', '"hip fractures"[MeSH]', '--returned', '2', ...lib]);
+    const search = await runCli(['--json', 'sr', 'search', reviewId, join(dir, 'pubmed.nbib'), '--source', 'pubmed', '--query', '"hip fractures"[MeSH]', '--returned', '2', ...lib]);
     expect(search.code, search.stderr).toBe(0);
     const payload = JSON.parse(search.stdout) as { summary: { parsed: number; added: number; documentId: string } };
     expect(payload.summary).toMatchObject({ parsed: 2, added: 2 });

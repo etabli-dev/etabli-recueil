@@ -3,7 +3,7 @@
  *
  *   recueil sr create "<title>" [--reason code=Label[@stage]] [--disclose-automation]
  *   recueil sr list | show <review>
- *   recueil sr search <review> <file> --database pubmed --query '<verbatim>' [--returned n]
+ *   recueil sr search <review> <file> --source pubmed --query '<verbatim>' [--returned n]
  *   recueil sr dedup <review> [--dry-run]
  *   recueil sr screen <review> [--stage full_text]                 keyboard loop on a terminal
  *   recueil sr screen <review> --record <id> --decide exclude --reason wrong_population
@@ -97,7 +97,7 @@ export const registerSr = (parent: Command, describe: (name: string) => string, 
       );
       if (ui().json) return ui().outJson({ command: 'sr.create', review });
       ui().out(review.id);
-      ui().info(`Created review '${review.title}'. Next: \`recueil sr search ${review.id} <export file> --database pubmed --query '…'\`.`);
+      ui().info(`Created review '${review.title}'. Next: \`recueil sr search ${review.id} <export file> --source pubmed --query '…'\`.`);
     });
   });
 
@@ -129,19 +129,19 @@ export const registerSr = (parent: Command, describe: (name: string) => string, 
       .description('Record a search run and import its export file (RIS, MEDLINE/NBIB, BibTeX, CSL-JSON)')
       .argument('<review>')
       .argument('<file>')
-      .requiredOption('--database <name>', 'pubmed | embase | web_of_science | scopus | cochrane | registry | citation_search | …')
+      .requiredOption('--source <name>', 'the database searched: pubmed | embase | web_of_science | scopus | cochrane | registry | citation_search | …')
       .requiredOption('--query <text>', 'the query, verbatim, in the syntax of the interface (PRISMA-S)')
       .option('--interface <name>', 'Ovid, EBSCOhost, native …')
       .option('--returned <n>', 'the number of records the database reported', Number)
       .option('--executed-at <iso>', 'when the search ran (default now)')
       .option('--format <format>', 'ris | medline | bibtex | csl-json (detected by default)', choice(['ris', 'medline', 'bibtex', 'csl-json'] as const)),
-  ).action(async (reviewId: string, file: string, flags: LibraryFlags & { database: string; query: string; interface?: string; returned?: number; executedAt?: string; format?: SearchFileFormat }) => {
+  ).action(async (reviewId: string, file: string, flags: LibraryFlags & { source: string; query: string; interface?: string; returned?: number; executedAt?: string; format?: SearchFileFormat }) => {
     await open(flags, async (recueil) => {
       const text = readFileSync(file, 'utf8');
       const run = recueil.reviews.addSearchRun(
         reviewId,
         {
-          sourceDatabase: flags.database,
+          sourceDatabase: flags.source,
           queryString: flags.query,
           ...(flags.interface === undefined ? {} : { interface: flags.interface }),
           ...(flags.returned === undefined ? {} : { recordsReturned: flags.returned }),

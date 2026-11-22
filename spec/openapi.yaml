@@ -4923,6 +4923,2310 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/reviews:
+    get:
+      operationId: listReviews
+      summary: List reviews
+      description: |-
+        Newest first.
+
+        **Scope:** `sr:read`.
+      tags:
+        - Systematic reviews
+      responses:
+        '200':
+          description: The reviews.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Review'
+                required:
+                  - data
+                additionalProperties: false
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+    post:
+      operationId: createReview
+      summary: Create a review
+      description: |-
+        Protocol, registration, the ordered exclusion reasons and the automation disclosure setting.
+
+        **Scope:** `sr:write`.
+      tags:
+        - Systematic reviews
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewCreate'
+      responses:
+        '201':
+          description: The review.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Review'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/reviews/{id}:
+    get:
+      operationId: getReview
+      summary: A review
+      description: |-
+        Its setup.
+
+        **Scope:** `sr:read`.
+      tags:
+        - Systematic reviews
+      parameters:
+        - in: path
+          name: id
+          schema:
+            description: The record id (a ULID).
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: The record id (a ULID).
+      responses:
+        '200':
+          description: The review.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Review'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+    patch:
+      operationId: updateReview
+      summary: Update a review
+      description: |-
+        A reason that decisions use cannot be removed (409).
+
+        **Scope:** `sr:write`.
+      tags:
+        - Systematic reviews
+      parameters:
+        - in: path
+          name: id
+          schema:
+            description: The record id (a ULID).
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: The record id (a ULID).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewUpdate'
+      responses:
+        '200':
+          description: The review.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Review'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: The write is refused by a uniqueness rule, a state rule or a data-model invariant.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+    delete:
+      operationId: trashReview
+      summary: Trash a review
+      description: |-
+        The library items it holds are untouched.
+
+        **Scope:** `sr:write`.
+      tags:
+        - Systematic reviews
+      parameters:
+        - in: path
+          name: id
+          schema:
+            description: The record id (a ULID).
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: The record id (a ULID).
+      responses:
+        '204':
+          description: Trashed.
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/reviews/{id}/searches:
+    get:
+      operationId: listSearchRuns
+      summary: Search runs
+      description: |-
+        In the order they were executed.
+
+        **Scope:** `sr:read`.
+      tags:
+        - Systematic reviews
+      parameters:
+        - in: path
+          name: id
+          schema:
+            description: The record id (a ULID).
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: The record id (a ULID).
+      responses:
+        '200':
+          description: The runs.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SearchRun'
+                required:
+                  - data
+                additionalProperties: false
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+    post:
+      operationId: createSearchRun
+      summary: Record a search run
+      description: |-
+        Database, interface, verbatim query, limits and the number the database reported (PRISMA-S).
+
+        **Scope:** `sr:write`.
+      tags:
+        - Systematic reviews
+      parameters:
+        - in: path
+          name: id
+          schema:
+            description: The record id (a ULID).
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: The record id (a ULID).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchRunCreate'
+      responses:
+        '201':
+          description: The run.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchRun'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/reviews/{id}/searches/{runId}:
+    delete:
+      operationId: deleteSearchRun
+      summary: Delete a search run
+      description: |-
+        Refused once records are attributed to it (SR2).
+
+        **Scope:** `sr:write`.
+      tags:
+        - Systematic reviews
+      parameters:
+        - in: path
+          name: id
+          schema:
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: A 26-character Crockford base32 ULID. Generated by the application, never by the
+            database, and lexicographically sortable, so ordering by id is creation order.
+        - in: path
+          name: runId
+          schema:
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: A 26-character Crockford base32 ULID. Generated by the application, never by the
+            database, and lexicographically sortable, so ordering by id is creation order.
+      responses:
+        '204':
+          description: Deleted.
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: The write is refused by a uniqueness rule, a state rule or a data-model invariant.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/reviews/{id}/searches/{runId}/import:
+    post:
+      operationId: importSearchRun
+      summary: Import a search export
+      description: >-
+        Keeps the file as a document (P10), matches items by DOI and PMID, and adds a second source
+        to records another search already found.
+
+
+        **Scope:** `sr:write`.
+      tags:
+        - Systematic reviews
+      parameters:
+        - in: path
+          name: id
+          schema:
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: A 26-character Crockford base32 ULID. Generated by the application, never by the
+            database, and lexicographically sortable, so ordering by id is creation order.
+        - in: path
+          name: runId
+          schema:
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: A 26-character Crockford base32 ULID. Generated by the application, never by the
+            database, and lexicographically sortable, so ordering by id is creation order.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchImport'
+      responses:
+        '200':
+          description: What arrived.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchImportSummary'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/reviews/{id}/dedup:
+    post:
+      operationId: dedupReview
+      summary: Find duplicates within the review
+      description: >-
+        Near-identical title, year within one, compatible first author. Duplicates are marked, never
+        deleted (RR3).
+
+
+        **Scope:** `sr:write`.
+      tags:
+        - Systematic reviews
+      parameters:
+        - in: path
+          name: id
+          schema:
+            description: The record id (a ULID).
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: The record id (a ULID).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewDedup'
+      responses:
+        '200':
+          description: The pairs.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pairs:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        duplicateId:
+                          type: string
+                        masterId:
+                          type: string
+                        similarity:
+                          type: number
+                      required:
+                        - duplicateId
+                        - masterId
+                        - similarity
+                      additionalProperties: false
+                required:
+                  - pairs
+                additionalProperties: false
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/reviews/{id}/records:
+    get:
+      operationId: listReviewRecords
+      summary: The screening worklist
+      description: >-
+        Unique records for a stage, pending first; full text lists records that passed
+        title/abstract.
+
+
+        **Scope:** `sr:read`.
+      tags:
+        - Systematic reviews
+      parameters:
+        - in: path
+          name: id
+          schema:
+            description: The record id (a ULID).
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: The record id (a ULID).
+        - in: query
+          name: stage
+          schema:
+            description: Default `title_abstract`.
+            type: string
+            enum:
+              - title_abstract
+              - full_text
+          description: Default `title_abstract`.
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum:
+              - pending
+              - decided
+              - all
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+        - in: query
+          name: offset
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 9007199254740991
+      responses:
+        '200':
+          description: The worklist.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewWorklist'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/reviews/{id}/records/{recordId}:
+    get:
+      operationId: getReviewRecord
+      summary: A record
+      description: |-
+        With its sources and every decision, oldest first.
+
+        **Scope:** `sr:read`.
+      tags:
+        - Systematic reviews
+      parameters:
+        - in: path
+          name: id
+          schema:
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: A 26-character Crockford base32 ULID. Generated by the application, never by the
+            database, and lexicographically sortable, so ordering by id is creation order.
+        - in: path
+          name: recordId
+          schema:
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: A 26-character Crockford base32 ULID. Generated by the application, never by the
+            database, and lexicographically sortable, so ordering by id is creation order.
+      responses:
+        '200':
+          description: The record.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  itemId:
+                    type: string
+                  stage:
+                    type: string
+                  dedupStatus:
+                    type: string
+                  duplicateOfId:
+                    type:
+                      - string
+                      - 'null'
+                  screeningStatus:
+                    type: string
+                  exclusionReasonCode:
+                    type:
+                      - string
+                      - 'null'
+                  retrievalStatus:
+                    type: string
+                  retrievalNote:
+                    type:
+                      - string
+                      - 'null'
+                  fullTextDocumentId:
+                    type:
+                      - string
+                      - 'null'
+                  extractionStatus:
+                    type: string
+                  isSnowballed:
+                    type: boolean
+                  studyGroupKey:
+                    type:
+                      - string
+                      - 'null'
+                  title:
+                    type:
+                      - string
+                      - 'null'
+                  abstract:
+                    type:
+                      - string
+                      - 'null'
+                  year:
+                    anyOf:
+                      - type: integer
+                        minimum: -9007199254740991
+                        maximum: 9007199254740991
+                      - type: 'null'
+                  venue:
+                    type:
+                      - string
+                      - 'null'
+                  doi:
+                    type:
+                      - string
+                      - 'null'
+                  pmid:
+                    type:
+                      - string
+                      - 'null'
+                  authors:
+                    type: array
+                    items:
+                      type: string
+                  sources:
+                    type: array
+                    items:
+                      type: string
+                  titleAbstract:
+                    anyOf:
+                      - $ref: '#/components/schemas/ScreeningDecision'
+                      - type: 'null'
+                  fullText:
+                    anyOf:
+                      - $ref: '#/components/schemas/ScreeningDecision'
+                      - type: 'null'
+                  decisions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ScreeningDecision'
+                required:
+                  - id
+                  - itemId
+                  - stage
+                  - dedupStatus
+                  - duplicateOfId
+                  - screeningStatus
+                  - exclusionReasonCode
+                  - retrievalStatus
+                  - retrievalNote
+                  - fullTextDocumentId
+                  - extractionStatus
+                  - isSnowballed
+                  - studyGroupKey
+                  - title
+                  - abstract
+                  - year
+                  - venue
+                  - doi
+                  - pmid
+                  - authors
+                  - sources
+                  - titleAbstract
+                  - fullText
+                  - decisions
+                additionalProperties: false
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/reviews/{id}/records/{recordId}/decisions:
+    post:
+      operationId: decideReviewRecord
+      summary: Record a screening decision
+      description: >-
+        Append-only; a change supersedes the current decision (SD1). A full-text exclusion needs a
+        reason.
+
+
+        **Scope:** `sr:write`.
+      tags:
+        - Systematic reviews
+      parameters:
+        - in: path
+          name: id
+          schema:
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: A 26-character Crockford base32 ULID. Generated by the application, never by the
+            database, and lexicographically sortable, so ordering by id is creation order.
+        - in: path
+          name: recordId
+          schema:
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: A 26-character Crockford base32 ULID. Generated by the application, never by the
+            database, and lexicographically sortable, so ordering by id is creation order.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScreeningDecide'
+      responses:
+        '201':
+          description: The record after the decision.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewRecord'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: The write is refused by a uniqueness rule, a state rule or a data-model invariant.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/reviews/{id}/records/{recordId}/undo:
+    post:
+      operationId: undoReviewDecision
+      summary: Undo the current decision of a stage
+      description: |-
+        Restores the previous decision as a new row.
+
+        **Scope:** `sr:write`.
+      tags:
+        - Systematic reviews
+      parameters:
+        - in: path
+          name: id
+          schema:
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: A 26-character Crockford base32 ULID. Generated by the application, never by the
+            database, and lexicographically sortable, so ordering by id is creation order.
+        - in: path
+          name: recordId
+          schema:
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: A 26-character Crockford base32 ULID. Generated by the application, never by the
+            database, and lexicographically sortable, so ordering by id is creation order.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScreeningUndo'
+      responses:
+        '200':
+          description: The record.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewRecord'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: The write is refused by a uniqueness rule, a state rule or a data-model invariant.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/reviews/{id}/records/{recordId}/retrieval:
+    put:
+      operationId: setReviewRetrieval
+      summary: Full-text retrieval status
+      description: |-
+        The PRISMA "sought / not retrieved" pair.
+
+        **Scope:** `sr:write`.
+      tags:
+        - Systematic reviews
+      parameters:
+        - in: path
+          name: id
+          schema:
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: A 26-character Crockford base32 ULID. Generated by the application, never by the
+            database, and lexicographically sortable, so ordering by id is creation order.
+        - in: path
+          name: recordId
+          schema:
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: A 26-character Crockford base32 ULID. Generated by the application, never by the
+            database, and lexicographically sortable, so ordering by id is creation order.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewRetrieval'
+      responses:
+        '200':
+          description: The record.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewRecord'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: The write is refused by a uniqueness rule, a state rule or a data-model invariant.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/reviews/{id}/records/{recordId}/duplicate:
+    put:
+      operationId: setReviewDuplicate
+      summary: Mark or unmark a duplicate
+      description: |-
+        `duplicateOfId: null` reverses a wrong call.
+
+        **Scope:** `sr:write`.
+      tags:
+        - Systematic reviews
+      parameters:
+        - in: path
+          name: id
+          schema:
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: A 26-character Crockford base32 ULID. Generated by the application, never by the
+            database, and lexicographically sortable, so ordering by id is creation order.
+        - in: path
+          name: recordId
+          schema:
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: A 26-character Crockford base32 ULID. Generated by the application, never by the
+            database, and lexicographically sortable, so ordering by id is creation order.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewDuplicate'
+      responses:
+        '200':
+          description: The record.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewRecord'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: The write is refused by a uniqueness rule, a state rule or a data-model invariant.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/reviews/{id}/records/{recordId}/study-group:
+    put:
+      operationId: setReviewStudyGroup
+      summary: Group reports of one study
+      description: |-
+        PRISMA counts studies and reports separately.
+
+        **Scope:** `sr:write`.
+      tags:
+        - Systematic reviews
+      parameters:
+        - in: path
+          name: id
+          schema:
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: A 26-character Crockford base32 ULID. Generated by the application, never by the
+            database, and lexicographically sortable, so ordering by id is creation order.
+        - in: path
+          name: recordId
+          schema:
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: A 26-character Crockford base32 ULID. Generated by the application, never by the
+            database, and lexicographically sortable, so ordering by id is creation order.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewStudyGroup'
+      responses:
+        '200':
+          description: The record.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewRecord'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/reviews/{id}/prisma:
+    get:
+      operationId: getReviewPrisma
+      summary: PRISMA 2020 counts
+      description: |-
+        Live, or a frozen snapshot.
+
+        **Scope:** `sr:read`.
+      tags:
+        - Systematic reviews
+      parameters:
+        - in: path
+          name: id
+          schema:
+            description: The record id (a ULID).
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: The record id (a ULID).
+        - in: query
+          name: snapshot
+          schema:
+            description: A frozen snapshot’s `snapshotAt`; the live counts when omitted.
+            type: string
+            maxLength: 40
+          description: A frozen snapshot’s `snapshotAt`; the live counts when omitted.
+      responses:
+        '200':
+          description: The flow.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrismaFlow'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/reviews/{id}/prisma.csv:
+    get:
+      operationId: exportReviewPrisma
+      summary: PRISMA counts for the PRISMA2020 R package
+      description: |-
+        `data,n` keyed by the names of the package’s template CSV.
+
+        **Scope:** `sr:read`.
+      tags:
+        - Systematic reviews
+      parameters:
+        - in: path
+          name: id
+          schema:
+            description: The record id (a ULID).
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: The record id (a ULID).
+        - in: query
+          name: snapshot
+          schema:
+            description: A frozen snapshot’s `snapshotAt`; the live counts when omitted.
+            type: string
+            maxLength: 40
+          description: A frozen snapshot’s `snapshotAt`; the live counts when omitted.
+      responses:
+        '200':
+          description: The counts.
+          content:
+            text/csv:
+              schema:
+                type: string
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/reviews/{id}/prisma.svg:
+    get:
+      operationId: drawReviewPrisma
+      summary: A draft PRISMA flow diagram
+      description: |-
+        For a quick look; publication diagrams come from PRISMA2020.
+
+        **Scope:** `sr:read`.
+      tags:
+        - Systematic reviews
+      parameters:
+        - in: path
+          name: id
+          schema:
+            description: The record id (a ULID).
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: The record id (a ULID).
+        - in: query
+          name: snapshot
+          schema:
+            description: A frozen snapshot’s `snapshotAt`; the live counts when omitted.
+            type: string
+            maxLength: 40
+          description: A frozen snapshot’s `snapshotAt`; the live counts when omitted.
+      responses:
+        '200':
+          description: SVG.
+          content:
+            image/svg+xml:
+              schema:
+                type: string
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/reviews/{id}/prisma/snapshots:
+    get:
+      operationId: listPrismaSnapshots
+      summary: Frozen PRISMA snapshots
+      description: |-
+        Oldest first.
+
+        **Scope:** `sr:read`.
+      tags:
+        - Systematic reviews
+      parameters:
+        - in: path
+          name: id
+          schema:
+            description: The record id (a ULID).
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: The record id (a ULID).
+      responses:
+        '200':
+          description: The snapshots.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        snapshotAt:
+                          type: string
+                        label:
+                          type:
+                            - string
+                            - 'null'
+                      required:
+                        - snapshotAt
+                        - label
+                      additionalProperties: false
+                required:
+                  - data
+                additionalProperties: false
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+    post:
+      operationId: freezePrisma
+      summary: Freeze the PRISMA counts
+      description: |-
+        The numbers printed in a manuscript, reproducible later (PC1).
+
+        **Scope:** `sr:write`.
+      tags:
+        - Systematic reviews
+      parameters:
+        - in: path
+          name: id
+          schema:
+            description: The record id (a ULID).
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: The record id (a ULID).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PrismaFreeze'
+      responses:
+        '201':
+          description: The snapshot.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  snapshotAt:
+                    type: string
+                  cells:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PrismaCell'
+                required:
+                  - snapshotAt
+                  - cells
+                additionalProperties: false
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/reviews/{id}/forms:
+    get:
+      operationId: listExtractionForms
+      summary: Extraction forms
+      description: |-
+        Every version.
+
+        **Scope:** `sr:read`.
+      tags:
+        - Systematic reviews
+      parameters:
+        - in: path
+          name: id
+          schema:
+            description: The record id (a ULID).
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: The record id (a ULID).
+      responses:
+        '200':
+          description: The forms.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ExtractionForm'
+                required:
+                  - data
+                additionalProperties: false
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+    post:
+      operationId: createExtractionForm
+      summary: Create an extraction form
+      description: >-
+        From a template, which creates the review-scoped fields it needs, or from a definition
+        (EF1).
+
+
+        **Scope:** `sr:write`.
+      tags:
+        - Systematic reviews
+      parameters:
+        - in: path
+          name: id
+          schema:
+            description: The record id (a ULID).
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: The record id (a ULID).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExtractionFormCreate'
+      responses:
+        '201':
+          description: The form.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExtractionForm'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: The write is refused by a uniqueness rule, a state rule or a data-model invariant.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/reviews/{id}/forms/{formId}:
+    put:
+      operationId: updateExtractionForm
+      summary: Change a form
+      description: |-
+        A locked form becomes a new version; values keep the version they were entered under (EF2).
+
+        **Scope:** `sr:write`.
+      tags:
+        - Systematic reviews
+      parameters:
+        - in: path
+          name: id
+          schema:
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: A 26-character Crockford base32 ULID. Generated by the application, never by the
+            database, and lexicographically sortable, so ordering by id is creation order.
+        - in: path
+          name: formId
+          schema:
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: A 26-character Crockford base32 ULID. Generated by the application, never by the
+            database, and lexicographically sortable, so ordering by id is creation order.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExtractionFormDefinition'
+      responses:
+        '200':
+          description: The form.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExtractionForm'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: The write is refused by a uniqueness rule, a state rule or a data-model invariant.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/reviews/{id}/records/{recordId}/values:
+    get:
+      operationId: listExtractionValues
+      summary: Extracted values of a record
+      description: |-
+        This review’s values only.
+
+        **Scope:** `sr:read`.
+      tags:
+        - Systematic reviews
+      parameters:
+        - in: path
+          name: id
+          schema:
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: A 26-character Crockford base32 ULID. Generated by the application, never by the
+            database, and lexicographically sortable, so ordering by id is creation order.
+        - in: path
+          name: recordId
+          schema:
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: A 26-character Crockford base32 ULID. Generated by the application, never by the
+            database, and lexicographically sortable, so ordering by id is creation order.
+      responses:
+        '200':
+          description: The values.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      propertyNames:
+                        type: string
+                      additionalProperties: {}
+                required:
+                  - data
+                additionalProperties: false
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+    put:
+      operationId: writeExtractionValue
+      summary: Write one extracted value
+      description: |-
+        Included studies only; a field in a repeatable group needs its group key.
+
+        **Scope:** `sr:write`.
+      tags:
+        - Systematic reviews
+      parameters:
+        - in: path
+          name: id
+          schema:
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: A 26-character Crockford base32 ULID. Generated by the application, never by the
+            database, and lexicographically sortable, so ordering by id is creation order.
+        - in: path
+          name: recordId
+          schema:
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: A 26-character Crockford base32 ULID. Generated by the application, never by the
+            database, and lexicographically sortable, so ordering by id is creation order.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExtractionValueWrite'
+      responses:
+        '200':
+          description: The value.
+          content:
+            application/json:
+              schema:
+                type: object
+                propertyNames:
+                  type: string
+                additionalProperties: {}
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: The write is refused by a uniqueness rule, a state rule or a data-model invariant.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/reviews/{id}/records/{recordId}/extraction/complete:
+    post:
+      operationId: completeExtraction
+      summary: Complete a record’s extraction
+      description: |-
+        Checks required fields and locks the forms used (EF2).
+
+        **Scope:** `sr:write`.
+      tags:
+        - Systematic reviews
+      parameters:
+        - in: path
+          name: id
+          schema:
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: A 26-character Crockford base32 ULID. Generated by the application, never by the
+            database, and lexicographically sortable, so ordering by id is creation order.
+        - in: path
+          name: recordId
+          schema:
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: A 26-character Crockford base32 ULID. Generated by the application, never by the
+            database, and lexicographically sortable, so ordering by id is creation order.
+      responses:
+        '200':
+          description: The record.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewRecord'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: The write is refused by a uniqueness rule, a state rule or a data-model invariant.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/reviews/{id}/extraction.csv:
+    get:
+      operationId: exportExtraction
+      summary: Extraction data
+      description: >-
+        `long`: one row per value. `wide`: one row per study and group, field keys as columns (the
+        `metafor::escalc()` shape).
+
+
+        **Scope:** `sr:read`.
+      tags:
+        - Systematic reviews
+      parameters:
+        - in: path
+          name: id
+          schema:
+            description: The record id (a ULID).
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: The record id (a ULID).
+        - in: query
+          name: shape
+          schema:
+            type: string
+            enum:
+              - long
+              - wide
+      responses:
+        '200':
+          description: The table.
+          content:
+            text/csv:
+              schema:
+                type: string
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/reviews/{id}/included.csv:
+    get:
+      operationId: exportIncludedStudies
+      summary: Included studies
+      description: |-
+        Study label, bibliographic core and extraction status.
+
+        **Scope:** `sr:read`.
+      tags:
+        - Systematic reviews
+      parameters:
+        - in: path
+          name: id
+          schema:
+            description: The record id (a ULID).
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: The record id (a ULID).
+      responses:
+        '200':
+          description: The table.
+          content:
+            text/csv:
+              schema:
+                type: string
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/reviews/{id}/audit.csv:
+    get:
+      operationId: exportScreeningAudit
+      summary: The screening audit trail
+      description: |-
+        Every decision; with automation disclosure on, which were tool-assisted (ADR-020).
+
+        **Scope:** `sr:read`.
+      tags:
+        - Systematic reviews
+      parameters:
+        - in: path
+          name: id
+          schema:
+            description: The record id (a ULID).
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: The record id (a ULID).
+      responses:
+        '200':
+          description: The decisions.
+          content:
+            text/csv:
+              schema:
+                type: string
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/sr/instruments:
+    get:
+      operationId: listRobInstruments
+      summary: Risk-of-bias instruments
+      description: |-
+        RoB 2, ROBINS-I, QUADAS-2, Newcastle-Ottawa: domains, signalling questions, levels.
+
+        **Scope:** `sr:read`.
+      tags:
+        - Systematic reviews
+      responses:
+        '200':
+          description: The instruments.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      propertyNames:
+                        type: string
+                      additionalProperties: {}
+                required:
+                  - data
+                additionalProperties: false
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/reviews/{id}/records/{recordId}/rob:
+    post:
+      operationId: assessRiskOfBias
+      summary: Assess risk of bias
+      description: >-
+        Supersedes the current assessment for the same tool and outcome. The overall judgement is
+        proposed by the instrument’s rule when omitted.
+
+
+        **Scope:** `sr:write`.
+      tags:
+        - Systematic reviews
+      parameters:
+        - in: path
+          name: id
+          schema:
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: A 26-character Crockford base32 ULID. Generated by the application, never by the
+            database, and lexicographically sortable, so ordering by id is creation order.
+        - in: path
+          name: recordId
+          schema:
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: A 26-character Crockford base32 ULID. Generated by the application, never by the
+            database, and lexicographically sortable, so ordering by id is creation order.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RobAssessmentWrite'
+      responses:
+        '201':
+          description: The assessment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RobAssessment'
+        '400':
+          description: The request could not be understood — a malformed header or an unparseable body.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '409':
+          description: The write is refused by a uniqueness rule, a state rule or a data-model invariant.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '415':
+          description: The request body is not in a media type this operation accepts.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/reviews/{id}/rob:
+    get:
+      operationId: listRiskOfBias
+      summary: Current risk-of-bias assessments
+      description: |-
+        Optionally one tool.
+
+        **Scope:** `sr:read`.
+      tags:
+        - Systematic reviews
+      parameters:
+        - in: path
+          name: id
+          schema:
+            description: The record id (a ULID).
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: The record id (a ULID).
+        - in: query
+          name: tool
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The assessments.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/RobAssessment'
+                required:
+                  - data
+                additionalProperties: false
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/reviews/{id}/rob/{tool}/robvis.csv:
+    get:
+      operationId: exportRobvis
+      summary: robvis input
+      description: |-
+        `Study, D1 … Dn, Overall, Weight` with robvis’s labels (RB1).
+
+        **Scope:** `sr:read`.
+      tags:
+        - Systematic reviews
+      parameters:
+        - in: path
+          name: id
+          schema:
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: A 26-character Crockford base32 ULID. Generated by the application, never by the
+            database, and lexicographically sortable, so ordering by id is creation order.
+        - in: path
+          name: tool
+          schema:
+            type: string
+            pattern: ^[a-z0-9_]{2,64}$
+          required: true
+      responses:
+        '200':
+          description: The table.
+          content:
+            text/csv:
+              schema:
+                type: string
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
   /api/v1/fields:
     get:
       operationId: listCustomFields
@@ -9294,6 +11598,550 @@ components:
           maxLength: 500
       required:
         - document
+      additionalProperties: false
+    ReviewCreate:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 500
+        question:
+          anyOf:
+            - type: string
+              maxLength: 4000
+            - type: 'null'
+        protocol:
+          description: PICO, eligibility criteria, planned analyses, deviations.
+          type: object
+          propertyNames:
+            type: string
+          additionalProperties: {}
+        registrationId:
+          anyOf:
+            - type: string
+              maxLength: 255
+            - type: 'null'
+        registrationUrl:
+          anyOf:
+            - type: string
+              maxLength: 2048
+            - type: 'null'
+        exclusionReasons:
+          maxItems: 100
+          type: array
+          items:
+            $ref: '#/components/schemas/ExclusionReason'
+        automationDisclosure:
+          description: 'ADR-020: export which decisions were tool-assisted with the audit trail.'
+          type: boolean
+      required:
+        - title
+      additionalProperties: false
+    ExclusionReason:
+      type: object
+      properties:
+        code:
+          type: string
+          pattern: ^[a-z0-9_.-]{1,64}$
+        label:
+          type: string
+          minLength: 1
+          maxLength: 255
+        stage:
+          type: string
+          enum:
+            - title_abstract
+            - full_text
+            - any
+      required:
+        - code
+        - label
+        - stage
+      additionalProperties: false
+    ReviewUpdate:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 500
+        question:
+          anyOf:
+            - type: string
+              maxLength: 4000
+            - type: 'null'
+        protocol:
+          description: PICO, eligibility criteria, planned analyses, deviations.
+          type: object
+          propertyNames:
+            type: string
+          additionalProperties: {}
+        registrationId:
+          anyOf:
+            - type: string
+              maxLength: 255
+            - type: 'null'
+        registrationUrl:
+          anyOf:
+            - type: string
+              maxLength: 2048
+            - type: 'null'
+        exclusionReasons:
+          maxItems: 100
+          type: array
+          items:
+            $ref: '#/components/schemas/ExclusionReason'
+        automationDisclosure:
+          description: 'ADR-020: export which decisions were tool-assisted with the audit trail.'
+          type: boolean
+        status:
+          type: string
+          enum:
+            - draft
+            - searching
+            - screening
+            - full_text
+            - extraction
+            - analysis
+            - complete
+            - archived
+      additionalProperties: false
+    SearchRunCreate:
+      type: object
+      properties:
+        sourceDatabase:
+          type: string
+          pattern: ^[a-z][a-z0-9_]{1,63}$
+          description: '`pubmed`, `embase`, `web_of_science`, `scopus`, `cochrane`, `registry`,
+            `citation_search`, `manual`, …'
+        interface:
+          anyOf:
+            - type: string
+              maxLength: 255
+            - type: 'null'
+        queryString:
+          type: string
+          minLength: 1
+          maxLength: 100000
+          description: Verbatim, in the syntax of the interface.
+        queryTranslated:
+          anyOf:
+            - type: string
+              maxLength: 100000
+            - type: 'null'
+        filters:
+          type: object
+          propertyNames:
+            type: string
+          additionalProperties: {}
+        dateLimitFrom:
+          anyOf:
+            - type: string
+              maxLength: 32
+            - type: 'null'
+        dateLimitTo:
+          anyOf:
+            - type: string
+              maxLength: 32
+            - type: 'null'
+        executedAt:
+          type: string
+          maxLength: 40
+        recordsReturned:
+          description: What the database reported; never recomputed (SR1).
+          anyOf:
+            - type: integer
+              minimum: 0
+              maximum: 9007199254740991
+            - type: 'null'
+        rerunOfSearchRunId:
+          anyOf:
+            - $ref: '#/components/schemas/Id'
+            - type: 'null'
+        notes:
+          anyOf:
+            - type: string
+              maxLength: 10000
+            - type: 'null'
+      required:
+        - sourceDatabase
+        - queryString
+      additionalProperties: false
+    SearchImport:
+      type: object
+      properties:
+        text:
+          type: string
+          minLength: 1
+          maxLength: 50000000
+          description: 'The export file as text: RIS, MEDLINE/NBIB, BibTeX or CSL-JSON.'
+        format:
+          description: Detected when omitted.
+          type: string
+          enum:
+            - ris
+            - medline
+            - bibtex
+            - csl-json
+        filename:
+          type: string
+          maxLength: 255
+      required:
+        - text
+      additionalProperties: false
+    ReviewDedup:
+      type: object
+      properties:
+        dryRun:
+          type: boolean
+        threshold:
+          type: number
+    ScreeningDecide:
+      type: object
+      properties:
+        stage:
+          type: string
+          enum:
+            - title_abstract
+            - full_text
+        decision:
+          type: string
+          enum:
+            - include
+            - exclude
+            - maybe
+        reasonCode:
+          description: One of the review’s exclusion reasons; required for a full-text exclusion.
+          anyOf:
+            - type: string
+              maxLength: 64
+            - type: 'null'
+        reasonNote:
+          anyOf:
+            - type: string
+              maxLength: 4000
+            - type: 'null'
+        durationMs:
+          anyOf:
+            - type: integer
+              minimum: 0
+              maximum: 9007199254740991
+            - type: 'null'
+        toolDetail:
+          description: What assisted. Kept only when the server classes the caller as a tool (SD2).
+          anyOf:
+            - type: object
+              propertyNames:
+                type: string
+              additionalProperties: {}
+            - type: 'null'
+      required:
+        - stage
+        - decision
+      additionalProperties: false
+    ScreeningUndo:
+      type: object
+      properties:
+        stage:
+          type: string
+          enum:
+            - title_abstract
+            - full_text
+      required:
+        - stage
+    ReviewRetrieval:
+      type: object
+      properties:
+        status:
+          type: string
+        note:
+          type:
+            - string
+            - 'null'
+        documentId:
+          type:
+            - string
+            - 'null'
+      required:
+        - status
+    ReviewDuplicate:
+      type: object
+      properties:
+        duplicateOfId:
+          type:
+            - string
+            - 'null'
+      required:
+        - duplicateOfId
+    ReviewStudyGroup:
+      type: object
+      properties:
+        key:
+          type:
+            - string
+            - 'null'
+      required:
+        - key
+    PrismaFreeze:
+      type: object
+      properties:
+        label:
+          type:
+            - string
+            - 'null'
+    ExtractionFormCreate:
+      anyOf:
+        - type: object
+          properties:
+            template:
+              type: string
+              enum:
+                - rct
+                - observational
+                - diagnostic
+            name:
+              type: string
+              minLength: 1
+              maxLength: 255
+          required:
+            - template
+          additionalProperties: false
+        - type: object
+          properties:
+            sections:
+              minItems: 1
+              maxItems: 100
+              type: array
+              items:
+                type: object
+                properties:
+                  title:
+                    type: string
+                    minLength: 1
+                    maxLength: 255
+                  fields:
+                    maxItems: 500
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        fieldKey:
+                          type: string
+                          minLength: 1
+                          maxLength: 64
+                        label:
+                          type: string
+                          maxLength: 255
+                        help:
+                          type: string
+                          maxLength: 4000
+                        required:
+                          type: boolean
+                        group:
+                          type: string
+                          maxLength: 32
+                      required:
+                        - fieldKey
+                      additionalProperties: false
+                required:
+                  - title
+                  - fields
+                additionalProperties: false
+            groups:
+              maxItems: 20
+              type: array
+              items:
+                type: object
+                properties:
+                  key:
+                    type: string
+                    pattern: ^[a-z][a-z0-9_]{0,31}$
+                  label:
+                    type: string
+                    minLength: 1
+                    maxLength: 255
+                required:
+                  - key
+                  - label
+                additionalProperties: false
+            name:
+              type: string
+              minLength: 1
+              maxLength: 255
+          required:
+            - sections
+            - name
+          additionalProperties: false
+      description: From a template, or a definition that references existing custom fields (EF1).
+    ExtractionFormDefinition:
+      type: object
+      properties:
+        sections:
+          minItems: 1
+          maxItems: 100
+          type: array
+          items:
+            type: object
+            properties:
+              title:
+                type: string
+                minLength: 1
+                maxLength: 255
+              fields:
+                maxItems: 500
+                type: array
+                items:
+                  type: object
+                  properties:
+                    fieldKey:
+                      type: string
+                      minLength: 1
+                      maxLength: 64
+                    label:
+                      type: string
+                      maxLength: 255
+                    help:
+                      type: string
+                      maxLength: 4000
+                    required:
+                      type: boolean
+                    group:
+                      type: string
+                      maxLength: 32
+                  required:
+                    - fieldKey
+                  additionalProperties: false
+            required:
+              - title
+              - fields
+            additionalProperties: false
+        groups:
+          maxItems: 20
+          type: array
+          items:
+            type: object
+            properties:
+              key:
+                type: string
+                pattern: ^[a-z][a-z0-9_]{0,31}$
+              label:
+                type: string
+                minLength: 1
+                maxLength: 255
+            required:
+              - key
+              - label
+            additionalProperties: false
+      required:
+        - sections
+      additionalProperties: false
+    ExtractionValueWrite:
+      type: object
+      properties:
+        formId:
+          $ref: '#/components/schemas/Id'
+        fieldKey:
+          type: string
+          minLength: 1
+          maxLength: 64
+        groupKey:
+          description: '`outcome:mortality_30d` for a field in a repeatable group.'
+          anyOf:
+            - type: string
+              maxLength: 100
+            - type: 'null'
+        ordinal:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        content:
+          description: A `FieldValueContent`, discriminated by `type`.
+          anyOf:
+            - type: object
+              propertyNames:
+                type: string
+              additionalProperties: {}
+            - type: 'null'
+        isBlank:
+          description: An explicit "not reported".
+          type: boolean
+      required:
+        - formId
+        - fieldKey
+      additionalProperties: false
+    RobAssessmentWrite:
+      type: object
+      properties:
+        tool:
+          type: string
+          minLength: 1
+          maxLength: 64
+        outcomeLabel:
+          anyOf:
+            - type: string
+              maxLength: 255
+            - type: 'null'
+        armLabel:
+          anyOf:
+            - type: string
+              maxLength: 255
+            - type: 'null'
+        signallingAnswers:
+          type: object
+          propertyNames:
+            type: string
+          additionalProperties:
+            type: object
+            properties:
+              answer:
+                type: string
+                maxLength: 16
+              support:
+                type: string
+                maxLength: 10000
+              quote:
+                type: string
+                maxLength: 10000
+              documentId:
+                $ref: '#/components/schemas/Id'
+              pageIndex:
+                type: integer
+                minimum: 0
+                maximum: 9007199254740991
+            required:
+              - answer
+            additionalProperties: false
+        domainJudgements:
+          type: object
+          propertyNames:
+            type: string
+          additionalProperties:
+            type: object
+            properties:
+              judgement:
+                type: string
+                maxLength: 32
+              rationale:
+                type: string
+                maxLength: 10000
+            required:
+              - judgement
+            additionalProperties: false
+        overallJudgement:
+          description: 'Omitted: the instrument’s rule proposes one where it has a rule.'
+          anyOf:
+            - type: string
+              maxLength: 32
+            - type: 'null'
+        notes:
+          anyOf:
+            - type: string
+              maxLength: 10000
+            - type: 'null'
+      required:
+        - tool
+        - domainJudgements
       additionalProperties: false
     FieldValueWrite:
       type: object
@@ -15433,6 +18281,554 @@ components:
         - items
       additionalProperties: false
       title: CuratedNetwork
+    Review:
+      type: object
+      properties:
+        id:
+          type: string
+        publicId:
+          type: string
+        title:
+          type: string
+        question:
+          type:
+            - string
+            - 'null'
+        protocol:
+          type: object
+          propertyNames:
+            type: string
+          additionalProperties: {}
+        registrationId:
+          type:
+            - string
+            - 'null'
+        registrationUrl:
+          type:
+            - string
+            - 'null'
+        status:
+          type: string
+        exclusionReasons:
+          type: array
+          items:
+            $ref: '#/components/schemas/ExclusionReason'
+        automationDisclosure:
+          type: boolean
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+      required:
+        - id
+        - publicId
+        - title
+        - question
+        - protocol
+        - registrationId
+        - registrationUrl
+        - status
+        - exclusionReasons
+        - automationDisclosure
+        - createdAt
+        - updatedAt
+      additionalProperties: false
+      title: Review
+    SearchRun:
+      type: object
+      properties:
+        id:
+          type: string
+        sourceDatabase:
+          type: string
+        interface:
+          type:
+            - string
+            - 'null'
+        queryString:
+          type: string
+        queryTranslated:
+          type:
+            - string
+            - 'null'
+        filters:
+          type: object
+          propertyNames:
+            type: string
+          additionalProperties: {}
+        dateLimitFrom:
+          type:
+            - string
+            - 'null'
+        dateLimitTo:
+          type:
+            - string
+            - 'null'
+        executedAt:
+          type: string
+        recordsReturned:
+          anyOf:
+            - type: integer
+              minimum: -9007199254740991
+              maximum: 9007199254740991
+            - type: 'null'
+        recordsImported:
+          anyOf:
+            - type: integer
+              minimum: -9007199254740991
+              maximum: 9007199254740991
+            - type: 'null'
+        duplicatesRemoved:
+          anyOf:
+            - type: integer
+              minimum: -9007199254740991
+              maximum: 9007199254740991
+            - type: 'null'
+        sourceFileDocumentId:
+          type:
+            - string
+            - 'null'
+        rerunOfSearchRunId:
+          type:
+            - string
+            - 'null'
+        notes:
+          type:
+            - string
+            - 'null'
+      required:
+        - id
+        - sourceDatabase
+        - interface
+        - queryString
+        - queryTranslated
+        - filters
+        - dateLimitFrom
+        - dateLimitTo
+        - executedAt
+        - recordsReturned
+        - recordsImported
+        - duplicatesRemoved
+        - sourceFileDocumentId
+        - rerunOfSearchRunId
+        - notes
+      additionalProperties: false
+      title: SearchRun
+      description: One executed search, with what PRISMA-S asks to report.
+    SearchImportSummary:
+      type: object
+      properties:
+        format:
+          type: string
+        parsed:
+          type: integer
+          minimum: -9007199254740991
+          maximum: 9007199254740991
+        added:
+          type: integer
+          minimum: -9007199254740991
+          maximum: 9007199254740991
+        sourceAdded:
+          type: integer
+          minimum: -9007199254740991
+          maximum: 9007199254740991
+        repeated:
+          type: integer
+          minimum: -9007199254740991
+          maximum: 9007199254740991
+        itemsCreated:
+          type: integer
+          minimum: -9007199254740991
+          maximum: 9007199254740991
+        itemsReused:
+          type: integer
+          minimum: -9007199254740991
+          maximum: 9007199254740991
+        failures:
+          type: array
+          items:
+            type: object
+            properties:
+              index:
+                type: integer
+                minimum: -9007199254740991
+                maximum: 9007199254740991
+              title:
+                type:
+                  - string
+                  - 'null'
+              reason:
+                type: string
+            required:
+              - index
+              - title
+              - reason
+            additionalProperties: false
+        losses:
+          type: integer
+          minimum: -9007199254740991
+          maximum: 9007199254740991
+          description: Values the format carried that the contract could not.
+        returnedDiffers:
+          type: boolean
+        documentId:
+          type: string
+        searchRun:
+          $ref: '#/components/schemas/SearchRun'
+      required:
+        - format
+        - parsed
+        - added
+        - sourceAdded
+        - repeated
+        - itemsCreated
+        - itemsReused
+        - failures
+        - losses
+        - returnedDiffers
+        - documentId
+        - searchRun
+      additionalProperties: false
+    ReviewWorklist:
+      type: object
+      properties:
+        total:
+          type: integer
+          minimum: -9007199254740991
+          maximum: 9007199254740991
+        pending:
+          type: integer
+          minimum: -9007199254740991
+          maximum: 9007199254740991
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReviewRecord'
+      required:
+        - total
+        - pending
+        - data
+      additionalProperties: false
+    ReviewRecord:
+      type: object
+      properties:
+        id:
+          type: string
+        itemId:
+          type: string
+        stage:
+          type: string
+        dedupStatus:
+          type: string
+        duplicateOfId:
+          type:
+            - string
+            - 'null'
+        screeningStatus:
+          type: string
+        exclusionReasonCode:
+          type:
+            - string
+            - 'null'
+        retrievalStatus:
+          type: string
+        retrievalNote:
+          type:
+            - string
+            - 'null'
+        fullTextDocumentId:
+          type:
+            - string
+            - 'null'
+        extractionStatus:
+          type: string
+        isSnowballed:
+          type: boolean
+        studyGroupKey:
+          type:
+            - string
+            - 'null'
+        title:
+          type:
+            - string
+            - 'null'
+        abstract:
+          type:
+            - string
+            - 'null'
+        year:
+          anyOf:
+            - type: integer
+              minimum: -9007199254740991
+              maximum: 9007199254740991
+            - type: 'null'
+        venue:
+          type:
+            - string
+            - 'null'
+        doi:
+          type:
+            - string
+            - 'null'
+        pmid:
+          type:
+            - string
+            - 'null'
+        authors:
+          type: array
+          items:
+            type: string
+        sources:
+          type: array
+          items:
+            type: string
+        titleAbstract:
+          anyOf:
+            - $ref: '#/components/schemas/ScreeningDecision'
+            - type: 'null'
+        fullText:
+          anyOf:
+            - $ref: '#/components/schemas/ScreeningDecision'
+            - type: 'null'
+      required:
+        - id
+        - itemId
+        - stage
+        - dedupStatus
+        - duplicateOfId
+        - screeningStatus
+        - exclusionReasonCode
+        - retrievalStatus
+        - retrievalNote
+        - fullTextDocumentId
+        - extractionStatus
+        - isSnowballed
+        - studyGroupKey
+        - title
+        - abstract
+        - year
+        - venue
+        - doi
+        - pmid
+        - authors
+        - sources
+        - titleAbstract
+        - fullText
+      additionalProperties: false
+      title: ReviewRecord
+      description: 'One record considered in one review: the unit PRISMA counts.'
+    ScreeningDecision:
+      type: object
+      properties:
+        id:
+          type: string
+        stage:
+          type: string
+        decision:
+          type: string
+        exclusionReasonCode:
+          type:
+            - string
+            - 'null'
+        exclusionReasonNote:
+          type:
+            - string
+            - 'null'
+        decidedAt:
+          type: string
+        screenerUserId:
+          type: string
+        isCurrent:
+          type: boolean
+        supersedesId:
+          type:
+            - string
+            - 'null'
+        toolAssisted:
+          type: boolean
+      required:
+        - id
+        - stage
+        - decision
+        - exclusionReasonCode
+        - exclusionReasonNote
+        - decidedAt
+        - screenerUserId
+        - isCurrent
+        - supersedesId
+        - toolAssisted
+      additionalProperties: false
+      title: ScreeningDecision
+    PrismaFlow:
+      type: object
+      properties:
+        cells:
+          type: array
+          items:
+            $ref: '#/components/schemas/PrismaCell'
+        other:
+          type: object
+          properties:
+            identified:
+              type: integer
+              minimum: -9007199254740991
+              maximum: 9007199254740991
+            sought:
+              type: integer
+              minimum: -9007199254740991
+              maximum: 9007199254740991
+            notRetrieved:
+              type: integer
+              minimum: -9007199254740991
+              maximum: 9007199254740991
+            assessed:
+              type: integer
+              minimum: -9007199254740991
+              maximum: 9007199254740991
+            excluded:
+              type: array
+              items:
+                type: object
+                properties:
+                  code:
+                    type:
+                      - string
+                      - 'null'
+                  count:
+                    type: integer
+                    minimum: -9007199254740991
+                    maximum: 9007199254740991
+                required:
+                  - code
+                  - count
+                additionalProperties: false
+            included:
+              type: integer
+              minimum: -9007199254740991
+              maximum: 9007199254740991
+          required:
+            - identified
+            - sought
+            - notRetrieved
+            - assessed
+            - excluded
+            - included
+          additionalProperties: false
+      required:
+        - cells
+        - other
+      additionalProperties: false
+      title: PrismaFlow
+      description: The PRISMA 2020 numbers, computed from the records (RR1).
+    PrismaCell:
+      type: object
+      properties:
+        stageKey:
+          type: string
+        count:
+          type: integer
+          minimum: -9007199254740991
+          maximum: 9007199254740991
+        sourceLabel:
+          type:
+            - string
+            - 'null'
+        searchRunId:
+          type:
+            - string
+            - 'null'
+        exclusionReasonCode:
+          type:
+            - string
+            - 'null'
+      required:
+        - stageKey
+        - count
+        - sourceLabel
+        - searchRunId
+        - exclusionReasonCode
+      additionalProperties: false
+    ExtractionForm:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        version:
+          type: integer
+          minimum: -9007199254740991
+          maximum: 9007199254740991
+        template:
+          type:
+            - string
+            - 'null'
+        status:
+          type: string
+        sections:
+          type: array
+          items: {}
+        groups:
+          type: array
+          items: {}
+      required:
+        - id
+        - name
+        - version
+        - template
+        - status
+        - sections
+        - groups
+      additionalProperties: false
+      title: ExtractionForm
+    RobAssessment:
+      type: object
+      properties:
+        id:
+          type: string
+        recordId:
+          type: string
+        tool:
+          type: string
+        toolVersion:
+          type:
+            - string
+            - 'null'
+        outcomeLabel:
+          type:
+            - string
+            - 'null'
+        domainJudgements:
+          type: object
+          propertyNames:
+            type: string
+          additionalProperties: {}
+        signallingAnswers:
+          type: object
+          propertyNames:
+            type: string
+          additionalProperties: {}
+        overallJudgement:
+          type:
+            - string
+            - 'null'
+        assessedAt:
+          type: string
+        isCurrent:
+          type: boolean
+      required:
+        - id
+        - recordId
+        - tool
+        - toolVersion
+        - outcomeLabel
+        - domainJudgements
+        - signallingAnswers
+        - overallJudgement
+        - assessedAt
+        - isCurrent
+      additionalProperties: false
+      title: RobAssessment
     CreatorMergeResult:
       type: object
       properties:

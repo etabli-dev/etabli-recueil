@@ -129,8 +129,8 @@ Run a systematic review from the shell ([spec](https://github.com/etabli-dev/eta
 ```sh
 id=$(recueil sr create "Hip fracture care" --reason 'wrong_population=Wrong population' \
        --reason 'wrong_design=Wrong study design@full_text' --disclose-automation)
-recueil sr search "$id" pubmed.nbib --database pubmed --query '"hip fractures"[MeSH]' --returned 412
-recueil sr search "$id" embase.ris --database embase --interface Ovid --query 'exp hip fracture/' --returned 655
+recueil sr search "$id" pubmed.nbib --source pubmed --query '"hip fractures"[MeSH]' --returned 412
+recueil sr search "$id" embase.ris --source embase --interface Ovid --query 'exp hip fracture/' --returned 655
 recueil sr dedup "$id" --dry-run && recueil sr dedup "$id"
 recueil sr screen "$id"                         # i include, e exclude, m maybe, u undo, s skip, q quit
 recueil sr retrieve "$id" <record> --status retrieved
