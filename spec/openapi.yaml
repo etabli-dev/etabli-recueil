@@ -4130,6 +4130,59 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/ProblemDetails'
+  /api/v1/documents/{id}/annotated.pdf:
+    get:
+      operationId: getAnnotatedPdf
+      summary: Download a PDF with its annotations embedded
+      description: >-
+        A new PDF carrying every live annotation as a standard PDF annotation, readable in any
+        viewer. The stored document is not modified (AN1). `X-Recueil-Embedded` and
+        `X-Recueil-Skipped` count them.
+
+
+        **Scope:** `documents:read`.
+      tags:
+        - Reading
+      parameters:
+        - in: path
+          name: id
+          schema:
+            description: The record id (a ULID).
+            $ref: '#/components/schemas/Id'
+          required: true
+          description: The record id (a ULID).
+      responses:
+        '200':
+          description: The annotated PDF.
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        '401':
+          description: No usable credential was presented.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '403':
+          description: The token does not hold the scope this operation requires.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: No such record, or it is in the trash and you did not ask for trashed records.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '422':
+          description: The request is well-formed and its content is not valid. `errors` names each field.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
   /api/v1/annotations/{id}/note:
     post:
       operationId: noteFromAnnotation
