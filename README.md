@@ -143,6 +143,32 @@ What has been exercised end to end here:
   draws the citation map with coverage beside it. Not yet: the MeSH vocabulary layer and co-word
   maps, Parquet encoding of the tables (CSV for now), and the deep dive.
 
+- **Phase 6 — curated networks.** A publication figure is a versioned document
+  (`/api/v1/curated-networks`, the web app's *Figures* screen): start it from a graph network, drag
+  nodes into place, save — every save is a new version — and freeze the version a paper uses, which
+  keeps the metadata it showed whatever later happens to the library. A node whose item has gone is
+  drawn dashed, never dropped. Exports: a draft SVG, TikZ for LaTeX, and GraphML/GEXF with the
+  positions; `rc_curated()` reads it into tidygraph for ggraph, which is the route to camera-ready
+  artwork (ADR-0013).
+
+- **Phase 7 — systematic reviews** ([`spec/systematic-review.md`](spec/systematic-review.md)).
+  `recueil sr` and `/api/v1/reviews`: a review with its protocol and ordered exclusion reasons;
+  search runs that keep the verbatim query, the number the database reported and the export file
+  itself; import of RIS, PubMed MEDLINE/NBIB, BibTeX and CSL-JSON, matching items by DOI and PMID so
+  a record found by two databases is one record with two sources; a fuzzy within-review dedup pass
+  whose duplicates are kept and reversible; title/abstract and full-text screening (a keyboard
+  loop in the terminal, a keyboard-driven *Screening* screen in the web app), append-only with
+  undo, a mandatory reason at full text, and decisions made through an MCP token flagged as
+  tool-assisted; the PRISMA 2020 counts computed live from the records, frozen snapshots, a draft
+  SVG and the counts for the PRISMA2020 R package; extraction forms over review-scoped custom fields
+  with RCT, observational and diagnostic templates, repeatable arms and outcomes, locking and
+  versions; RoB 2, ROBINS-I, QUADAS-2 and Newcastle-Ottawa as data, with the table robvis reads.
+  The R client's `rc_sr_prisma()`, `rc_sr_rob()` and `rc_sr_extraction()` are checked in CI
+  against PRISMA2020, robvis and metafor themselves, and `clients/r/inst/templates/sr-report.qmd`
+  drafts the methods and results. Run on fixtures only, **not yet on a real review, so M5 is not
+  claimed**. Not yet: a second screener, automated prioritisation, Unpaywall retrieval from the
+  server and the snowballing deep dive (both need the job queue), and Parquet.
+
 ### The hardening round
 
 An adversarial review between Phase 2 and Phase 3 returned 8 critical, 8 major and

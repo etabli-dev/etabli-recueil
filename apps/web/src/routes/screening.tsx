@@ -150,7 +150,7 @@ export const ScreeningRoute = (): JSX.Element => {
     return () => window.removeEventListener('keydown', onKey);
   }, [decide, excluding, reasons, records.length, undo]);
 
-  if (reviews === null) return error === null ? <LoadingState label="Loading reviews…" /> : <ErrorState error={error} />;
+  if (reviews === null) return error === null ? <LoadingState label="Loading reviews…" /> : <ErrorState label="Could not load the reviews" error={error} />;
   if (reviews.length === 0) {
     return (
       <section className="screening empty">
@@ -191,7 +191,7 @@ export const ScreeningRoute = (): JSX.Element => {
           </span>
         ) : null}
       </header>
-      {error !== null ? <ErrorState error={error} /> : null}
+      {error !== null ? <ErrorState label="That did not work" error={error} /> : null}
       <div className="screening-body">
         <ol className="screening-list" aria-label="Records">
           {records.map((record, i) => {

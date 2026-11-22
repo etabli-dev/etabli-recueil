@@ -41,7 +41,7 @@ Machine-readable output on every command via `--json`, so `jq` is the intended c
 | `recueil plugin` | List, enable, disable and configure plugins | 3 | ✓ — install from npm or a URL arrives with the registry (Phase 9) |
 | `recueil graph` | collect, derive, export (wos, vosviewer, gexf, graphml, csv), coverage, top, promote | 5 | ✓ — the deep dive is not in yet |
 | `recueil network` | Curated networks: create (from the graph), list, freeze, export (svg, tikz, graphml, gexf) | 6 | ✓ |
-| `recueil sr` | Systematic review: search runs, screening, extraction, PRISMA counts | 7 | — |
+| `recueil sr` | Systematic review: create, search (import an export as a search run), dedup, screen, retrieve, prisma, form, extract, rob, export | 7 | ✓ — second screener and the deep dive are not in yet |
 
 Sources themselves are configured over the API rather than from the shell:
 `POST /api/v1/ingestion/sources` for a watched folder, a WebDAV collection or an IMAP mailbox.
@@ -122,6 +122,25 @@ Snowball from a seed with a budget:
 
 ```sh
 recueil graph deep-dive --seed collection:phd --direction both --depth 2 --max-nodes 500
+```
+
+Run a systematic review from the shell ([spec](https://github.com/etabli-dev/etabli-recueil/blob/main/spec/systematic-review.md)):
+
+```sh
+id=$(recueil sr create "Hip fracture care" --reason 'wrong_population=Wrong population' \
+       --reason 'wrong_design=Wrong study design@full_text' --disclose-automation)
+recueil sr search "$id" pubmed.nbib --database pubmed --query '"hip fractures"[MeSH]' --returned 412
+recueil sr search "$id" embase.ris --database embase --interface Ovid --query 'exp hip fracture/' --returned 655
+recueil sr dedup "$id" --dry-run && recueil sr dedup "$id"
+recueil sr screen "$id"                         # i include, e exclude, m maybe, u undo, s skip, q quit
+recueil sr retrieve "$id" <record> --status retrieved
+recueil sr screen "$id" --stage ft --record <record> --decide exclude --reason wrong_design
+recueil sr prisma "$id" --freeze submission --format csv -o prisma.csv   # PRISMA2020 R package input
+recueil sr form "$id" --template rct
+recueil sr extract "$id" <record> --form <form> --field sr_events_treatment --group outcome:mortality_30d --value 4
+recueil sr rob "$id" <record> --tool rob2 --domain D1=low --domain D2=some_concerns --domain D3=low --domain D4=low --domain D5=low
+recueil sr export "$id" --what extraction --shape wide -o extraction.csv  # metafor::escalc() input
+recueil sr export "$id" --what robvis --tool rob2 -o rob.csv               # robvis input
 ```
 
 Follow a long job:
