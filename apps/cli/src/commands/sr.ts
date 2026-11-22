@@ -18,7 +18,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { createInterface } from 'node:readline/promises';
 
 import type { ExclusionReason, Recueil, ScreeningStage } from '@recueil/core';
-import { extractionCsv, includedStudiesCsv, prismaCsv, prismaSvg, robvisCsv, screeningAuditCsv, storeAndImportSearchFile } from '@recueil/sr';
+import { detectFormat, extractionCsv, includedStudiesCsv, prismaCsv, prismaSvg, robvisCsv, screeningAuditCsv, storeAndImportSearchFile } from '@recueil/sr';
 import type { SearchFileFormat } from '@recueil/sr';
 import { InvalidArgumentError } from 'commander';
 import type { Command } from 'commander';
@@ -138,6 +138,8 @@ export const registerSr = (parent: Command, describe: (name: string) => string, 
   ).action(async (reviewId: string, file: string, flags: LibraryFlags & { source: string; query: string; interface?: string; returned?: number; executedAt?: string; format?: SearchFileFormat }) => {
     await open(flags, async (recueil) => {
       const text = readFileSync(file, 'utf8');
+      // Tell the format first, so an unreadable file leaves no empty search run behind.
+      if (flags.format === undefined && detectFormat(text) === null) throw new CliError(`could not tell the format of '${file}'; give --format ris | medline | bibtex | csl-json`, { exitCode: ExitCode.Usage });
       const run = recueil.reviews.addSearchRun(
         reviewId,
         {

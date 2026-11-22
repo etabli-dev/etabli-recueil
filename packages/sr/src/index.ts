@@ -259,14 +259,14 @@ export const extractionCsv = (recueil: Recueil, reviewId: string, shape: 'long' 
       rows.map((row) => [row.study, row.recordId, row.itemId, row.group, row.field, row.value, row.blank ? 'TRUE' : 'FALSE', row.formVersion]),
     );
   }
-  const fields = [...new Set(rows.map((row) => row.field))];
-  const studyLevel = new Set(rows.filter((row) => row.group === null).map((row) => row.field));
+  const fields = [...new Set(rows.map((row) => (row.ordinal === 0 ? row.field : `${row.field}_${row.ordinal + 1}`)))];
+  const studyLevel = new Set(rows.filter((row) => row.group === null).map((row) => (row.ordinal === 0 ? row.field : `${row.field}_${row.ordinal + 1}`)));
   const byKey = new Map<string, { study: string; recordId: string; group: string | null; values: Map<string, unknown> }>();
   const studyValues = new Map<string, Map<string, unknown>>();
   for (const row of rows) {
     if (row.group === null) {
       const values = studyValues.get(row.recordId) ?? new Map<string, unknown>();
-      values.set(row.field, row.value);
+      values.set(row.ordinal === 0 ? row.field : `${row.field}_${row.ordinal + 1}`, row.value);
       studyValues.set(row.recordId, values);
     }
   }
@@ -274,7 +274,8 @@ export const extractionCsv = (recueil: Recueil, reviewId: string, shape: 'long' 
     const key = `${row.recordId}\u0000${row.group ?? ''}`;
     if (row.group === null && rows.some((other) => other.recordId === row.recordId && other.group !== null)) continue;
     const entry = byKey.get(key) ?? { study: row.study, recordId: row.recordId, group: row.group, values: new Map(studyValues.get(row.recordId) ?? []) };
-    entry.values.set(row.field, row.value);
+    // A repeatable field's later entries get their own columns rather than overwriting the first.
+    entry.values.set(row.ordinal === 0 ? row.field : `${row.field}_${row.ordinal + 1}`, row.value);
     byKey.set(key, entry);
   }
   const ordered = [...fields.filter((field) => studyLevel.has(field)), ...fields.filter((field) => !studyLevel.has(field))];

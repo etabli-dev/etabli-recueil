@@ -251,7 +251,7 @@ export class ReviewService {
         this.db
           .select({ code: screeningDecisions.exclusionReasonCode })
           .from(screeningDecisions)
-          .where(and(eq(screeningDecisions.reviewId, id), eq(screeningDecisions.isCurrent, true)))
+          .where(eq(screeningDecisions.reviewId, id))
           .all()
           .map((row) => row.code)
           .filter((code): code is string => code !== null),
@@ -518,6 +518,12 @@ export class ReviewService {
       .map((row) => ({ ...row.source, sourceDatabase: row.sourceDatabase }));
   }
 
+  /** The first author's family name (or an organisation's name), for study labels. */
+  firstAuthor(itemId: string): string | null {
+    const first = this.creators.forItem(itemId)[0]?.creator;
+    return first?.familyName ?? first?.literalName ?? null;
+  }
+
   /** A record with what a screener needs to see. */
   view(recordId: string): RecordView {
     const record = this.record(recordId);
@@ -568,6 +574,9 @@ export class ReviewService {
 
   setRetrieval(recordId: string, input: { status: ReviewRecordRow['retrievalStatus']; note?: string | null; documentId?: string | null }, actor: Actor): ReviewRecordRow {
     const record = this.record(recordId);
+    if (input.status !== 'retrieved' && this.currentDecision(recordId, 'full_text') !== null) {
+      throw new ConflictError('The full text has been assessed; undo the full-text decision before changing its retrieval.', { recordId });
+    }
     if (input.status !== 'not_attempted' && !this.passedTitleAbstract(recordId)) {
       throw new ConflictError('Full text is sought only for records that passed title/abstract screening.', { recordId });
     }
@@ -622,6 +631,14 @@ export class ReviewService {
   dedup(reviewId: string, actor: Actor, options: { threshold?: number; dryRun?: boolean } = {}): { pairs: { duplicateId: string; masterId: string; similarity: number }[] } {
     this.get(reviewId);
     const threshold = options.threshold ?? 0.93;
+    const screened = new Set(
+      this.db
+        .select({ id: screeningDecisions.reviewRecordId })
+        .from(screeningDecisions)
+        .where(and(eq(screeningDecisions.reviewId, reviewId), eq(screeningDecisions.isCurrent, true)))
+        .all()
+        .map((row) => row.id),
+    );
     const rows = this.records(reviewId).filter((record) => record.dedupStatus !== 'duplicate');
     const facts = rows.map((record) => {
       const bib = this.db.select().from(itemBibliographic).where(eq(itemBibliographic.itemId, record.itemId)).get();
@@ -641,7 +658,8 @@ export class ReviewService {
       if (taken.has(master.record.id)) continue;
       for (let j = i + 1; j < facts.length; j += 1) {
         const other = facts[j]!;
-        if (taken.has(other.record.id)) continue;
+        // A screened record is not silently turned into a duplicate (RR2); markDuplicate says why.
+        if (taken.has(other.record.id) || screened.has(other.record.id)) continue;
         if (master.doi !== null && other.doi !== null && master.doi !== other.doi) continue;
         if (master.year !== null && other.year !== null && Math.abs(master.year - other.year) > 1) continue;
         if (master.author !== null && other.author !== null && normalise(master.author) !== normalise(other.author)) continue;
@@ -688,6 +706,7 @@ export class ReviewService {
     const masterId = record.duplicateOfId!;
     this.db.transaction((tx) => {
       tx.update(reviewRecords).set({ dedupStatus: 'unique', duplicateOfId: null, stage: 'deduplicated', updatedAt: nowTimestamp() }).where(eq(reviewRecords.id, recordId)).run();
+      this.writeCache(tx, recordId);
       const remaining = tx.select({ id: reviewRecords.id }).from(reviewRecords).where(eq(reviewRecords.duplicateOfId, masterId)).all();
       if (remaining.length === 0) tx.update(reviewRecords).set({ dedupStatus: 'unique' }).where(eq(reviewRecords.id, masterId)).run();
       this.audit.record({ actor, action: 'review_record.duplicate_undone', entityType: 'review_record', entityId: recordId, before: { duplicateOfId: masterId } }, tx);
@@ -771,6 +790,12 @@ export class ReviewService {
     const record = this.record(recordId);
     const review = this.get(record.reviewId);
     if (record.dedupStatus === 'duplicate') throw new ConflictError('Duplicates are not screened; undo the duplicate call first.', { recordId, duplicateOfId: record.duplicateOfId });
+    if (input.stage === 'title_abstract' && this.currentDecision(recordId, 'full_text') !== null) {
+      throw new ConflictError('A full-text decision rests on this title/abstract decision; undo the full-text decision first.', { recordId });
+    }
+    if (input.stage === 'full_text' && input.decision === 'maybe') {
+      throw new ValidationError('Full-text screening ends in include or exclude: PRISMA reports every assessed report as one or the other.', { recordId });
+    }
     if (input.stage === 'full_text') {
       if (!this.passedTitleAbstract(recordId)) throw new ConflictError('Full-text screening follows a title/abstract include or maybe.', { recordId });
       if (record.retrievalStatus !== 'retrieved') throw new ConflictError('Full-text screening needs the full text; mark it retrieved first.', { recordId, retrievalStatus: record.retrievalStatus });
@@ -857,7 +882,9 @@ export class ReviewService {
           id: newId(),
           decidedAt: now,
           isCurrent: true,
-          supersedesId: current.id,
+          // The restored decision takes its original place in the lineage, so a second undo steps
+          // further back instead of returning to the decision just undone.
+          supersedesId: previous.supersedesId,
           supersededById: null,
           toolAssisted: this.isToolAssisted(actor),
           toolDetail: null,
@@ -931,8 +958,10 @@ export class ReviewService {
       .all()
       .map((row) => row.source);
     const recordsById = new Map(records.map((record) => [record.id, record]));
-    const primaryRun = new Map(sourceRows.filter((row) => row.isPrimarySource).map((row) => [row.reviewRecordId, runs.get(row.searchRunId)!]));
-    const isOtherMethod = (record: ReviewRecordRow): boolean => record.isSnowballed || OTHER_SOURCES.has(primaryRun.get(record.id)?.sourceDatabase ?? 'other');
+    // A record belongs to the databases-and-registers column if any database or register found it,
+    // whatever order the searches were imported in.
+    const foundByDatabase = new Set(sourceRows.filter((row) => !OTHER_SOURCES.has(runs.get(row.searchRunId)!.sourceDatabase)).map((row) => row.reviewRecordId));
+    const isOtherMethod = (record: ReviewRecordRow): boolean => record.isSnowballed || !foundByDatabase.has(record.id);
 
     const cells: PrismaCell[] = [];
     const cell = (stageKey: PrismaStageKey, count: number, extra: Partial<PrismaCell> = {}): void => {
@@ -955,15 +984,23 @@ export class ReviewService {
       else if (run.sourceDatabase === REGISTER) registers += count;
       else databases += count;
     }
+    // Labels must be unique within a snapshot (ux_prisma_counts_cell): two runs of one database on
+    // one day are told apart by a counter.
+    const labelled = new Map<string, number>();
+    const label = (base: string): string => {
+      const n = (labelled.get(base) ?? 0) + 1;
+      labelled.set(base, n);
+      return n === 1 ? base : `${base} #${n}`;
+    };
     cell('records_identified_databases', databases);
     for (const run of runs.values()) {
       if (run.sourceDatabase !== REGISTER && !OTHER_SOURCES.has(run.sourceDatabase)) {
-        cell('records_identified_databases', perRun.get(run.id) ?? 0, { sourceLabel: `${run.sourceDatabase}${run.interface === null ? '' : ` (${run.interface})`} ${run.executedAt.slice(0, 10)}`, searchRunId: run.id });
+        cell('records_identified_databases', perRun.get(run.id) ?? 0, { sourceLabel: label(`${run.sourceDatabase}${run.interface === null ? '' : ` (${run.interface})`} ${run.executedAt.slice(0, 10)}`), searchRunId: run.id });
       }
     }
     cell('records_identified_registers', registers);
     for (const run of runs.values()) {
-      if (run.sourceDatabase === REGISTER) cell('records_identified_registers', perRun.get(run.id) ?? 0, { sourceLabel: `${run.sourceDatabase} ${run.executedAt.slice(0, 10)}`, searchRunId: run.id });
+      if (run.sourceDatabase === REGISTER) cell('records_identified_registers', perRun.get(run.id) ?? 0, { sourceLabel: label(`${run.sourceDatabase} ${run.executedAt.slice(0, 10)}`), searchRunId: run.id });
     }
     cell('records_identified_other', otherIdentified);
 
@@ -1015,7 +1052,10 @@ export class ReviewService {
     const reasonRank = (code: string | null) => (code === null ? Number.MAX_SAFE_INTEGER : order.indexOf(code));
     for (const [code, count] of [...m.byReason].sort((a, b) => reasonRank(a[0]) - reasonRank(b[0]))) cell('reports_excluded', count, { exclusionReasonCode: code ?? 'unspecified' });
     // Studies and reports included combine both columns, as the PRISMA 2020 diagram does.
-    const allIncluded = unique.filter((record) => current.get(record.id)?.ft?.decision === 'include');
+    const allIncluded = unique.filter((record) => {
+      const entry = current.get(record.id);
+      return entry?.ft?.decision === 'include' && entry.ta !== undefined && entry.ta.decision !== 'exclude';
+    });
     cell('studies_included', new Set(allIncluded.map((record) => record.studyGroupKey ?? record.id)).size);
     cell('reports_of_included_studies', allIncluded.length);
     return {

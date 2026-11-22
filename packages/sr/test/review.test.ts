@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { createRecueil, schema } from '@recueil/core';
+import { ROB_INSTRUMENTS, createRecueil, proposeOverall, schema } from '@recueil/core';
 import type { Recueil } from '@recueil/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -254,6 +254,76 @@ describe('deduplication, screening and PRISMA', () => {
     const { review } = screened();
     recueil.reviews.decide(byTitle(review.id, 'Nerve')[0]!.record.id, { stage: 'title_abstract', decision: 'exclude', reasonCode: 'wrong_population' }, recueil.actor);
     expect(() => recueil.reviews.update(review.id, { exclusionReasons: [] }, recueil.actor)).toThrow(/still in use/u);
+  });
+});
+
+describe('regressions from the Phase 7 audit', () => {
+  const imported = () => {
+    const ctx = setup();
+    importSearchFile(recueil, ctx.pubmed.id, MEDLINE);
+    const ids = recueil.reviews.records(ctx.review.id).map((r) => r.id);
+    return { ...ctx, ids };
+  };
+
+  it('steps back through decisions on repeated undo, down to none', () => {
+    const { ids } = imported();
+    const id = ids[0]!;
+    recueil.reviews.decide(id, { stage: 'title_abstract', decision: 'include' }, recueil.actor);
+    recueil.reviews.decide(id, { stage: 'title_abstract', decision: 'exclude', reasonCode: 'wrong_population' }, recueil.actor);
+    expect(recueil.reviews.undo(id, 'title_abstract', recueil.actor)!.decision).toBe('include');
+    expect(recueil.reviews.undo(id, 'title_abstract', recueil.actor)).toBeNull();
+    expect(recueil.reviews.currentDecision(id, 'title_abstract')).toBeNull();
+    expect(recueil.reviews.record(id).screeningStatus).toBe('pending');
+  });
+
+  it('keeps title/abstract, retrieval and full text consistent', () => {
+    const { review, ids } = imported();
+    const id = ids[0]!;
+    recueil.reviews.decide(id, { stage: 'title_abstract', decision: 'include' }, recueil.actor);
+    recueil.reviews.setRetrieval(id, { status: 'retrieved' }, recueil.actor);
+    expect(() => recueil.reviews.decide(id, { stage: 'full_text', decision: 'maybe' }, recueil.actor)).toThrow(/include or exclude/u);
+    recueil.reviews.decide(id, { stage: 'full_text', decision: 'include' }, recueil.actor);
+    expect(() => recueil.reviews.decide(id, { stage: 'title_abstract', decision: 'exclude' }, recueil.actor)).toThrow(/undo the full-text decision/u);
+    expect(() => recueil.reviews.setRetrieval(id, { status: 'not_retrieved' }, recueil.actor)).toThrow(/assessed/u);
+    expect(recueil.reviews.verifyCaches(review.id)).toEqual([]);
+  });
+
+  it('does not turn a screened record into a duplicate in the bulk pass', () => {
+    const ctx = setup();
+    importSearchFile(recueil, ctx.pubmed.id, MEDLINE);
+    importSearchFile(recueil, ctx.embase.id, RIS);
+    const later = recueil.reviews.records(ctx.review.id).map((r) => recueil.reviews.view(r.id)).filter((v) => v.title?.includes('Early mobilisation'))[1]!;
+    recueil.reviews.decide(later.record.id, { stage: 'title_abstract', decision: 'include' }, recueil.actor);
+    expect(recueil.reviews.dedup(ctx.review.id, recueil.actor).pairs).toEqual([]);
+    expect(recueil.reviews.verifyCaches(ctx.review.id)).toEqual([]);
+  });
+
+  it('freezes two same-day runs of one database', () => {
+    const { review } = imported();
+    const again = recueil.reviews.addSearchRun(review.id, { sourceDatabase: 'pubmed', interface: 'native', queryString: 'update', recordsReturned: 3 }, recueil.actor);
+    importSearchFile(recueil, again.id, MEDLINE);
+    const labels = recueil.reviews.prisma(review.id).cells.filter((c) => c.stageKey === 'records_identified_databases' && c.sourceLabel !== null).map((c) => c.sourceLabel);
+    expect(new Set(labels).size).toBe(labels.length);
+    expect(() => recueil.reviews.freezePrisma(review.id, 'submission', recueil.actor)).not.toThrow();
+  });
+
+  it('puts a record in the databases column whichever search was imported first', () => {
+    const review = recueil.reviews.create({ title: 'Order' }, recueil.actor);
+    const manual = recueil.reviews.addSearchRun(review.id, { sourceDatabase: 'manual', queryString: 'hand search' }, recueil.actor);
+    const pubmed = recueil.reviews.addSearchRun(review.id, { sourceDatabase: 'pubmed', queryString: 'q' }, recueil.actor);
+    importSearchFile(recueil, manual.id, MEDLINE);
+    importSearchFile(recueil, pubmed.id, MEDLINE);
+    const flow = recueil.reviews.prisma(review.id);
+    expect(cell(flow, 'records_identified_databases')).toBe(3);
+    expect(cell(flow, 'records_removed_duplicates')).toBe(0);
+    expect(cell(flow, 'records_screened')).toBe(3);
+  });
+
+  it('lets a high domain outweigh "no information" in the proposed overall judgement', () => {
+    const rob2 = ROB_INSTRUMENTS['rob2']!;
+    const low = { judgement: 'low' };
+    expect(proposeOverall(rob2, { D1: { judgement: 'high' }, D2: low, D3: { judgement: 'no_information' }, D4: low, D5: low })).toBe('high');
+    expect(proposeOverall(rob2, { D1: low, D2: low, D3: { judgement: 'no_information' }, D4: low, D5: low })).toBe('no_information');
   });
 });
 

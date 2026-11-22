@@ -111,7 +111,11 @@ export const proposeOverall = (instrument: RobInstrument, domainJudgements: Reco
   if (!instrument.worstDomainOverall) return null;
   const judgements = instrument.domains.map((domain) => domainJudgements[domain.key]?.judgement);
   if (judgements.some((judgement) => judgement === undefined)) return null;
-  const ranked = judgements.map((judgement) => instrument.levels.indexOf(judgement!));
-  if (ranked.some((rank) => rank < 0)) return judgements.includes('no_information') ? 'no_information' : null;
-  return instrument.levels[Math.max(...ranked)]!;
+  const ranked = judgements.map((judgement) => instrument.levels.indexOf(judgement!)).filter((rank) => rank >= 0);
+  const unranked = judgements.length - ranked.length;
+  if (unranked > 0 && judgements.some((judgement) => judgement !== 'no_information' && !instrument.levels.includes(judgement!))) return null;
+  const worst = ranked.length === 0 ? -1 : Math.max(...ranked);
+  // "No information" weighs only when no ranked domain is already at the worst level.
+  if (unranked > 0 && worst < instrument.levels.length - 1) return 'no_information';
+  return worst < 0 ? null : instrument.levels[worst]!;
 };

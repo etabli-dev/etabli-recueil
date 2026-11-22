@@ -155,6 +155,7 @@ export interface ExtractionRow {
   value: string | number | boolean | null;
   blank: boolean;
   formVersion: number;
+  ordinal: number;
 }
 
 export interface RobInput {
@@ -266,7 +267,7 @@ export class ExtractionService {
       template: definition.template ?? 'custom',
       schemaJson: JSON.stringify(definition.sections),
       repeatableGroups: JSON.stringify(definition.groups ?? []),
-      status: 'active',
+      status: 'draft',
       createdAt: now,
       updatedAt: now,
     };
@@ -312,6 +313,8 @@ export class ExtractionService {
     const record = this.extractable(recordId);
     const form = this.form(formId);
     if (form.reviewId !== record.reviewId) throw new ValidationError('The form belongs to another review.');
+    const latest = this.db.select().from(extractionForms).where(and(eq(extractionForms.reviewId, form.reviewId), eq(extractionForms.name, form.name))).orderBy(desc(extractionForms.version)).get()!;
+    if (latest.id !== form.id) throw new ConflictError(`Form '${form.name}' v${form.version} has been replaced by v${latest.version}; extract into that.`, { formId: latest.id });
     const field = this.definition(form)
       .sections.flatMap((section) => section.fields)
       .find((candidate) => candidate.fieldKey === input.fieldKey);
@@ -392,7 +395,7 @@ export class ExtractionService {
       .innerJoin(customFields, eq(customFields.id, fieldValues.fieldId))
       .innerJoin(reviewRecords, and(eq(reviewRecords.itemId, fieldValues.itemId), eq(reviewRecords.reviewId, reviewId)))
       .innerJoin(extractionForms, eq(extractionForms.id, fieldValues.extractionFormId))
-      .where(eq(fieldValues.reviewId, reviewId))
+      .where(and(eq(fieldValues.reviewId, reviewId), eq(reviewRecords.stage, 'included')))
       .orderBy(asc(reviewRecords.addedAt), asc(fieldValues.groupKey), asc(customFields.position), asc(fieldValues.ordinal))
       .all();
     const labels = this.studyLabels(reviewId);
@@ -405,17 +408,23 @@ export class ExtractionService {
       value: scalar(value),
       blank: value.isBlank,
       formVersion: form.version,
+      ordinal: value.ordinal,
     }));
   }
 
   /** `Lovelace 2020`, `Lovelace 2020b` — the study labels the exports and robvis share. */
   studyLabels(reviewId: string): Map<string, string> {
-    const included = this.reviews.records(reviewId).filter((record) => record.dedupStatus !== 'duplicate');
+    // Included studies are labelled first, so an excluded record never pushes one to a "b".
+    const included = this.reviews
+      .records(reviewId)
+      .filter((record) => record.dedupStatus !== 'duplicate')
+      .sort((a, b) => Number(b.stage === 'included') - Number(a.stage === 'included'));
     const labels = new Map<string, string>();
     const used = new Map<string, number>();
     for (const record of included) {
       const view = this.reviews.view(record.id);
-      const author = view.authors[0]?.split(/[ ,]/u).filter((part) => part !== '').at(-1) ?? 'Anon';
+      const first = this.reviews.firstAuthor(record.itemId);
+      const author = first ?? view.authors[0]?.split(/[ ,]/u).filter((part) => part !== '').at(-1) ?? 'Anon';
       const base = record.studyGroupKey ?? `${author} ${view.year ?? 'n.d.'}`;
       const n = (used.get(base) ?? 0) + 1;
       used.set(base, n);
