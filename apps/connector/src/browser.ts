@@ -38,4 +38,8 @@ export const readSettings = async (api: ExtensionApi): Promise<{ baseUrl: string
 };
 
 /** The origin pattern a server URL needs as a host permission: `https://recueil.example.org/*`. */
-export const originPattern = (baseUrl: string): string => `${new URL(baseUrl).origin}/*`;
+export const originPattern = (baseUrl: string): string => {
+  // Match patterns take no port (Firefox refuses one); the host covers every port on it.
+  const url = new URL(baseUrl);
+  return `${url.protocol}//${url.hostname}/*`;
+};

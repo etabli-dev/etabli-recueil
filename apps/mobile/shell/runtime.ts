@@ -47,10 +47,12 @@ export const defaultSettings = (): SettingsBackend => (Capacitor.isNativePlatfor
 const stamp = (): string => new Date().toISOString().replace(/[:.]/gu, '-').slice(0, 19);
 
 /** A file the native side wrote, read back as bytes through the web view's file bridge. */
-const readNativeFile = async (uri: string): Promise<Blob> => {
+const readNativeFile = async (uri: string, type?: string): Promise<Blob> => {
   const response = await fetch(Capacitor.convertFileSrc(uri));
   if (!response.ok) throw new Error(`Could not read ${uri} (${response.status}).`);
-  return response.blob();
+  const blob = await response.blob();
+  // The share plugin copies files to `*.tmp`, so the bridge cannot tell the type; the sender can.
+  return type === undefined || type === '' ? blob : new Blob([blob], { type });
 };
 
 const base64ToBlob = (base64: string, type: string): Blob => {
@@ -72,9 +74,45 @@ const releasing = (pending: Promise<PluginListenerHandle>): (() => void) => {
   };
 };
 
+/**
+ * Shares are listened for from the moment the host script runs, not only while the Capture screen
+ * is open, and kept until a listener takes them: a share that arrives while the app shows another
+ * screen, or before React has mounted, is not lost.
+ */
+const createShareInbox = () => {
+  const pending: HostFile[][] = [];
+  const listeners = new Set<(files: HostFile[]) => void>();
+  let started = false;
+  const deliver = (files: HostFile[]): void => {
+    if (listeners.size === 0) pending.push(files);
+    else for (const listener of listeners) listener(files);
+  };
+  const start = (): void => {
+    if (started) return;
+    started = true;
+    void CapacitorShareTarget.addListener('shareReceived', (event) => {
+      void Promise.all(
+        event.files.map(async (file) => ({ blob: await readNativeFile(file.uri, file.mimeType), filename: file.name || `shared-${stamp()}`, ...(event.title === '' ? {} : { note: event.title }) })),
+      ).then(deliver, (error: unknown) => console.error('recueil: a shared file could not be read', error));
+    });
+  };
+  return {
+    start,
+    subscribe: (listener: (files: HostFile[]) => void): (() => void) => {
+      start();
+      listeners.add(listener);
+      for (const files of pending.splice(0)) listener(files);
+      return () => listeners.delete(listener);
+    },
+  };
+};
+
+const shares = createShareInbox();
+
 export const nativeCapabilities = (): Capabilities => {
   const platform = Capacitor.getPlatform();
   if (platform === 'web') return { platform };
+  shares.start();
   return {
     platform,
     scanDocument: async () => {
@@ -85,7 +123,7 @@ export const nativeCapabilities = (): Capabilities => {
         }
         const result = await DocumentScanner.scanDocument({ resultFormats: 'PDF', galleryImportAllowed: true, scannerMode: 'FULL', pageLimit: 30 });
         if (result.pdf === undefined) return [];
-        return [{ blob: await readNativeFile(result.pdf.uri), filename: `scan-${stamp()}.pdf` }];
+        return [{ blob: await readNativeFile(result.pdf.uri, 'application/pdf'), filename: `scan-${stamp()}.pdf` }];
       } catch (error) {
         if (cancelled(error)) return [];
         throw error;
@@ -94,7 +132,11 @@ export const nativeCapabilities = (): Capabilities => {
     scanBarcode: async () => {
       if (platform === 'android') {
         const { available } = await BarcodeScanner.isGoogleBarcodeScannerModuleAvailable();
-        if (!available) await BarcodeScanner.installGoogleBarcodeScannerModule();
+        if (!available) {
+          // Installing only starts a download from Google Play; scanning before it finishes fails.
+          await BarcodeScanner.installGoogleBarcodeScannerModule();
+          throw new Error('Google’s barcode scanner is being installed on this phone. Try again in a minute.');
+        }
       } else {
         await BarcodeScanner.requestPermissions();
       }
@@ -106,14 +148,7 @@ export const nativeCapabilities = (): Capabilities => {
         throw error;
       }
     },
-    onShared: (listener) =>
-      releasing(
-        CapacitorShareTarget.addListener('shareReceived', (event) => {
-          void Promise.all(
-            event.files.map(async (file) => ({ blob: await readNativeFile(file.uri), filename: file.name || `shared-${stamp()}`, ...(event.title === '' ? {} : { note: event.title }) })),
-          ).then(listener);
-        }),
-      ),
+    onShared: (listener) => shares.subscribe(listener),
     onNetworkChange: (listener) => releasing(Network.addListener('networkStatusChange', (status) => listener(status.connected))),
   };
 };

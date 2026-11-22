@@ -9,8 +9,9 @@ the web client in Capacitor 8, connected to the user's own Recueil server, for c
   on-device queue (`apps/web/src/capture/queue.ts`) and uploaded to `POST /api/v1/ingestion/upload`
   when the server answers; one the server refuses stays in the queue with its reason.
 - **Settings.** The server address is kept in Capacitor Preferences; the token in the Keychain or
-  Android's Keystore-backed storage, never in Preferences. HTTPS only, except loopback and the
-  Android emulator's host during development.
+  Android's Keystore-backed storage, never in Preferences. HTTPS only: the app's pages come from a
+  secure origin, so the web view would block plain HTTP as mixed content. For development, put the
+  local server behind TLS or a tunnel.
 - **Server.** `RECUEIL_CORS_ORIGIN` must list `capacitor://localhost` (iOS) and `https://localhost`
   (Android).
 
@@ -30,5 +31,7 @@ Signed builds need the owner's keys (`docs/platform-roadmap.md` §4.4–4.5, §6
 
 Built in CI, **not yet run on a phone**: the Phase 8 exit (a three-page document from camera to a
 searchable item in under thirty seconds) is the owner's to measure on a real device. Not yet: an
-iOS share extension (Android receives shares already; iOS needs an extension target in Xcode),
-and cached reading offline.
+iOS share extension (Android receives shares already; iOS needs an extension target in Xcode);
+a share that *launches* the Android app (the share-target plugin handles shares to a running app
+only, so a cold-start share needs a `MainActivity` hand-off); idempotent ISBN items (a lost
+response followed by a retry can create the book twice); cached reading offline.

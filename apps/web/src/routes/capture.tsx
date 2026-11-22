@@ -86,8 +86,12 @@ export const CaptureRoute = (): JSX.Element => {
 
   const scan = async (): Promise<void> => {
     if (capabilities?.scanDocument === undefined) return cameraInput.current?.click();
-    const pages = await capabilities.scanDocument();
-    if (pages.length > 0) await addFiles(pages, 'scan');
+    try {
+      const pages = await capabilities.scanDocument();
+      if (pages.length > 0) await addFiles(pages, 'scan');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    }
   };
 
   const addIsbn = async (raw: string, origin: string): Promise<void> => {
@@ -103,8 +107,12 @@ export const CaptureRoute = (): JSX.Element => {
   };
 
   const barcode = async (): Promise<void> => {
-    const code = await capabilities?.scanBarcode?.();
-    if (code !== null && code !== undefined) await addIsbn(code, 'barcode');
+    try {
+      const code = await capabilities?.scanBarcode?.();
+      if (code !== null && code !== undefined) await addIsbn(code, 'barcode');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    }
   };
 
   const pending = items.filter((item) => item.status === 'queued');

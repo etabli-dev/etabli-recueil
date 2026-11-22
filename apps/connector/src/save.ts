@@ -33,7 +33,7 @@ export class SaveError extends Error {
 const creatorOf = (author: PageAuthor) =>
   author.literal !== undefined
     ? { role: 'author', creator: { kind: 'organisation', literalName: author.literal } }
-    : { role: 'author', creator: { kind: 'person', familyName: author.family ?? author.given ?? '', ...(author.given === undefined ? {} : { givenName: author.given }) } };
+    : { role: 'author', creator: { kind: 'person', familyName: author.family ?? author.given ?? '', ...(author.given === undefined || author.given === '' || author.family === undefined ? {} : { givenName: author.given }) } };
 
 /** The `ItemCreate` body for a page. Only what the page said; enrichment can fill in the rest. */
 export const itemBody = (meta: PageMetadata): Record<string, unknown> => {
@@ -48,7 +48,12 @@ export const itemBody = (meta: PageMetadata): Record<string, unknown> => {
   if (meta.firstPage !== null) {
     set('pages', meta.lastPage === null ? meta.firstPage : `${meta.firstPage}-${meta.lastPage}`);
     if (/^\d+$/u.test(meta.firstPage)) set('pageFirst', Number(meta.firstPage));
-    if (meta.lastPage !== null && /^\d+$/u.test(meta.lastPage)) set('pageLast', Number(meta.lastPage));
+    if (meta.lastPage !== null && /^\d+$/u.test(meta.lastPage) && /^\d+$/u.test(meta.firstPage)) {
+      // `1234–45` means 1245: expand an abbreviated last page, and keep the order the server checks.
+      const first = meta.firstPage;
+      const last = meta.lastPage.length < first.length ? first.slice(0, first.length - meta.lastPage.length) + meta.lastPage : meta.lastPage;
+      if (Number(last) >= Number(first)) set('pageLast', Number(last));
+    }
   }
   set('doi', meta.doi);
   set('pmid', meta.pmid);
@@ -100,14 +105,17 @@ export const saveToRecueil = async (
       if (!response.ok) throw new Error(`the publisher answered HTTP ${response.status}`);
       return response.blob();
     }))(meta.pdfUrl);
-    if (blob.type !== '' && !blob.type.includes('pdf')) return { itemId: item.id, pdf: { failed: `the PDF link returned ${blob.type}, not a PDF (often a login page)` } };
+    // By the bytes, not the content type: publishers often serve PDFs as octet-stream.
+    const magic = new TextDecoder().decode(await blob.slice(0, 5).arrayBuffer());
+    if (magic !== '%PDF-') return { itemId: item.id, pdf: { failed: 'the PDF link did not return a PDF (often a login page)' } };
     const form = new FormData();
-    form.append('file', blob, `${(meta.title ?? 'document').slice(0, 80).replace(/[^\p{L}\p{N} ._-]+/gu, '_')}.pdf`);
+    // Fields before the file, or the server never sees them (`@fastify/multipart`).
     form.append('sourceKind', 'connector');
     form.append('sourceRef', meta.pdfUrl);
     // Attached in the same transaction as the upload: no document is left orphaned on a failure.
     form.append('itemId', item.id);
     form.append('role', 'primary');
+    form.append('file', blob, `${(meta.title ?? 'document').slice(0, 80).replace(/[^\p{L}\p{N} ._-]+/gu, '_')}.pdf`);
     const uploaded = await doFetch(`${base}/api/v1/documents`, { method: 'POST', headers: { ...auth, accept: 'application/json' }, body: form });
     if (!uploaded.ok) return { itemId: item.id, pdf: { failed: await problem(uploaded) } };
     return { itemId: item.id, pdf: 'attached' };

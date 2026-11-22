@@ -16,13 +16,12 @@ export interface SettingsBackend {
   clear(): Promise<void>;
 }
 
-/** Hosts a phone may reach over plain HTTP: the device itself and the Android emulator's host. */
-const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]', '10.0.2.2']);
-
 /**
- * A server address a phone may use: HTTPS, or HTTP to a loopback address for development. App
- * Transport Security on iOS and Android's cleartext default would refuse anything else anyway; this
- * says so before the first request rather than after it.
+ * A server address a phone may use: HTTPS only. The app's own pages are served from a secure
+ * origin (`capacitor://localhost`, `https://localhost`), so the web view blocks plain HTTP as mixed
+ * content, and App Transport Security and Android's cleartext default would refuse it as well;
+ * this says so before the first request rather than after it. For development, put the local
+ * server behind TLS (`deploy/README.md`) or a tunnel.
  */
 export const validateServerUrl = (raw: string): { ok: true; url: string } | { ok: false; reason: string } => {
   let url: URL;
@@ -33,7 +32,6 @@ export const validateServerUrl = (raw: string): { ok: true; url: string } | { ok
   }
   if (url.username !== '' || url.password !== '') return { ok: false, reason: 'Leave the user name and password out of the address; use a token.' };
   if (url.protocol === 'https:') return { ok: true, url: `${url.origin}${url.pathname.replace(/\/+$/u, '')}` };
-  if (url.protocol === 'http:' && LOOPBACK.has(url.hostname)) return { ok: true, url: `${url.origin}${url.pathname.replace(/\/+$/u, '')}` };
   if (url.protocol === 'http:') return { ok: false, reason: 'A phone talks to the server over HTTPS. Put the server behind TLS (deploy/README.md) and use its https:// address.' };
   return { ok: false, reason: `'${url.protocol}' is not a protocol the app can use.` };
 };

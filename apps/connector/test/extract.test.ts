@@ -54,6 +54,10 @@ describe('reading a scholarly page', () => {
     expect(page('<meta property="og:title" content="A blog post">').itemType).toBe('webpage');
   });
 
+  it('survives a malformed address and ignores a PMID with a leading zero', () => {
+    expect(page('<meta name="citation_title" content="T"><meta name="citation_pmid" content="0123">', '', 'https://x.example/a%E0%A4%A').pmid).toBeNull();
+  });
+
   it('survives broken JSON-LD and keeps the meta tags', () => {
     expect(page('<script type="application/ld+json">{not json</script><meta name="dc.title" content="Dublin Core title">')).toMatchObject({ title: 'Dublin Core title', source: 'dublin-core' });
   });

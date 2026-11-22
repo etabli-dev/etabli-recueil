@@ -730,11 +730,13 @@ export class RecueilClient {
     signal?: AbortSignal,
   ): Promise<IngestUploadResult> {
     const form = new FormData();
-    form.append('file', file, fields.filename);
+    // Fields before the file: the server reads the fields that arrived ahead of the file part and
+    // no others (`@fastify/multipart`), so a field after the file would be silently dropped.
     for (const key of ['sourceKind', 'sourceId', 'title', 'sender', 'subject', 'runLabel'] as const) {
       const value = fields[key];
       if (value !== undefined) form.append(key, value);
     }
+    form.append('file', file, fields.filename);
 
     const url = `${this.baseUrl}${API_BASE_PATH}/ingestion/upload`;
     const headers: Record<string, string> = { accept: `${JSON_CONTENT_TYPE}, application/problem+json` };

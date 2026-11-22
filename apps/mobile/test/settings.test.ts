@@ -3,10 +3,10 @@ import { describe, expect, it } from 'vitest';
 import { memorySettings, pluginSettings, validateServerUrl } from '../shell/settings.js';
 
 describe('server address', () => {
-  it('takes HTTPS, and HTTP only to the device or the emulator host', () => {
+  it('takes HTTPS only: the web view would block plain HTTP as mixed content', () => {
     expect(validateServerUrl('https://recueil.example.org/')).toEqual({ ok: true, url: 'https://recueil.example.org' });
     expect(validateServerUrl(' https://example.org/recueil/ ')).toEqual({ ok: true, url: 'https://example.org/recueil' });
-    expect(validateServerUrl('http://10.0.2.2:3000')).toEqual({ ok: true, url: 'http://10.0.2.2:3000' });
+    expect(validateServerUrl('http://10.0.2.2:3000')).toMatchObject({ ok: false, reason: expect.stringContaining('HTTPS') });
     expect(validateServerUrl('http://192.168.1.20:3000')).toMatchObject({ ok: false, reason: expect.stringContaining('HTTPS') });
     expect(validateServerUrl('https://user:pw@example.org')).toMatchObject({ ok: false });
     expect(validateServerUrl('recueil')).toMatchObject({ ok: false });

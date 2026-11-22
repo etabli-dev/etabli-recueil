@@ -16,7 +16,7 @@ const uploader = (script: (call: number) => 'ok' | ApiError | Error): CaptureUpl
   };
   return {
     calls,
-    uploadForIngestion: (_blob, fields) => answer(`file:${fields.filename}`, { outcome: 'ingested', jobId: 'j', document: null, item: null, reviewEntry: null, reasonCode: null, detail: '' }),
+    uploadForIngestion: (_blob, fields) => answer(`file:${fields.filename}`, { outcome: (fields.filename.startsWith('stopped') ? 'stopped' : 'ingested') as 'ingested', jobId: 'j', document: null, item: null, reviewEntry: null, reasonCode: null, detail: '' }),
     createItemFromIsbn: (isbn) => answer(`isbn:${isbn}`, { id: 'item' }),
   };
 };
@@ -64,12 +64,61 @@ describe('the capture queue', () => {
     expect(again.calls).toEqual(['file:huge.tiff']);
   });
 
+  it('keeps a capture the server answered for but did not keep', async () => {
+    const queue = new CaptureQueue(memoryCaptureStore());
+    await queue.addFile(new Blob(['x']), 'stopped.pdf', 'scan');
+    const report = await queue.flush(uploader(() => 'ok'));
+    expect(report.uploaded).toEqual([]);
+    expect(await queue.list()).toEqual([expect.objectContaining({ status: 'refused' })]);
+  });
+
+  it('stops on a refused token and keeps everything queued', async () => {
+    const queue = new CaptureQueue(memoryCaptureStore());
+    await queue.addIsbn('9783161484100', 'typed');
+    await queue.addIsbn('0306406152', 'typed');
+    const up = uploader(() => problem(401, 'The token has expired.'));
+    await queue.flush(up);
+    expect(up.calls).toHaveLength(1);
+    expect((await queue.list()).map((c) => c.status)).toEqual(['queued', 'queued']);
+  });
+
+  it('does not let one broken capture hold up the rest', async () => {
+    const store = memoryCaptureStore();
+    const queue = new CaptureQueue(store);
+    const broken = await queue.addFile(new Blob(['x']), 'a.pdf', 'scan');
+    const stored = (await store.all()).find((c) => c.id === broken.id)!;
+    delete stored.blob;
+    await store.put(stored);
+    await queue.addIsbn('9783161484100', 'typed');
+    const report = await queue.flush(uploader(() => 'ok'));
+    expect(report.refused.map((c) => c.id)).toEqual([broken.id]);
+    expect(report.uploaded.map((u) => u.outcome)).toEqual(['created']);
+  });
+
+  it('picks up a capture added while a flush runs', async () => {
+    const queue = new CaptureQueue(memoryCaptureStore());
+    await queue.addIsbn('9783161484100', 'typed');
+    let added = false;
+    const up: CaptureUploader = {
+      uploadForIngestion: async () => ({ outcome: 'ingested', jobId: 'j', document: null, item: null, reviewEntry: null, reasonCode: null, detail: '' }),
+      createItemFromIsbn: async () => {
+        if (!added) {
+          added = true;
+          await queue.addIsbn('0306406152', 'typed');
+        }
+        return { id: 'x' };
+      },
+    };
+    const report = await queue.flush(up);
+    expect(report.uploaded).toHaveLength(2);
+  });
+
   it('shares one pass between concurrent flushes', async () => {
     const queue = new CaptureQueue(memoryCaptureStore());
     await queue.addIsbn('0-306-40615-2', 'typed');
     const up = uploader(() => 'ok');
     await Promise.all([queue.flush(up), queue.flush(up)]);
-    expect(up.calls).toEqual(['isbn:0306406152']);
+    expect(up.calls).toEqual(['isbn:9780306406157']);
   });
 
   it('tells retryable failures from refusals', () => {
@@ -77,13 +126,14 @@ describe('the capture queue', () => {
     expect(isRetryable(problem(503, ''))).toBe(true);
     expect(isRetryable(problem(429, ''))).toBe(true);
     expect(isRetryable(problem(422, ''))).toBe(false);
-    expect(isRetryable(new TypeError('network'))).toBe(true);
+    expect(isRetryable(new TypeError('a local fault'))).toBe(false);
+    expect(isRetryable(new DOMException('slow', 'TimeoutError'))).toBe(true);
   });
 
   it('accepts only ISBNs whose check digit holds', () => {
     expect(normaliseIsbn('978-3-16-148410-0')).toBe('9783161484100');
-    expect(normaliseIsbn('0-306-40615-2')).toBe('0306406152');
-    expect(normaliseIsbn('080442957X')).toBe('080442957X');
+    expect(normaliseIsbn('0-306-40615-2')).toBe('9780306406157');
+    expect(normaliseIsbn('080442957X')).toBe('9780804429573');
     expect(normaliseIsbn('978-3-16-148410-1')).toBeNull();
     expect(normaliseIsbn('hello')).toBeNull();
   });

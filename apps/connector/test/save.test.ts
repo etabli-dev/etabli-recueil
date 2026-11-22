@@ -61,14 +61,21 @@ describe('saving', () => {
     expect(calls.map((call) => call.url)).toEqual(['https://recueil.example/api/v1/items', 'https://recueil.example/api/v1/documents']);
     expect((calls[0]!.init!.headers as Record<string, string>)['authorization']).toBe('Bearer rc_t');
     const form = calls[1]!.init!.body as FormData;
+    expect([...form.keys()].at(-1)).toBe('file');
     expect(form.get('itemId')).toBe('ITEM1');
     expect(form.get('role')).toBe('primary');
+  });
+
+  it('expands abbreviated page ranges and drops an empty given name', () => {
+    const body = itemBody(meta({ firstPage: '1234', lastPage: '45', authors: [{ family: 'Smith', given: '' }] }));
+    expect(body['bibliographic']).toMatchObject({ pageFirst: 1234, pageLast: 1245 });
+    expect(body['creators']).toEqual([{ role: 'author', creator: { kind: 'person', familyName: 'Smith' } }]);
   });
 
   it('keeps the item when the PDF link is a login page', async () => {
     const outcome = await saveToRecueil(settings, meta({ pdfUrl: 'https://journal.example/a.pdf' }), {
       fetch: async () => json(201, { id: 'ITEM1' }),
-      fetchPdf: async () => new Blob(['<html>'], { type: 'text/html' }),
+      fetchPdf: async () => new Blob(['<html>'], { type: 'application/octet-stream' }),
     });
     expect(outcome.itemId).toBe('ITEM1');
     expect(outcome.pdf).toEqual({ failed: expect.stringContaining('not a PDF') });
@@ -87,5 +94,6 @@ describe('the server address', () => {
     expect(checkServerUrl('http://localhost:3000')).toEqual({ ok: true, url: 'http://localhost:3000' });
     expect(checkServerUrl('http://recueil.example')).toMatchObject({ ok: false });
     expect(originPattern('https://recueil.example/app')).toBe('https://recueil.example/*');
+    expect(originPattern('http://localhost:3000')).toBe('http://localhost/*');
   });
 });

@@ -53,7 +53,13 @@ export function extractPageMetadata(doc: Document = document, pageUrl: string = 
   const DOI = /\b(10\.\d{4,9}\/[^\s"'<>&?#]+[^\s"'<>&?#.,;)\]])/u;
   const cleanDoi = (value: string | null): string | null => {
     if (value === null) return null;
-    const match = DOI.exec(decodeURIComponent(value));
+    let decoded = value;
+    try {
+      decoded = decodeURIComponent(value);
+    } catch {
+      // A malformed `%` sequence in an address: read it as it is.
+    }
+    const match = DOI.exec(decoded);
     return match === null ? null : match[1]!.toLowerCase();
   };
   const absolute = (href: string | null): string | null => {
@@ -68,7 +74,8 @@ export function extractPageMetadata(doc: Document = document, pageUrl: string = 
     const name = raw.trim();
     if (name.includes(',')) {
       const [family, ...rest] = name.split(',');
-      return { family: family!.trim(), given: rest.join(',').trim() };
+      const given = rest.join(',').trim();
+      return given === '' ? { family: family!.trim() } : { family: family!.trim(), given };
     }
     const parts = name.split(/\s+/u);
     if (parts.length === 1) return { literal: name };
@@ -164,7 +171,7 @@ export function extractPageMetadata(doc: Document = document, pageUrl: string = 
     firstPage: meta('citation_firstpage', 'prism.startingpage'),
     lastPage: meta('citation_lastpage', 'prism.endingpage'),
     doi,
-    pmid: pmidRaw !== null && /^\d{1,9}$/u.test(pmidRaw) ? pmidRaw : null,
+    pmid: pmidRaw !== null && /^[1-9]\d{0,8}$/u.test(pmidRaw) ? pmidRaw : null,
     isbn,
     issn: meta('citation_issn', 'prism.issn', 'prism.eissn'),
     publisher: meta('citation_publisher', 'dc.publisher', 'citation_dissertation_institution', 'citation_technical_report_institution') ?? ldText('publisher'),

@@ -46,7 +46,7 @@ export interface CaptureStore {
 
 /** What the queue needs from the API client. */
 export interface CaptureUploader {
-  uploadForIngestion(file: Blob, fields: { filename: string; sourceKind?: string; title?: string }): Promise<IngestUploadResult>;
+  uploadForIngestion(file: Blob, fields: { filename: string; sourceKind?: string; title?: string }, signal?: AbortSignal): Promise<IngestUploadResult>;
   createItemFromIsbn(isbn: string): Promise<{ id: string }>;
 }
 
@@ -59,25 +59,44 @@ export interface FlushReport {
 
 const RETRYABLE = new Set([0, 408, 425, 429]);
 
-/** Whether an error means "try again later" rather than "the server said no". */
+/**
+ * Whether an error means "try again later" rather than "the server said no". Only a failure to
+ * reach the server is retryable; a local fault (a capture missing its bytes, say) is not, or one
+ * broken capture would hold up every capture behind it.
+ */
 export const isRetryable = (error: unknown): boolean => {
   if (error instanceof ApiError) return RETRYABLE.has(error.problem.status) || error.problem.status >= 500;
-  return true;
+  return error instanceof DOMException && (error.name === 'TimeoutError' || error.name === 'AbortError');
 };
+
+/** 401 and 403: the token, not the capture, is the problem — stop and keep everything queued. */
+const isAuthFailure = (error: unknown): boolean => error instanceof ApiError && (error.problem.status === 401 || error.problem.status === 403);
+
+/** What `/ingestion/upload` answers when the library now holds the capture (or will, after review). */
+const KEPT_OUTCOMES = new Set(['ingested', 'duplicate', 'review', 'container']);
+
+/** How long one upload may take before the queue gives up on it for this pass. */
+const UPLOAD_TIMEOUT_MS = 120_000;
 
 const ISBN = /^(?:97[89])?\d{9}[\dX]$/u;
 
-/** Digits only, check digit verified; null when it is not an ISBN. Exported for the test. */
+/**
+ * Digits only, check digit verified, and always ISBN-13: an ISBN-10 becomes `978` plus its nine
+ * digits with a new check digit, which is the form the server stores. Null when it is not an ISBN.
+ * Exported for the test.
+ */
 export const normaliseIsbn = (raw: string): string | null => {
   const compact = raw.replace(/[\s-]/gu, '').toUpperCase();
   if (!ISBN.test(compact)) return null;
+  const check13 = (twelve: string): number => (10 - ([...twelve].reduce((acc, char, index) => acc + Number(char) * (index % 2 === 0 ? 1 : 3), 0) % 10)) % 10;
   if (compact.length === 10) {
     const sum = [...compact].reduce((acc, char, index) => acc + (char === 'X' ? 10 : Number(char)) * (10 - index), 0);
-    return sum % 11 === 0 ? compact : null;
+    if (sum % 11 !== 0 || compact.slice(0, 9).includes('X')) return null;
+    const twelve = `978${compact.slice(0, 9)}`;
+    return `${twelve}${check13(twelve)}`;
   }
   if (compact.includes('X')) return null;
-  const sum = [...compact].reduce((acc, char, index) => acc + Number(char) * (index % 2 === 0 ? 1 : 3), 0);
-  return sum % 10 === 0 ? compact : null;
+  return check13(compact.slice(0, 12)) === Number(compact[12]) ? compact : null;
 };
 
 const newCaptureId = (): string => `cap_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
@@ -132,7 +151,10 @@ export class CaptureQueue {
     await this.store.delete(id);
   }
 
-  /** Upload what is queued, oldest first. Concurrent calls share one pass. */
+  /**
+   * Upload what is queued, oldest first. Concurrent calls share one pass, and the pass looks again
+   * when it is done, so a capture added while it ran is not left waiting for the next trigger.
+   */
   flush(uploader: CaptureUploader): Promise<FlushReport> {
     this.flushing ??= this.run(uploader).finally(() => {
       this.flushing = null;
@@ -142,34 +164,60 @@ export class CaptureQueue {
 
   private async run(uploader: CaptureUploader): Promise<FlushReport> {
     const report: FlushReport = { uploaded: [], refused: [], deferred: [] };
-    const queued = (await this.list()).filter((capture) => capture.status === 'queued');
-    for (const [position, capture] of queued.entries()) {
-      const attempted = { ...capture, attempts: capture.attempts + 1, lastAttemptAt: this.now().toISOString() };
-      try {
-        let outcome: string;
-        if (capture.kind === 'file') {
-          const result = await uploader.uploadForIngestion(capture.blob!, { filename: capture.filename ?? 'capture', sourceKind: 'mobile', ...(capture.note === undefined ? {} : { title: capture.note }) });
-          outcome = result.outcome;
-        } else {
-          await uploader.createItemFromIsbn(capture.isbn!);
-          outcome = 'created';
+    const tried = new Set<string>();
+    for (;;) {
+      const queued = (await this.list()).filter((capture) => capture.status === 'queued' && !tried.has(capture.id));
+      if (queued.length === 0) return report;
+      for (const [position, capture] of queued.entries()) {
+        tried.add(capture.id);
+        const attempted = { ...capture, attempts: capture.attempts + 1, lastAttemptAt: this.now().toISOString() };
+        // A capture discarded while its upload was under way must not be written back.
+        const keep = async (row: Capture): Promise<void> => {
+          if ((await this.store.all()).some((candidate) => candidate.id === row.id)) await this.store.put(row);
+        };
+        try {
+          let outcome: string;
+          if (capture.kind === 'file') {
+            if (capture.blob === undefined) throw new Error('This capture lost its file on the device; capture it again.');
+            const result = await uploader.uploadForIngestion(
+              capture.blob,
+              { filename: capture.filename ?? 'capture', sourceKind: 'mobile', ...(capture.note === undefined ? {} : { title: capture.note }) },
+              AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
+            );
+            outcome = result.outcome;
+            if (!KEPT_OUTCOMES.has(outcome)) {
+              // The server answered but did not keep the file: the device's copy is the only one.
+              const reason = result.detail === '' ? `The server did not keep the file (${outcome}).` : result.detail;
+              if (outcome === 'failed') {
+                await keep({ ...attempted, lastError: reason });
+                report.deferred.push({ ...attempted, lastError: reason });
+              } else {
+                const refused = { ...attempted, status: 'refused' as const, lastError: reason };
+                await keep(refused);
+                report.refused.push(refused);
+              }
+              continue;
+            }
+          } else {
+            await uploader.createItemFromIsbn(capture.isbn!);
+            outcome = 'created';
+          }
+          await this.store.delete(capture.id);
+          report.uploaded.push({ capture: attempted, outcome });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          if (isRetryable(error) || isAuthFailure(error)) {
+            await keep({ ...attempted, lastError: message });
+            // The server is unreachable or refuses the token: the rest would fail the same way.
+            report.deferred.push({ ...attempted, lastError: message }, ...queued.slice(position + 1));
+            return report;
+          }
+          const refused = { ...attempted, status: 'refused' as const, lastError: message };
+          await keep(refused);
+          report.refused.push(refused);
         }
-        await this.store.delete(capture.id);
-        report.uploaded.push({ capture: attempted, outcome });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        if (isRetryable(error)) {
-          await this.store.put({ ...attempted, lastError: message });
-          // The server is unreachable: the rest would fail the same way; leave them for the next flush.
-          report.deferred.push({ ...attempted, lastError: message }, ...queued.slice(position + 1));
-          break;
-        }
-        const refused = { ...attempted, status: 'refused' as const, lastError: message };
-        await this.store.put(refused);
-        report.refused.push(refused);
       }
     }
-    return report;
   }
 }
 
