@@ -15,7 +15,7 @@ test_that("PRISMA counts fill the PRISMA2020 template and draw", {
   skip_if_not_installed("PRISMA2020")
   filled <- recueil:::sr_prisma_template(counts)
   expect_true(all(c("data", "n") %in% names(filled)))
-  expect_equal(filled$n[filled$data == "database_results"], "6")
+  expect_equal(filled$n[filled$data %in% "database_results"], "6")
   data <- PRISMA2020::PRISMA_data(filled)
   expect_type(data, "list")
   plot <- PRISMA2020::PRISMA_flowdiagram(data, interactive = FALSE, previous = FALSE, other = TRUE)

@@ -32,7 +32,7 @@ snapshot <- if (nzchar(params$snapshot)) params$snapshot else NULL
 meta <- rc_sr_reviews(con)
 meta <- meta[meta$id == review, ]
 counts <- rc_sr_prisma(con, review, snapshot = snapshot, template = FALSE)
-n <- function(key) counts$n[counts$data == key]
+n <- function(key) counts$n[counts$data %in% key]
 ```
 
 # `r meta$title`
