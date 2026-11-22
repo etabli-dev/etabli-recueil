@@ -149,6 +149,9 @@ importers:
       '@fastify/sensible':
         specifier: ^6.0.7
         version: 6.0.7
+      '@recueil/analytics':
+        specifier: workspace:*
+        version: link:../../packages/analytics
       '@recueil/core':
         specifier: workspace:*
         version: link:../../packages/core
