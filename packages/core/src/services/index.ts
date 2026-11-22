@@ -19,3 +19,4 @@ export * from './annotations.js';
 export * from './annotation-note.js';
 export * from './saved-search.js';
 export * from './graph.js';
+export * from './curated.js';

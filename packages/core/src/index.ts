@@ -44,6 +44,7 @@ import { ProvenanceService } from './services/provenance.js';
 import { SearchService } from './services/search.js';
 import { TagService } from './services/tags.js';
 import { AnnotationService } from './services/annotations.js';
+import { CuratedNetworkService } from './services/curated.js';
 import { GraphService } from './services/graph.js';
 import { ItemMergeService } from './services/merge.js';
 import { TrashService } from './services/trash.js';
@@ -97,6 +98,8 @@ export interface Recueil {
   annotations: AnnotationService;
   /** The bibliometric graph (CONCEPT §5.8). */
   graph: GraphService;
+  /** Curated networks: versioned publication figures (CONCEPT §5.9). */
+  curated: CuratedNetworkService;
   /** The single local account every owned record belongs to in v1. */
   user: UserRow;
   /** An actor for that account, for callers that have no request context of their own. */
@@ -139,6 +142,7 @@ export const createRecueil = (options: CreateRecueilOptions): Recueil => {
   const creators = new CreatorService(db, audit, indexer);
   const annotations = new AnnotationService(db, audit, user.id);
   const graph = new GraphService(db, library);
+  const curated = new CuratedNetworkService(db, creators, user.id);
   const merges = new ItemMergeService(db, audit, { library, tags, collections, creators });
   const trash = new TrashService(db, audit, {
     library,
@@ -169,6 +173,7 @@ export const createRecueil = (options: CreateRecueilOptions): Recueil => {
     merges,
     annotations,
     graph,
+    curated,
     user,
     actor: userActor(user.id),
     close: () => {

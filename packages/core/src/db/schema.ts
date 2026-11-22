@@ -2036,10 +2036,69 @@ export const edgeEvidence = sqliteTable(
   ],
 );
 
+/* ============================================================================================== */
+/* 10. Curated networks (`spec/data-model.md` §7; Phase 6)                                          */
+/* ============================================================================================== */
+
+/**
+ * §7.1. The head (`current_version_id`) carries no SQL foreign key: the two tables reference each
+ * other, and SQLite cannot create a mutual reference in one migration. The service sets it in the
+ * same transaction as the version it points at.
+ */
+export const curatedNetworks = sqliteTable(
+  'curated_networks',
+  {
+    id: text('id').primaryKey(),
+    publicId: text('public_id').notNull(),
+    name: text('name').notNull(),
+    description: text('description'),
+    ownerUserId: text('owner_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    /** FK → `reviews(id)` arrives with Phase 7's table. */
+    reviewId: text('review_id'),
+    currentVersionId: text('current_version_id'),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+    trashedAt: text('trashed_at'),
+  },
+  (table) => [uniqueIndex('ux_curated_networks_public_id').on(table.publicId), index('ix_curated_networks_owner').on(table.ownerUserId)],
+);
+
+/** §7.2. A frozen version is immutable (CN1) and reads its snapshot (CN3). */
+export const curatedNetworkVersions = sqliteTable(
+  'curated_network_versions',
+  {
+    id: text('id').primaryKey(),
+    networkId: text('network_id')
+      .notNull()
+      .references(() => curatedNetworks.id, { onDelete: 'cascade' }),
+    version: integer('version').notNull(),
+    parentVersionId: text('parent_version_id').references((): AnySQLiteColumn => curatedNetworkVersions.id, { onDelete: 'set null' }),
+    document: text('document').notNull(),
+    isFrozen: integer('is_frozen', { mode: 'boolean' }).notNull().default(false),
+    frozenAt: text('frozen_at'),
+    frozenSnapshot: text('frozen_snapshot'),
+    message: text('message'),
+    createdByUserId: text('created_by_user_id').references(() => users.id, { onDelete: 'restrict' }),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('ux_curated_network_versions_number').on(table.networkId, table.version),
+    check('ck_curated_network_versions_frozen', sql`("is_frozen" = 1) = ("frozen_snapshot" is not null)`),
+    check('ck_curated_network_versions_version', sql`"version" >= 1`),
+    boolean01('ck_curated_network_versions_frozen_bool', 'is_frozen'),
+    jsonValid('ck_curated_network_versions_document_json', 'document'),
+    jsonValidOrNull('ck_curated_network_versions_snapshot_json', 'frozen_snapshot'),
+  ],
+);
+
 /* -------------------------------------------------------------------------------------------- */
 /* Row types                                                                                       */
 /* -------------------------------------------------------------------------------------------- */
 
+export type CuratedNetworkRow = typeof curatedNetworks.$inferSelect;
+export type CuratedNetworkVersionRow = typeof curatedNetworkVersions.$inferSelect;
 export type TermRow = typeof terms.$inferSelect;
 export type ItemTermRow = typeof itemTerms.$inferSelect;
 export type ShadowWorkRow = typeof shadowWorks.$inferSelect;

@@ -28,7 +28,7 @@ export const PHASE_TITLES: Readonly<Record<number, string>> = {
 };
 
 /** The phase this build belongs to. Not every command in it is finished; see `implemented`. */
-export const CURRENT_PHASE = 5;
+export const CURRENT_PHASE = 6;
 
 export interface CommandSpec {
   /** The subcommand name, as typed. */
@@ -164,6 +164,13 @@ export const COMMANDS: readonly CommandSpec[] = [
     phase: 5,
     implemented: true,
     promise: 'Build edges, run a deep dive with a budget, and export a network for VOSviewer or Gephi.',
+  },
+  {
+    name: 'network',
+    summary: 'Curated networks: figures for a publication',
+    phase: 6,
+    implemented: true,
+    promise: 'Start a figure from the citation graph, freeze a version, and export it as SVG, TikZ, GraphML or GEXF.',
   },
   {
     name: 'sr',

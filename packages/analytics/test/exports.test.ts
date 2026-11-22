@@ -69,3 +69,33 @@ describe('exports', () => {
     expect(toCsv([], ['a'])).toBe('a\r\n');
   });
 });
+
+describe('curated network exports', () => {
+  it('writes a draft SVG, a TikZ picture and GraphML with positions', async () => {
+    const { curatedToNetwork, curatedToSvg, curatedToTikz } = await import('../src/index.js');
+    const { emptyDocument } = await import('@recueil/core');
+    const a = seed();
+    const created = recueil.curated.create(
+      {
+        name: 'Figure 1 & co',
+        document: {
+          ...emptyDocument(),
+          nodes: [{ id: 'n1', kind: 'item', itemId: a }, { id: 'n2', kind: 'free', label: 'Babbage_1999' }],
+          edges: [{ id: 'e1', source: 'n1', target: 'n2', kind: 'inherited', edgeType: 'cites' }],
+          layout: { algorithm: 'manual', positions: { n1: { x: 0, y: 0 }, n2: { x: 200, y: 100 } } },
+        },
+      },
+      recueil.actor,
+    );
+    const svg = curatedToSvg(created);
+    expect(svg).toContain('<title>Figure 1 &amp; co — version 1</title>');
+    expect(svg).toContain('Lovelace 2020');
+    expect(svg).toContain('Draft rendering');
+    const tikz = curatedToTikz(created);
+    expect(tikz).toContain('\\begin{tikzpicture}');
+    expect(tikz).toContain('Babbage\\_1999');
+    expect(tikz).toContain('\\draw[gray,->] (n1) -- (n2);');
+    const graphml = toGraphml(curatedToNetwork(created));
+    expect(graphml).toContain('<data key="x">200</data>');
+  });
+});

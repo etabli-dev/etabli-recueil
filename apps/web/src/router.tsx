@@ -12,6 +12,7 @@
  */
 import { createRootRoute, createRoute, createRouter } from '@tanstack/react-router';
 
+import { FiguresRoute } from './routes/figures.js';
 import { GraphRoute } from './routes/graph.js';
 import { LibraryRoute, validateLibrarySearch } from './routes/library.js';
 import type { LibrarySearch } from './routes/library.js';
@@ -68,6 +69,12 @@ const graphRoute = createRoute({
   component: GraphRoute,
 });
 
+const figuresRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/figures',
+  component: FiguresRoute,
+});
+
 const shareRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/share',
@@ -82,6 +89,7 @@ export const routeTree = rootRoute.addChildren([
   sourcesRoute,
   rulesRoute,
   graphRoute,
+  figuresRoute,
   shareRoute,
 ]);
 

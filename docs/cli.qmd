@@ -40,6 +40,7 @@ Machine-readable output on every command via `--json`, so `jq` is the intended c
 | `recueil dedup` | Record deduplication, dry run by default; `--apply`, `undo` | 3 | ✓ |
 | `recueil plugin` | List, enable, disable and configure plugins | 3 | ✓ — install from npm or a URL arrives with the registry (Phase 9) |
 | `recueil graph` | collect, derive, export (wos, vosviewer, gexf, graphml, csv), coverage, top, promote | 5 | ✓ — the deep dive is not in yet |
+| `recueil network` | Curated networks: create (from the graph), list, freeze, export (svg, tikz, graphml, gexf) | 6 | ✓ |
 | `recueil sr` | Systematic review: search runs, screening, extraction, PRISMA counts | 7 | — |
 
 Sources themselves are configured over the API rather than from the shell:

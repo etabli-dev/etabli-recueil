@@ -142,3 +142,25 @@ rc_export_network <- function(con, path, network = c("citations", "local", "co-c
   writeLines(rc_text(con, "/graph/network", list(network = match.arg(network), format = match.arg(format))), path, useBytes = TRUE)
   invisible(path)
 }
+
+#' A curated network as a tidygraph, with its layout
+#'
+#' The publication route of ADR-0013: arrange the figure in Recueil, then render it with ggraph
+#' using the saved positions, e.g. `ggraph::ggraph(g, layout = "manual", x = x, y = -y)`.
+#'
+#' @param con A connection from [rc_connect()].
+#' @param id The curated network id.
+#' @param version A version number; the head by default. Frozen versions are reproducible.
+#' @export
+rc_curated <- function(con, id, version = NULL) {
+  query <- list(format = "json")
+  if (!is.null(version)) query$version <- version
+  net <- jsonlite::fromJSON(rc_text(con, paste0("/curated-networks/", id, "/export"), query), simplifyVector = TRUE)
+  positions <- net$positions
+  nodes <- as.data.frame(net$nodes, stringsAsFactors = FALSE)
+  nodes$x <- vapply(nodes$id, function(n) positions[[n]]$x, numeric(1))
+  nodes$y <- vapply(nodes$id, function(n) positions[[n]]$y, numeric(1))
+  net$nodes <- nodes
+  net$positions <- NULL
+  network_from_json(net)
+}

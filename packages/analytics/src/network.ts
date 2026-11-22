@@ -103,6 +103,8 @@ export const toGraphml = (network: ExportNetwork): string => {
     '  <key id="doi" for="node" attr.name="doi" attr.type="string"/>',
     '  <key id="cited_by" for="node" attr.name="cited_by" attr.type="double"/>',
     '  <key id="in_library" for="node" attr.name="in_library" attr.type="boolean"/>',
+    '  <key id="x" for="node" attr.name="x" attr.type="double"/>',
+    '  <key id="y" for="node" attr.name="y" attr.type="double"/>',
     '  <key id="weight" for="edge" attr.name="weight" attr.type="double"/>',
     '  <key id="edge_type" for="edge" attr.name="edge_type" attr.type="string"/>',
     '  <key id="provenance" for="edge" attr.name="provenance" attr.type="string"/>',
@@ -116,6 +118,8 @@ export const toGraphml = (network: ExportNetwork): string => {
     if (node.venue !== null) lines.push(`      <data key="venue">${xml(node.venue)}</data>`);
     if (node.doi !== null) lines.push(`      <data key="doi">${xml(node.doi)}</data>`);
     if (node.citedBy !== null) lines.push(`      <data key="cited_by">${node.citedBy}</data>`);
+    const position = (network as ExportNetwork & { positions?: Record<string, { x: number; y: number }> }).positions?.[node.id];
+    if (position !== undefined) lines.push(`      <data key="x">${position.x}</data>`, `      <data key="y">${position.y}</data>`);
     lines.push('    </node>');
   }
   network.edges.forEach((edge, index) => {

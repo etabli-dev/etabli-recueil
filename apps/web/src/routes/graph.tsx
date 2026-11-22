@@ -67,6 +67,25 @@ export const GraphRoute = (): JSX.Element => {
             </option>
           ))}
         </select>
+        <button
+          type="button"
+          className="button button--small"
+          disabled={network === null || network.nodes.length === 0}
+          onClick={() => {
+            if (network === null) return;
+            const nameForFigure = globalThis.prompt?.('Name of the figure', `${NETWORKS.find((n) => n.value === name)?.label ?? name}`);
+            if (!nameForFigure) return;
+            // The figure starts where the map is now: these positions become its layout. The
+            // server builds the nodes from the same graph, so the node ids match.
+            const positionsNow = Object.fromEntries([...positions].map(([id, point]) => [id, { x: Math.round(point.x), y: Math.round(point.y) }]));
+            void client.createCuratedNetwork({ name: nameForFigure, fromGraph: name }).then(
+              (created) => client.saveCuratedNetwork(created.id, { ...created.document, layout: { algorithm: 'force', positions: positionsNow } }, created.version, 'positions from the citation map'),
+              setError,
+            );
+          }}
+        >
+          Save as figure
+        </button>
         <a className="button button--small" href={client.url('/graph/network', { network: name, format: 'vosviewer' })} download={`${name}.vosviewer.json`}>
           VOSviewer
         </a>

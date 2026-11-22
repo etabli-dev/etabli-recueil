@@ -181,6 +181,23 @@ export interface GraphNetwork {
   description: string;
 }
 
+/** `GET /curated-networks/{id}`. */
+export interface CuratedNetworkWire {
+  id: string;
+  name: string;
+  version: number;
+  isFrozen: boolean;
+  document: {
+    schema: string;
+    nodes: { id: string; kind: 'item' | 'free' | 'group'; itemId?: string; label?: string }[];
+    edges: { id: string; source: string; target: string; kind: string; edgeType?: string; weight?: number }[];
+    layout: { algorithm: string; positions: Record<string, { x: number; y: number; pinned?: boolean }> };
+    style: Record<string, unknown>;
+    annotations: unknown[];
+  };
+  items: Record<string, { title: string | null; year: number | null; firstAuthor: string | null; state: string }>;
+}
+
 /** `GET /graph/coverage`. */
 export interface GraphCoverage {
   items: number;
@@ -365,6 +382,36 @@ export class RecueilClient {
 
   getGraphCoverage(signal?: AbortSignal): Promise<GraphCoverage> {
     return this.api<GraphCoverage>('/graph/coverage', { signal });
+  }
+
+  /* Curated networks (CONCEPT §5.9) ------------------------------------------------------ */
+
+  listCuratedNetworks(signal?: AbortSignal): Promise<{ data: { id: string; name: string; updatedAt: string }[] }> {
+    return this.api('/curated-networks', { signal });
+  }
+
+  getCuratedNetwork(id: string, signal?: AbortSignal): Promise<CuratedNetworkWire> {
+    return this.api<CuratedNetworkWire>(`/curated-networks/${encodeURIComponent(id)}`, { signal });
+  }
+
+  createCuratedNetwork(body: { name: string; document?: unknown; fromGraph?: string }): Promise<CuratedNetworkWire> {
+    return this.api<CuratedNetworkWire>('/curated-networks', { method: 'POST', body });
+  }
+
+  saveCuratedNetwork(id: string, document: unknown, expectedVersion: number, message?: string): Promise<CuratedNetworkWire> {
+    return this.api<CuratedNetworkWire>(`/curated-networks/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: { document, ...(message === undefined ? {} : { message }) },
+      expectedVersion,
+    });
+  }
+
+  freezeCuratedNetwork(id: string): Promise<CuratedNetworkWire> {
+    return this.api<CuratedNetworkWire>(`/curated-networks/${encodeURIComponent(id)}/freeze`, { method: 'POST', body: {} });
+  }
+
+  curatedExportUrl(id: string, format: 'svg' | 'tikz' | 'graphml' | 'gexf', version?: number): string {
+    return this.url(`/curated-networks/${encodeURIComponent(id)}/export`, { format, ...(version === undefined ? {} : { version: String(version) }) });
   }
 
   /* Annotations (ADR-0009) ---------------------------------------------------------------- */

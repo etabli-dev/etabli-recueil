@@ -1504,3 +1504,7 @@ kbd {
   stroke: rgb(220 120 0);
   stroke-width: 3;
 }
+.graph__label {
+  font-size: 11px;
+  pointer-events: none;
+}
