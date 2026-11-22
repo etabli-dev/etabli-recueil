@@ -1,0 +1,24 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "recueil"
+version = "0.1.0"
+description = "Client for the Recueil reference manager: the library, the analytics tables and the citation graph as data."
+readme = "README.md"
+license = "AGPL-3.0-or-later"
+requires-python = ">=3.10"
+authors = [{ name = "R. Heller" }]
+dependencies = ["httpx>=0.27"]
+
+[project.optional-dependencies]
+pandas = ["pandas>=2.0"]
+networkx = ["networkx>=3.0"]
+test = ["pytest>=8", "pandas>=2.0", "networkx>=3.0"]
+
+[project.urls]
+Homepage = "https://github.com/etabli-dev/etabli-recueil"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/recueil"]

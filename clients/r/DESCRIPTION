@@ -1,0 +1,23 @@
+Package: recueil
+Title: Client for the 'Recueil' Reference Manager
+Version: 0.1.0
+Authors@R: person("R.", "Heller", role = c("aut", "cre"), email = "58561665+r-heller@users.noreply.github.com")
+Description: Reads a 'Recueil' library over its REST API as data frames: items, the
+    analytics tables, the citation graph as 'tidygraph' or 'igraph' objects, and the
+    library as a 'bibliometrix' data frame through 'convert2df', so 'biblioshiny' and
+    the 'bibliometrix' analyses run on it unmodified. Exports networks for 'VOSviewer'
+    and 'Gephi'.
+License: AGPL (>= 3)
+Encoding: UTF-8
+Imports:
+    httr2 (>= 1.0.0),
+    jsonlite,
+    utils
+Suggests:
+    bibliometrix,
+    igraph,
+    tidygraph,
+    testthat (>= 3.0.0)
+Config/testthat/edition: 3
+URL: https://github.com/etabli-dev/etabli-recueil
+BugReports: https://github.com/etabli-dev/etabli-recueil/issues

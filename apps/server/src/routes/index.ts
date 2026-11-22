@@ -10,6 +10,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import type { ZodOpenApiPathsObject } from 'zod-openapi';
 
+import { analyticsPaths, analyticsRoutes } from './analytics.js';
 import { annotationPaths, annotationRoutes } from './annotations.js';
 import { attachmentPaths, attachmentRoutes } from './attachments.js';
 import { collectionPaths, collectionRoutes } from './collections.js';
@@ -41,6 +42,7 @@ const GROUPS: readonly { plugin: FastifyPluginAsync; paths: ZodOpenApiPathsObjec
   { plugin: tagRoutes, paths: tagPaths },
   { plugin: noteRoutes, paths: notePaths },
   { plugin: annotationRoutes, paths: annotationPaths },
+  { plugin: analyticsRoutes, paths: analyticsPaths },
   { plugin: customFieldRoutes, paths: customFieldPaths },
   { plugin: creatorRoutes, paths: creatorPaths },
   { plugin: searchRoutes, paths: searchPaths },

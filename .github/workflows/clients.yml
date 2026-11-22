@@ -1,0 +1,51 @@
+name: Clients
+# The R and Python clients (clients/r, clients/python): their own tests, on every change to them.
+# The R job installs bibliometrix and checks that the Web of Science export converts unmodified,
+# which is the Phase 5 exit criterion (CONCEPT §7).
+on:
+  push:
+    branches: [main]
+    paths: ['clients/**', '.github/workflows/clients.yml']
+  pull_request:
+    branches: [main]
+    paths: ['clients/**', '.github/workflows/clients.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: clients-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  r:
+    name: R client (bibliometrix)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: r-lib/actions/setup-r@f9a764fea8d5c63df6ef9a5c7795bf7deb5d7e05 # v2
+        with:
+          use-public-rspm: true
+      - uses: r-lib/actions/setup-r-dependencies@f9a764fea8d5c63df6ef9a5c7795bf7deb5d7e05 # v2
+        with:
+          working-directory: clients/r
+          extra-packages: |
+            any::bibliometrix
+            any::igraph
+            any::tidygraph
+            any::rcmdcheck
+      - uses: r-lib/actions/check-r-package@f9a764fea8d5c63df6ef9a5c7795bf7deb5d7e05 # v2
+        with:
+          working-directory: clients/r
+          args: 'c("--no-manual", "--as-cran")'
+          error-on: '"error"'
+  python:
+    name: Python client
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - run: pip install -e "clients/python[test]"
+      - run: pytest clients/python/tests -q

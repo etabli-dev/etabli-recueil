@@ -24,3 +24,10 @@ AGENTS.md
 .cursor/
 .mcp.json
 .pnpm-store/
+
+# R and Python client build output
+clients/r/*.Rcheck/
+clients/r/*.tar.gz
+clients/python/**/__pycache__/
+clients/python/*.egg-info/
+clients/python/dist/
