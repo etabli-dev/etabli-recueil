@@ -25,6 +25,7 @@ describe('the mobile host', () => {
     const host = createHost(memorySettings(), {}, () => undefined);
     installHost(scope as never, host);
     expect(scope.recueilHost).toBe(host);
-    expect(() => installHost(scope as never, host)).toThrow();
+    // A second, different host cannot replace the first.
+    expect(() => installHost(scope as never, createHost(memorySettings(), {}, () => undefined))).toThrow();
   });
 });
