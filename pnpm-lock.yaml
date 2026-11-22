@@ -410,6 +410,15 @@ importers:
         specifier: ^4.1.12
         version: 4.1.12(@types/node@22.20.5)(jsdom@30.0.1)(vite@8.2.4(@types/node@22.20.5)(esbuild@0.28.2)(tsx@4.23.15)(yaml@2.9.1))
 
+  packages/create-recueil-plugin:
+    devDependencies:
+      '@recueil/plugin-host':
+        specifier: workspace:*
+        version: link:../plugin-host
+      vitest:
+        specifier: ^4.1.12
+        version: 4.1.12(@types/node@22.20.5)(jsdom@30.0.1)(vite@8.2.4(@types/node@22.20.5)(esbuild@0.28.2)(tsx@4.23.15)(yaml@2.9.1))
+
   packages/formats:
     dependencies:
       '@recueil/schemas':

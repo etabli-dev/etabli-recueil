@@ -1,0 +1,18 @@
+{
+  "name": "create-recueil-plugin",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Scaffold a Recueil plugin: a manifest the host accepts, one working check, its test and the build (npm create recueil-plugin).",
+  "license": "MIT",
+  "type": "module",
+  "bin": { "create-recueil-plugin": "./bin/create.mjs" },
+  "files": ["bin", "src"],
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@recueil/plugin-host": "workspace:*",
+    "vitest": "^4.1.12"
+  }
+}

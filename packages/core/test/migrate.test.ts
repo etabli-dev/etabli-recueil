@@ -11,7 +11,7 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { migrate, openDatabase } from '../src/index.js';
+import { NewerLibraryError, migrate, openDatabase } from '../src/index.js';
 
 const PHASE_ONE_TABLES = [
   'users',
@@ -203,6 +203,15 @@ describe('migrate', () => {
       /append-only/iu,
     );
     expect(() => connection.prepare('delete from audit_log').run()).toThrow(/append-only/iu);
+    connection.close();
+  });
+
+  it('refuses a library a newer Recueil has migrated, instead of starting on a schema it does not know', () => {
+    const { db, connection } = openDatabase({ databaseUrl: temporaryDatabase() });
+    migrate(db);
+    connection.prepare("insert into __drizzle_migrations (hash, created_at) values ('from-the-future', ?)").run(Date.UTC(2099, 0, 1));
+    expect(() => migrate(db)).toThrow(NewerLibraryError);
+    expect(() => migrate(db)).toThrow(/newer Recueil/u);
     connection.close();
   });
 });

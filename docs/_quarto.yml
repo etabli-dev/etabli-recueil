@@ -49,6 +49,8 @@ website:
             href: cli.qmd
           - text: "Plugins"
             href: plugins.qmd
+          - text: "Upgrades"
+            href: upgrades.qmd
       - text: "Project"
         menu:
           - text: "Roadmap"
@@ -85,6 +87,7 @@ website:
           - api.qmd
           - cli.qmd
           - plugins.qmd
+          - upgrades.qmd
       - section: "Project"
         contents:
           - roadmap.qmd

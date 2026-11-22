@@ -183,6 +183,15 @@ What has been exercised end to end here:
   in any store**: the thirty-second capture exit and the Chrome Web Store listing need the owner's
   devices and developer accounts. Not yet: an iOS share extension, cached reading offline.
 
+- **Phase 9 — toward 1.0.** `npm create recueil-plugin` (`packages/create-recueil-plugin`) writes
+  a plugin with a manifest the host accepts, one working check and its test; the registry format
+  is specified in [`spec/plugin-registry.md`](spec/plugin-registry.md), with the first-party
+  plugins in [`registry/index.json`](registry/index.json), checked against their manifests in CI;
+  [docs/upgrades.qmd](docs/upgrades.qmd) states the guarantees that start at 1.0, and the server
+  now refuses a library a newer Recueil has migrated. Not done, because each is the owner's to
+  do: publishing the SDK and the scaffolder to npm, the separate registry repository, the Zenodo
+  archive, the store listings, and the 1.0 tag itself.
+
 ### The hardening round
 
 An adversarial review between Phase 2 and Phase 3 returned 8 critical, 8 major and
@@ -232,11 +241,11 @@ Three limits worth knowing before pointing this at real paper:
   that, the importer refuses with a named error rather than half-reading it.
   There is a test for that refusal.
 
-Not done: `recueil token`, background jobs, and everything from Phase 3 onwards
-report the phase they arrive in and exit non-zero. And the Zotero migration has
-been proved against the fixture library, **not** against a real personal library —
-which is what milestone M1 in [`CONCEPT.md`](CONCEPT.md) §7 actually asks for, so
-M1 is not claimed either.
+Not done: `recueil token` and `recueil job` report the phase they belong to and exit non-zero, and
+the background job queue (server routes for sync, checks and dedup, Unpaywall retrieval, the deep
+dive) is still to come. The Zotero migration has been proved against the fixture library, **not**
+against a real personal library — which is what milestone M1 in [`CONCEPT.md`](CONCEPT.md) §7
+actually asks for, so M1 is not claimed either.
 
 See [`CONCEPT.md`](CONCEPT.md) for the full concept, architecture and roadmap.
 
@@ -270,6 +279,25 @@ nothing else yet.
 | `docs/` | Quarto documentation site |
 | `deploy/` | Dockerfile and docker-compose with sidecar profiles (untested) |
 | `fixtures/` | the generated Zotero library, the format fixtures, and the Phase 2 corpora: scans, mail, archives, a Paperless-ngx dump and rule cases |
+
+## Citing Recueil
+
+If Recueil is part of your method, cite the version you used ([`CITATION.cff`](CITATION.cff); a
+Zenodo DOI follows with the first archived release).
+
+```bibtex
+@software{heller_recueil_2026,
+  author  = {Heller, Raban},
+  title   = {Recueil},
+  version = {0.1.0},
+  year    = {2026},
+  url     = {https://github.com/etabli-dev/etabli-recueil},
+  license = {AGPL-3.0-or-later}
+}
+```
+
+APA: Heller, R. (2026). *Recueil* (Version 0.1.0) [Computer software].
+https://github.com/etabli-dev/etabli-recueil
 
 ## Licence
 

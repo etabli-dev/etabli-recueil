@@ -21,7 +21,7 @@ export {
   resolveDatabaseFile,
 } from './db/client.js';
 export type { OpenDatabaseOptions, OpenedDatabase, RecueilDatabase, SqliteConnection } from './db/client.js';
-export { findMigrationsFolder, migrate } from './db/migrate.js';
+export { NewerLibraryError, findMigrationsFolder, migrate } from './db/migrate.js';
 export type { MigrateOptions } from './db/migrate.js';
 
 export * from './storage/index.js';
