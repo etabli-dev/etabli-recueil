@@ -10,6 +10,7 @@
 
 mod connection;
 mod credentials;
+mod desktop_v1;
 mod settings;
 
 use std::collections::HashMap;
@@ -23,7 +24,7 @@ use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindowBuilder};
 
 use connection::{classify_navigation, is_app_origin, normalise_server_url, Navigation, DEFAULT_SERVER_URL};
 
-const MAIN_WINDOW: &str = "main";
+pub(crate) const MAIN_WINDOW: &str = "main";
 const CONNECT_PAGE: &str = "shell/connect.html";
 const MENU_CONNECTION: &str = "connection-settings";
 const MENU_RECONNECT: &str = "reconnect";
@@ -341,7 +342,8 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let menu = Menu::default(app)?;
     let settings = MenuItem::with_id(app, MENU_CONNECTION, "Connection settings…", true, Some("CmdOrCtrl+,"))?;
     let reconnect = MenuItem::with_id(app, MENU_RECONNECT, "Reconnect", true, Some("CmdOrCtrl+Shift+R"))?;
-    let server = Submenu::with_items(app, "Server", true, &[&settings, &reconnect])?;
+    let watch = MenuItem::with_id(app, desktop_v1::MENU_WATCH_FOLDER, "Watch a folder…", true, None::<&str>)?;
+    let server = Submenu::with_items(app, "Server", true, &[&settings, &reconnect, &watch])?;
     // Before Window and Help, which the default menu always ends with.
     let position = menu.items()?.len().saturating_sub(2);
     menu.insert(&server, position)?;
@@ -351,6 +353,11 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // First: a second launch (a `recueil://` link clicked while Recueil runs) hands its
+        // arguments to this instance and exits; the deep-link feature forwards the link.
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| desktop_v1::show(app, None)))
+        .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![shell_state, check_server_url, save_connection, connection])
         .setup(|app| {
             let settings_path = settings::path_in(&app.path().app_config_dir()?);
@@ -383,6 +390,7 @@ pub fn run() {
             app.manage(shell.clone());
             build_main_window(app.handle(), shell)?;
             app.set_menu(build_menu(app.handle())?)?;
+            desktop_v1::install(app.handle())?;
             Ok(())
         })
         .on_menu_event(|app, event| {
@@ -390,6 +398,8 @@ pub fn run() {
                 show_connection_page(app, true);
             } else if event.id() == MENU_RECONNECT {
                 show_connection_page(app, false);
+            } else {
+                desktop_v1::handle_menu(app, event.id().as_ref());
             }
         })
         .run(tauri::generate_context!())

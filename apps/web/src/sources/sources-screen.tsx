@@ -46,11 +46,13 @@ import { SourceForm } from './source-form.js';
 export interface SourcesScreenProps {
   selectedSourceId: string | null;
   onSelect: (id: string | null) => void;
+  /** A folder the desktop shell's "Watch a folder…" picked: the form opens with it filled in. */
+  newFolder?: string | null;
 }
 
-export const SourcesScreen = ({ selectedSourceId, onSelect }: SourcesScreenProps): JSX.Element => {
+export const SourcesScreen = ({ selectedSourceId, onSelect, newFolder = null }: SourcesScreenProps): JSX.Element => {
   const sources = useIngestionSources();
-  const [adding, setAdding] = useState(false);
+  const [adding, setAdding] = useState(newFolder !== null);
   const create = useCreateIngestionSource();
 
   const list = sources.data?.data ?? [];
@@ -116,6 +118,8 @@ export const SourcesScreen = ({ selectedSourceId, onSelect }: SourcesScreenProps
           <>
             {create.isError ? <ErrorState label="The source was not created" error={create.error} /> : null}
             <SourceForm
+              key={newFolder ?? 'new'}
+              {...(newFolder === null ? {} : { initialRoot: newFolder })}
               busy={create.isPending}
               onCancel={() => setAdding(false)}
               onSubmit={(body) =>
