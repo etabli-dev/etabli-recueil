@@ -1,0 +1,87 @@
+# Mobile: build the Capacitor shell in apps/mobile for Android and iOS (ADR-0024).
+#
+# Each leg builds the web client and the shell's pages into apps/mobile/www, copies them and the
+# plugins into the native project with `cap sync`, and builds an unsigned debug package: an APK
+# on Linux, a simulator build on macOS. Nothing is signed or uploaded to a store — that needs the
+# owner's keystore and Apple account (docs/platform-roadmap.md §4.4–4.5, §6), which this workflow
+# deliberately does not ask for.
+
+name: Mobile
+on:
+  push:
+    branches: [main, 'transition/**']
+    paths:
+      - apps/mobile/**
+      - apps/web/**
+      - apps/desktop/shell/probe.ts
+      - packages/rules/**
+      - packages/schemas/**
+      - pnpm-lock.yaml
+      - .github/workflows/mobile.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - apps/mobile/**
+      - apps/web/**
+      - pnpm-lock.yaml
+      - .github/workflows/mobile.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: mobile-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+env:
+  CI: 'true'
+jobs:
+  android:
+    name: Android (debug APK)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+      - run: npm install --global pnpm@9.15.4
+      - run: pnpm install --frozen-lockfile --filter "@recueil/mobile..."
+      - name: Shell unit tests
+        run: pnpm --filter @recueil/mobile test
+      - name: Build the web client and assemble www
+        run: pnpm --filter "@recueil/mobile..." run build
+      - name: Copy into the Android project
+        run: pnpm --filter @recueil/mobile exec cap sync android
+      # The runner image ships JDK 21 and the Android SDK; Capacitor 8 needs JDK 21.
+      - name: Gradle debug build
+        working-directory: apps/mobile/android
+        run: |
+          export JAVA_HOME="$JAVA_HOME_21_X64"
+          ./gradlew --no-daemon assembleDebug
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: recueil-android-debug
+          path: apps/mobile/android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+  ios:
+    name: iOS and iPadOS (simulator build)
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+      - run: npm install --global pnpm@9.15.4
+      - run: pnpm install --frozen-lockfile --filter "@recueil/mobile..."
+      - name: Build the web client and assemble www
+        run: pnpm --filter "@recueil/mobile..." run build
+      # `cap sync ios` runs `pod install` for the plugins' CocoaPods on macOS.
+      - name: Copy into the iOS project
+        run: pnpm --filter @recueil/mobile exec cap sync ios
+      - name: Simulator build (universal iPhone and iPad target)
+        working-directory: apps/mobile/ios/App
+        run: |
+          xcodebuild -workspace App.xcworkspace -scheme App -configuration Debug \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO build | tail -40
+          test "${PIPESTATUS[0]}" -eq 0

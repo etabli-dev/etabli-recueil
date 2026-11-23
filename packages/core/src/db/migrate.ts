@@ -8,10 +8,11 @@
  * writes at all. That is what makes "run migrations on start" a sane default rather than a hazard —
  * the desktop shell starts the same server binary as the container, several times a day.
  */
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { sql } from 'drizzle-orm';
 import { migrate as drizzleMigrate } from 'drizzle-orm/better-sqlite3/migrator';
 
 import type { RecueilDatabase } from './client.js';
@@ -45,9 +46,34 @@ export interface MigrateOptions {
  * Bring a database up to the current schema. Idempotent: applying an already-current database is a
  * no-op, so this runs unconditionally on boot.
  */
+/**
+ * Refuse a library a newer Recueil has migrated: this build does not know its schema, and the
+ * migrator would otherwise start on it silently (docs/upgrades.qmd). A downgrade is a restore.
+ */
+export class NewerLibraryError extends Error {
+  constructor(readonly libraryMigratedAt: number, readonly newestKnown: number) {
+    super(
+      `This library was migrated by a newer Recueil (schema of ${new Date(libraryMigratedAt).toISOString()}; ` +
+        `this build knows schemas up to ${new Date(newestKnown).toISOString()}). Upgrade Recueil, or restore a backup taken with this version.`,
+    );
+    this.name = 'NewerLibraryError';
+  }
+}
+
+const refuseNewerLibrary = (db: RecueilDatabase, migrationsFolder: string): void => {
+  const table = db.get<{ name: string } | undefined>(sql`select name from sqlite_master where type = 'table' and name = '__drizzle_migrations'`);
+  if (table === undefined) return;
+  const applied = db.get<{ newest: number | null }>(sql`select max(created_at) as newest from __drizzle_migrations`);
+  const journal = JSON.parse(readFileSync(join(migrationsFolder, 'meta', '_journal.json'), 'utf8')) as { entries: { when: number }[] };
+  const newestKnown = Math.max(...journal.entries.map((entry) => entry.when));
+  if (applied?.newest != null && Number(applied.newest) > newestKnown) throw new NewerLibraryError(Number(applied.newest), newestKnown);
+};
+
 export const migrate = (db: RecueilDatabase, options: MigrateOptions = {}): void => {
+  const migrationsFolder = options.migrationsFolder ?? findMigrationsFolder();
+  refuseNewerLibrary(db, migrationsFolder);
   drizzleMigrate(db, {
-    migrationsFolder: options.migrationsFolder ?? findMigrationsFolder(),
+    migrationsFolder,
     migrationsTable: '__drizzle_migrations',
   });
 };

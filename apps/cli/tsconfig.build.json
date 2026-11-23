@@ -14,6 +14,8 @@
   "include": ["src/**/*.ts"],
   "exclude": ["test/**/*.ts", "vitest.config.ts", "**/*.test.ts"],
   "references": [
+    { "path": "../../packages/analytics/tsconfig.build.json" },
+    { "path": "../../packages/sr/tsconfig.build.json" },
     { "path": "../../packages/core/tsconfig.build.json" },
     { "path": "../../packages/formats/tsconfig.build.json" },
     { "path": "../../packages/import-paperless/tsconfig.build.json" },
@@ -21,7 +23,9 @@
     { "path": "../../packages/ingest/tsconfig.build.json" },
     { "path": "../../packages/ingest-sources/tsconfig.build.json" },
     { "path": "../../packages/rules/tsconfig.build.json" },
+    { "path": "../../packages/plugin-host/tsconfig.build.json" },
     { "path": "../../packages/schemas/tsconfig.build.json" },
+    { "path": "../../packages/sync-zotero/tsconfig.build.json" },
     { "path": "../server/tsconfig.build.json" }
   ]
 }

@@ -29,8 +29,8 @@ export type {
 export { creatorFamily, creatorsWithRole, isOrganisation, recordFromItem, recordTitle, trimmed } from './record.js';
 
 /* Loss reporting ------------------------------------------------------------------------------ */
-export { FORMAT_NAMES, LossReport, renderLossValue } from './loss.js';
-export type { ExportResult, FormatName, ImportResult, LossEntry } from './loss.js';
+export { FORMAT_NAMES, IMPORT_ONLY_FORMATS, LossReport, renderLossValue } from './loss.js';
+export type { ExportResult, FormatName, ImportOnlyFormat, ImportResult, LossEntry } from './loss.js';
 export { FORMAT_LIMITATIONS, limitationFor } from './limitations.js';
 export type { Limitation } from './limitations.js';
 
@@ -123,6 +123,8 @@ export {
 export { exportBibtex, exportBibtexDialect, exportBiblatex } from './bibtex/export.js';
 export type { BibtexDialect, BibtexExportOptions } from './bibtex/export.js';
 export { importBibtex, importBiblatex } from './bibtex/import.js';
+export { importMedline, parseMedlineFile } from './medline/import.js';
+export type { RawMedlineRecord } from './medline/import.js';
 export type { BibtexImportOptions } from './bibtex/import.js';
 export { parseBibtexFile, resolveCrossReferences } from './bibtex/parse.js';
 export type { RawBibEntry, RawBibFile } from './bibtex/parse.js';

@@ -11,7 +11,7 @@ and enriches references against the open scholarly graph, and exposes the whole
 library to R, Python and LLMs as data. Systematic reviews and bibliometric
 mapping are native workflows, not exports.
 
-**Status:** Phases 1 and 2 in the tree, unreleased. It builds and runs from a
+**Status:** Phases 1–5 in the tree, unreleased. It builds and runs from a
 source checkout; there is no tagged release, no image on `ghcr.io` and no
 published installable binary.
 
@@ -103,6 +103,95 @@ What has been exercised end to end here:
   OCR, GROBID, Paperless-ngx, WebDAV, S3 and IMAP are each behind an interface
   with an in-process fake.
 
+- **`recueil sync zotero`** syncs the library with the zotero.org libraries an API key
+  reaches, both ways ([ADR-0025](spec/adr/0025-two-way-zotero-sync.md)): a per-field three-way
+  merge against the last agreed state, conflicts held on both sides until decided with
+  `recueil sync zotero resolve`, fields locked in Recueil never overwritten by a pull, every write
+  conditional on the version last seen, files checked against Zotero's MD5, and a dry run that
+  writes nothing to either side. Tested against an in-process fake of the Web API, **not yet
+  against a real zotero.org account**.
+
+- **Phase 3 — enrichment, checks, deduplication, plugins.** An in-process plugin host
+  (`packages/plugin-host`, ADR-0012) loads plugins written against `@recueil/plugin-sdk`, whose
+  types are generated from `spec/hooks.md`. Three first-party plugins ship: eleven resolvers
+  (`recueil enrich`), the thirteen checks including bibliography audit (`recueil check --audit`),
+  and identifier and fuzzy dedup rules (`recueil dedup`, reversible merges, `dedup undo`). Plugins
+  are installed disabled; `recueil plugin enable --builtin` turns them on. Parity tests carry the
+  behaviour of the three Zotero plugins this phase retires ([`spec/parity-zotero-plugins.md`](spec/parity-zotero-plugins.md)).
+  The upstream sources are exercised against recorded responses, **not yet against the live
+  services**, and no real manuscript audit has been delivered, so **M3 is not claimed**.
+
+- **Phase 4 — reading.** Annotations are records (`/api/v1/annotations`, ADR-0009): the reader
+  highlights a selection with an optional comment, lists every annotation in reading order, turns
+  one into a note that quotes it and ends in a Pandoc citation (`[@key, p. 12]`), and downloads the
+  PDF with all of them embedded (`/documents/{id}/annotated.pdf`; the stored file is untouched).
+  Saved searches take filters as well as text — types, tags, collection, years, files, retraction
+  status, failing checks — and smart collections list their items. `recueil check --audit
+  manuscript.pdf` reads the reference list through a GROBID sidecar (`RECUEIL_GROBID_URL`), whose
+  adapter has not been run against a live GROBID here. Not yet: the desktop shell's tray, URI
+  scheme and folder picker (they need new Rust crates and move to the platform step), and the
+  Meilisearch backend (it needs the job runner to keep its index in step).
+
+- **Phase 5 — graph and bibliometrics.** `recueil graph collect` reads reference lists from
+  OpenAlex and Crossref into a citation graph; cited works outside the library are shadow works,
+  matched to library items by DOI and PMID, so the local citation network falls out of it.
+  `recueil graph derive` builds co-citation and coupling (association strength or Salton).
+  Exports: Web of Science plain text that bibliometrix's `convert2df` reads (checked in CI with
+  bibliometrix itself), VOSviewer JSON, GEXF, GraphML and the analytics tables as CSV, through
+  the CLI and `/api/v1/analytics` and `/api/v1/graph`. `clients/r` (`rc_bibliometrix()`,
+  `rc_network()` as tidygraph) and `clients/python` (pandas, networkx) read them; the web app
+  draws the citation map with coverage beside it. Not yet: the MeSH vocabulary layer and co-word
+  maps, Parquet encoding of the tables (CSV for now), and the deep dive.
+
+- **Phase 6 — curated networks.** A publication figure is a versioned document
+  (`/api/v1/curated-networks`, the web app's *Figures* screen): start it from a graph network, drag
+  nodes into place, save — every save is a new version — and freeze the version a paper uses, which
+  keeps the metadata it showed whatever later happens to the library. A node whose item has gone is
+  drawn dashed, never dropped. Exports: a draft SVG, TikZ for LaTeX, and GraphML/GEXF with the
+  positions; `rc_curated()` reads it into tidygraph for ggraph, which is the route to camera-ready
+  artwork (ADR-0013).
+
+- **Phase 7 — systematic reviews** ([`spec/systematic-review.md`](spec/systematic-review.md)).
+  `recueil sr` and `/api/v1/reviews`: a review with its protocol and ordered exclusion reasons;
+  search runs that keep the verbatim query, the number the database reported and the export file
+  itself; import of RIS, PubMed MEDLINE/NBIB, BibTeX and CSL-JSON, matching items by DOI and PMID so
+  a record found by two databases is one record with two sources; a fuzzy within-review dedup pass
+  whose duplicates are kept and reversible; title/abstract and full-text screening (a keyboard
+  loop in the terminal, a keyboard-driven *Screening* screen in the web app), append-only with
+  undo, a mandatory reason at full text, and decisions made through an MCP token flagged as
+  tool-assisted; the PRISMA 2020 counts computed live from the records, frozen snapshots, a draft
+  SVG and the counts for the PRISMA2020 R package; extraction forms over review-scoped custom fields
+  with RCT, observational and diagnostic templates, repeatable arms and outcomes, locking and
+  versions; RoB 2, ROBINS-I, QUADAS-2 and Newcastle-Ottawa as data, with the table robvis reads.
+  The R client's `rc_sr_prisma()`, `rc_sr_rob()` and `rc_sr_extraction()` are checked in CI
+  against PRISMA2020, robvis and metafor themselves, and `clients/r/inst/templates/sr-report.qmd`
+  drafts the methods and results. Run on fixtures only, **not yet on a real review, so M5 is not
+  claimed**. Not yet: a second screener, automated prioritisation, Unpaywall retrieval from the
+  server and the snowballing deep dive (both need the job queue), and Parquet.
+
+- **Phase 8 — capture on the phone, and Recueil's own connector.** The web app's *Capture* screen
+  scans or photographs a document, takes files, and reads or takes a typed ISBN; every capture goes
+  into an on-device queue (IndexedDB) and is uploaded when the server answers, and one the server
+  refuses stays with its reason. `apps/mobile` is the Capacitor 8 shell for iOS, iPadOS and Android
+  ([ADR-0024](spec/adr/0024-capacitor-for-the-mobile-shell.md), now accepted): the server address
+  in Preferences and the token in the Keychain or Keystore, ML Kit's document scanner on Android
+  and VisionKit on iOS through the app's own plugin, ML Kit barcodes, files shared into the app on
+  Android, and the queue flushing when the network returns. CI builds a debug APK and an iOS
+  simulator build. `apps/connector` is a Manifest V3 extension for Chromium and Firefox (Safari via
+  Apple's converter) that saves the page you are reading — Highwire, Dublin Core, JSON-LD or a DOI
+  — and its PDF through the REST API with a scoped token. **Not yet run on a phone and not listed
+  in any store**: the thirty-second capture exit and the Chrome Web Store listing need the owner's
+  devices and developer accounts. Not yet: an iOS share extension, cached reading offline.
+
+- **Phase 9 — toward 1.0.** `npm create recueil-plugin` (`packages/create-recueil-plugin`) writes
+  a plugin with a manifest the host accepts, one working check and its test; the registry format
+  is specified in [`spec/plugin-registry.md`](spec/plugin-registry.md), with the first-party
+  plugins in [`registry/index.json`](registry/index.json), checked against their manifests in CI;
+  [docs/upgrades.qmd](docs/upgrades.qmd) states the guarantees that start at 1.0, and the server
+  now refuses a library a newer Recueil has migrated. Not done, because each is the owner's to
+  do: publishing the SDK and the scaffolder to npm, the separate registry repository, the Zenodo
+  archive, the store listings, and the 1.0 tag itself.
+
 ### The hardening round
 
 An adversarial review between Phase 2 and Phase 3 returned 8 critical, 8 major and
@@ -152,11 +241,11 @@ Three limits worth knowing before pointing this at real paper:
   that, the importer refuses with a named error rather than half-reading it.
   There is a test for that refusal.
 
-Not done: `recueil token`, background jobs, and everything from Phase 3 onwards
-report the phase they arrive in and exit non-zero. And the Zotero migration has
-been proved against the fixture library, **not** against a real personal library —
-which is what milestone M1 in [`CONCEPT.md`](CONCEPT.md) §7 actually asks for, so
-M1 is not claimed either.
+Not done: `recueil token` and `recueil job` report the phase they belong to and exit non-zero, and
+the background job queue (server routes for sync, checks and dedup, Unpaywall retrieval, the deep
+dive) is still to come. The Zotero migration has been proved against the fixture library, **not**
+against a real personal library — which is what milestone M1 in [`CONCEPT.md`](CONCEPT.md) §7
+actually asks for, so M1 is not claimed either.
 
 See [`CONCEPT.md`](CONCEPT.md) for the full concept, architecture and roadmap.
 
@@ -177,16 +266,38 @@ nothing else yet.
 | `packages/formats` | BibTeX, BibLaTeX, RIS, CSL-JSON and citation keys |
 | `packages/import-zotero` | the Zotero migrator and its verification report |
 | `packages/import-paperless` | the Paperless-ngx migrator and its verification report |
+| `packages/sync-zotero` | two-way sync with zotero.org through the Web API ([ADR-0025](spec/adr/0025-two-way-zotero-sync.md)) |
 | `packages/ingest` | the ten-stage ingestion pipeline of CONCEPT.md §5.3 |
 | `packages/ingest-sources` | watched folders, the WebDAV feed and the IMAP mailbox |
 | `packages/rules` | the YAML/JSON rule language, its engine and the dry-run report |
 | `packages/storage-backends` | WebDAV and S3, and the conformance suite all three pass |
-| `packages/plugin-sdk`, `packages/client-ts` | placeholder |
-| `plugins/` | first-party plugins — placeholder |
+| `packages/plugin-sdk` | the plugin API 1.0.0 types, errors and helpers |
+| `packages/plugin-host` | the plugin host and the enrichment, checks and dedup engines |
+| `packages/client-ts` | placeholder |
+| `plugins/` | first-party plugins: `resolvers-core`, `checks-core`, `dedup-core` |
 | `spec/` | OpenAPI, plugin manifest schema, ADRs, data model |
 | `docs/` | Quarto documentation site |
 | `deploy/` | Dockerfile and docker-compose with sidecar profiles (untested) |
 | `fixtures/` | the generated Zotero library, the format fixtures, and the Phase 2 corpora: scans, mail, archives, a Paperless-ngx dump and rule cases |
+
+## Citing Recueil
+
+If Recueil is part of your method, cite the version you used ([`CITATION.cff`](CITATION.cff); a
+Zenodo DOI follows with the first archived release).
+
+```bibtex
+@software{heller_recueil_2026,
+  author  = {Heller, Raban},
+  title   = {Recueil},
+  version = {0.1.0},
+  year    = {2026},
+  url     = {https://github.com/etabli-dev/etabli-recueil},
+  license = {AGPL-3.0-or-later}
+}
+```
+
+APA: Heller, R. (2026). *Recueil* (Version 0.1.0) [Computer software].
+https://github.com/etabli-dev/etabli-recueil
 
 ## Licence
 

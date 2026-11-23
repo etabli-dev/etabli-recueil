@@ -1,0 +1,61 @@
+{
+  "schema": "recueil.plugin-registry/1",
+  "updated": "2026-11-22",
+  "plugins": [
+    {
+      "name": "@recueil/plugin-resolvers-core",
+      "displayName": "Core resolvers",
+      "description": "Eleven metadata resolvers: Crossref, OpenAlex, PubMed, DataCite, arXiv, Unpaywall and more.",
+      "repository": "https://github.com/etabli-dev/etabli-recueil/tree/main/plugins/resolvers-core",
+      "licence": "AGPL-3.0-or-later",
+      "recueilApi": "^1.0.0",
+      "hooks": [
+        "resolver"
+      ],
+      "permissions": [
+        "network:outbound"
+      ],
+      "source": {
+        "type": "builtin"
+      },
+      "firstParty": true
+    },
+    {
+      "name": "@recueil/plugin-checks-core",
+      "displayName": "Core checks",
+      "description": "The thirteen checks of the verification engine.",
+      "repository": "https://github.com/etabli-dev/etabli-recueil/tree/main/plugins/checks-core",
+      "licence": "AGPL-3.0-or-later",
+      "recueilApi": "^1.0.0",
+      "hooks": [
+        "check"
+      ],
+      "permissions": [
+        "network:outbound",
+        "items:read",
+        "storage:read"
+      ],
+      "source": {
+        "type": "builtin"
+      },
+      "firstParty": true
+    },
+    {
+      "name": "@recueil/plugin-dedup-core",
+      "displayName": "Core duplicate rules",
+      "description": "Identifier and fuzzy title rules for record deduplication.",
+      "repository": "https://github.com/etabli-dev/etabli-recueil/tree/main/plugins/dedup-core",
+      "licence": "AGPL-3.0-or-later",
+      "recueilApi": "^1.0.0",
+      "hooks": [
+        "dedupRule"
+      ],
+      "permissions": [],
+      "source": {
+        "type": "builtin"
+      },
+      "firstParty": true
+    }
+  ],
+  "revoked": []
+}

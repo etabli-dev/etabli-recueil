@@ -20,7 +20,7 @@
  * endpoint says so in a header and, for the JSON variants of the export endpoint, in the body.
  */
 import type { Recueil } from '@recueil/core';
-import { ValidationError } from '@recueil/core';
+import { ValidationError, evaluateSavedSearch, parseSavedSearch } from '@recueil/core';
 import type { Item } from '@recueil/schemas';
 import {
   disambiguate,
@@ -132,7 +132,7 @@ export const resolveSelection = (recueil: Recueil, selection: Selection): string
  * search endpoint takes — and anything else is refused rather than quietly returning nothing. A
  * saved search that silently exports an empty bibliography is a broken manuscript nobody notices.
  */
-const smartCollectionItems = (
+export const smartCollectionItems = (
   recueil: Recueil,
   collection: { id: string; query: string | null },
   limit: number,
@@ -149,23 +149,7 @@ const smartCollectionItems = (
       { collectionId: collection.id },
     );
   }
-
-  const text =
-    typeof parsed === 'object' && parsed !== null
-      ? (parsed as { text?: unknown; q?: unknown }).text ?? (parsed as { q?: unknown }).q
-      : undefined;
-
-  if (typeof text !== 'string' || text.trim() === '') {
-    throw new ValidationError(
-      `The saved search on collection '${collection.id}' has no \`text\` query. Phase 1 understands ` +
-        'saved searches of the form `{"text": "<query>"}`; the structured query language arrives ' +
-        'with the search phase.',
-      { collectionId: collection.id, query: parsed },
-    );
-  }
-
-  if (!recueil.search.available) return [];
-  return recueil.search.itemIdsMatching(text, limit);
+  return evaluateSavedSearch(recueil.db, recueil.search, parseSavedSearch(parsed), limit);
 };
 
 export interface RenderedExport {

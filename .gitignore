@@ -15,3 +15,27 @@ data/
 *.log
 
 .DS_Store
+
+# Agent and orchestration files never enter the repository
+CLAUDE.md
+AGENTS.md
+.claude/
+.codex/
+.cursor/
+.mcp.json
+.pnpm-store/
+
+# R and Python client build output
+clients/r/*.Rcheck/
+clients/r/*.tar.gz
+clients/python/**/__pycache__/
+clients/python/*.egg-info/
+clients/python/dist/
+# The mobile shell's assembled web assets and native build output (apps/mobile).
+apps/mobile/www/
+apps/mobile/android/app/build/
+apps/mobile/android/.gradle/
+apps/mobile/ios/App/Pods/
+apps/mobile/ios/App/App/public/
+# Review exports the TypeScript tests write for the R tests in CI (packages/sr); never committed.
+clients/r/tests/testthat/fixtures/*.csv

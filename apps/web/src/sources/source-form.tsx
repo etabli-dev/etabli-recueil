@@ -21,6 +21,8 @@ export interface SourceFormProps {
   /** Absent for a new source. */
   source?: IngestionSource;
   kind?: IngestionSourceKind;
+  /** A folder picked in the desktop shell, prefilled as the watched root. */
+  initialRoot?: string;
   busy?: boolean;
   onCancel: () => void;
   onSubmit: (body: ReturnType<typeof draftToCreate>) => void;
@@ -35,9 +37,13 @@ const SOURCE_KINDS: readonly { value: IngestionSourceKind; label: string; hint: 
 /** `documents.source_kind`, restricted to the values an operator would choose for a source. */
 const DOCUMENT_SOURCE_KINDS = ['folder', 'webdav', 'imap', 'scanner', 'mobile', 'api'] as const;
 
-export const SourceForm = ({ source, kind, busy = false, onCancel, onSubmit }: SourceFormProps): JSX.Element => {
+export const SourceForm = ({ source, kind, initialRoot, busy = false, onCancel, onSubmit }: SourceFormProps): JSX.Element => {
   const [draft, setDraft] = useState<SourceDraft>(() =>
-    source === undefined ? emptyDraft(kind ?? 'folder') : draftFromSource(source),
+    source === undefined
+      ? initialRoot === undefined
+        ? emptyDraft(kind ?? 'folder')
+        : { ...emptyDraft('folder'), root: initialRoot, name: initialRoot.split(/[\\/]/u).filter((part) => part !== '').at(-1) ?? 'Folder' }
+      : draftFromSource(source),
   );
   const [issues, setIssues] = useState<readonly DraftIssue[]>([]);
   const formId = useId();

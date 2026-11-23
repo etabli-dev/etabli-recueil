@@ -83,6 +83,9 @@ export interface SetFieldValueInput {
   groupKey?: string | null;
   ordinal?: number;
   isBlank?: boolean;
+  /** Extraction data (Phase 7): the review and the form version. Both null for library values. */
+  reviewId?: string | null;
+  extractionFormId?: string | null;
 }
 
 /** A stored value, decoded back into the typed union the contract speaks. */
@@ -367,6 +370,8 @@ export class CustomFieldService {
             eq(fieldValues.fieldId, field.id),
             eq(fieldValues.itemId, input.itemId),
             eq(fieldValues.groupScopeKey, scopeKey(groupKey)),
+            eq(fieldValues.reviewScopeKey, scopeKey(input.reviewId ?? null)),
+            eq(fieldValues.formScopeKey, scopeKey(input.extractionFormId ?? null)),
             eq(fieldValues.ordinal, ordinal),
           ),
         )
@@ -376,6 +381,10 @@ export class CustomFieldService {
         id: existing?.id ?? newId(),
         fieldId: field.id,
         itemId: input.itemId,
+        reviewId: input.reviewId ?? null,
+        extractionFormId: input.extractionFormId ?? null,
+        reviewScopeKey: scopeKey(input.reviewId ?? null),
+        formScopeKey: scopeKey(input.extractionFormId ?? null),
         groupKey,
         groupScopeKey: scopeKey(groupKey),
         ordinal,
@@ -420,7 +429,7 @@ export class CustomFieldService {
 
   /** One slot's value, or undefined when it has never been written. */
   getValue(
-    input: Pick<SetFieldValueInput, 'fieldId' | 'fieldKey' | 'itemId' | 'groupKey' | 'ordinal'>,
+    input: Pick<SetFieldValueInput, 'fieldId' | 'fieldKey' | 'itemId' | 'groupKey' | 'ordinal' | 'reviewId' | 'extractionFormId'>,
   ): DecodedFieldValue | undefined {
     const field = this.resolveField(this.db, input);
     const row = this.db
@@ -431,6 +440,8 @@ export class CustomFieldService {
           eq(fieldValues.fieldId, field.id),
           eq(fieldValues.itemId, input.itemId),
           eq(fieldValues.groupScopeKey, scopeKey(input.groupKey ?? null)),
+          eq(fieldValues.reviewScopeKey, scopeKey(input.reviewId ?? null)),
+          eq(fieldValues.formScopeKey, scopeKey(input.extractionFormId ?? null)),
           eq(fieldValues.ordinal, input.ordinal ?? 0),
         ),
       )
@@ -439,13 +450,16 @@ export class CustomFieldService {
     return { row, field, content: decodeContent(field, row) };
   }
 
-  /** Every value on an item, decoded, in field order. */
-  listValues(itemId: string): DecodedFieldValue[] {
+  /**
+   * Every value on an item, decoded, in field order. Library values by default; pass a review id
+   * for that review's extraction values.
+   */
+  listValues(itemId: string, options: { reviewId?: string } = {}): DecodedFieldValue[] {
     const rows = this.db
       .select({ value: fieldValues, field: customFields })
       .from(fieldValues)
       .innerJoin(customFields, eq(customFields.id, fieldValues.fieldId))
-      .where(eq(fieldValues.itemId, itemId))
+      .where(and(eq(fieldValues.itemId, itemId), eq(fieldValues.reviewScopeKey, options.reviewId ?? '')))
       .orderBy(asc(customFields.position), asc(customFields.fieldKey), asc(fieldValues.ordinal))
       .all();
     return rows.map((row) => ({
@@ -462,7 +476,7 @@ export class CustomFieldService {
    * extracted" — which is a different fact from `is_blank`, "recorded as not reported" (§4.7).
    */
   clearValue(
-    input: Pick<SetFieldValueInput, 'fieldId' | 'fieldKey' | 'itemId' | 'groupKey' | 'ordinal'>,
+    input: Pick<SetFieldValueInput, 'fieldId' | 'fieldKey' | 'itemId' | 'groupKey' | 'ordinal' | 'reviewId' | 'extractionFormId'>,
     actor: Actor,
   ): boolean {
     return this.db.transaction((tx) => {
@@ -475,6 +489,8 @@ export class CustomFieldService {
             eq(fieldValues.fieldId, field.id),
             eq(fieldValues.itemId, input.itemId),
             eq(fieldValues.groupScopeKey, scopeKey(input.groupKey ?? null)),
+            eq(fieldValues.reviewScopeKey, scopeKey(input.reviewId ?? null)),
+            eq(fieldValues.formScopeKey, scopeKey(input.extractionFormId ?? null)),
             eq(fieldValues.ordinal, input.ordinal ?? 0),
           ),
         )

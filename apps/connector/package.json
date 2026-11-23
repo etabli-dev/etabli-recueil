@@ -1,0 +1,23 @@
+{
+  "name": "@recueil/connector",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Recueil's own browser connector: save the scholarly page you are reading, with its PDF, to your Recueil server (Chromium, Firefox, Safari).",
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && node scripts/build.mjs",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "jsdom": "^30.0.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.12"
+  }
+}

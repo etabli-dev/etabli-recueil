@@ -19,6 +19,7 @@
 import type { DecodedFieldValue, ItemCreatorRecord, ItemRecord } from '@recueil/core';
 import type { schema } from '@recueil/core';
 import type {
+  Annotation,
   Attachment,
   CustomField,
   BibliographicFacet,
@@ -271,6 +272,38 @@ export const noteToWire = (row: schema.NoteRow): Note => ({
   sourceFormat: row.sourceFormat,
   contentOriginal: row.contentOriginal,
   noteKind: row.noteKind,
+});
+
+/* -------------------------------------------------------------------------------------------- */
+/* Annotations                                                                                     */
+/* -------------------------------------------------------------------------------------------- */
+
+export const annotationToWire = (row: schema.AnnotationRow): Annotation => ({
+  id: row.id,
+  publicId: row.publicId,
+  documentId: row.documentId,
+  itemId: row.itemId,
+  attachmentId: row.attachmentId,
+  annotationType: row.annotationType,
+  motivation: row.motivation,
+  selector: JSON.parse(row.selector) as Annotation['selector'],
+  quotedText: row.quotedText,
+  prefixText: row.prefixText,
+  suffixText: row.suffixText,
+  bodyText: row.bodyText,
+  bodyFormat: row.bodyFormat,
+  colour: row.colour,
+  pageIndex: row.pageIndex,
+  pageLabel: row.pageLabel,
+  positionSortKey: row.positionSortKey,
+  authorUserId: row.authorUserId,
+  authorName: row.authorName,
+  isExternal: row.isExternal,
+  externalRef: row.externalRef,
+  version: row.version,
+  createdAt: row.createdAt,
+  updatedAt: row.updatedAt,
+  trashedAt: row.trashedAt,
 });
 
 /* -------------------------------------------------------------------------------------------- */

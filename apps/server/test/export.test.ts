@@ -278,17 +278,26 @@ describe('GET /api/v1/saved-searches/{id}/bibliography.bib', () => {
   it('refuses a saved search whose query it cannot understand', async () => {
     const h = await harness();
     try {
-      const saved = h.recueil.collections.create(
-        { name: 'Structured', kind: 'smart', query: { and: [{ field: 'itemType', eq: 'article' }] } },
-        h.recueil.actor,
-      );
+      // A query that would not run is refused when it is saved (Phase 4)…
+      expect(() =>
+        h.recueil.collections.create(
+          { name: 'Structured', kind: 'smart', query: { and: [{ field: 'itemType', eq: 'article' }] } },
+          h.recueil.actor,
+        ),
+      ).toThrow(/unknown key/u);
+
+      // …and one stored before that check existed is refused when it is run.
+      const saved = h.recueil.collections.create({ name: 'Structured', kind: 'smart', query: { text: 'x' } }, h.recueil.actor);
+      h.recueil.connection
+        .prepare('update collections set query = ? where id = ?')
+        .run(JSON.stringify({ and: [{ field: 'itemType', eq: 'article' }] }), saved.id);
 
       const response = await h.app.inject({
         method: 'GET',
         url: `/api/v1/saved-searches/${saved.id}/bibliography.bib`,
       });
       expect(response.statusCode).toBe(422);
-      expect(body(response).detail).toContain('text');
+      expect(body(response).detail).toContain('unknown key');
     } finally {
       await h.close();
     }

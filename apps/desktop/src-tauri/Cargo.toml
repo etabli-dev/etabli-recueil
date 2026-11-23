@@ -19,13 +19,18 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "=2.7.4", features = [] }
 
 [dependencies]
-tauri = { version = "=2.12.5", features = [] }
+tauri = { version = "=2.12.5", features = ["tray-icon"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 url = "2.5.8"
 # Links leaving the window open in the system browser. Called from Rust only; the web view is
 # given no permission to open anything itself.
 open = "=5.4.4"
+# Desktop v1 (platform roadmap PM7): `recueil://` links, the folder picker behind "Watch a
+# folder…", and one running instance that receives the links a second launch was given.
+tauri-plugin-deep-link = "=2.6.3"
+tauri-plugin-dialog = "=2.8.4"
+tauri-plugin-single-instance = { version = "=2.5.5", features = ["deep-link"] }
 
 # The API token, when a server needs one, lives in the operating system's credential store and
 # never in the settings file: Keychain on macOS, Credential Manager on Windows, the Secret Service

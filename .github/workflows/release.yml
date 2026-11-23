@@ -151,3 +151,131 @@ jobs:
             echo "${{ steps.meta.outputs.tags }}"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # Platform roadmap PM4: the apps, as unsigned packages on a draft release with checksums and
+  # build provenance. Signing (PM5, PM10) needs the owner's certificates and keystore; nothing here
+  # asks for them. The draft is published by hand, after the acceptance lists in the roadmap.
+  desktop:
+    name: Desktop package (${{ matrix.name }})
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: Linux, os: ubuntu-24.04, bundles: 'deb,appimage', glob: 'deb/*.deb appimage/*.AppImage' }
+          - { name: Windows, os: windows-latest, bundles: msi, glob: 'msi/*.msi' }
+          - { name: macOS, os: macos-15, bundles: dmg, glob: 'dmg/*.dmg' }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+      - run: npm install --global pnpm@9.15.4
+      - name: Install the Rust toolchain
+        shell: bash
+        run: |
+          rustup toolchain install 1.93.1 --profile minimal --no-self-update
+          rustup default 1.93.1
+      - name: Install the WebKitGTK build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libdbus-1-dev libayatana-appindicator3-dev file
+      - run: pnpm install --frozen-lockfile --filter "@recueil/desktop..."
+      - run: pnpm --filter @recueil/desktop exec tauri build --bundles ${{ matrix.bundles }}
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: '1'
+      - name: Collect the packages
+        shell: bash
+        run: |
+          mkdir -p out
+          cd apps/desktop/src-tauri/target/release/bundle
+          for pattern in ${{ matrix.glob }}; do cp $pattern "$GITHUB_WORKSPACE/out/"; done
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-desktop-${{ matrix.name }}
+          path: out/*
+          if-no-files-found: error
+
+  android:
+    name: Android package (unsigned release APK)
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+      - run: npm install --global pnpm@9.15.4
+      - run: pnpm install --frozen-lockfile --filter "@recueil/mobile..."
+      - run: pnpm --filter "@recueil/mobile..." run build
+      - run: pnpm --filter @recueil/mobile exec cap sync android
+      - name: Gradle release build (unsigned)
+        working-directory: apps/mobile/android
+        run: |
+          export JAVA_HOME="$JAVA_HOME_21_X64"
+          ./gradlew --no-daemon assembleRelease
+          mkdir -p "$GITHUB_WORKSPACE/out"
+          cp app/build/outputs/apk/release/*.apk "$GITHUB_WORKSPACE/out/recueil-android-${GITHUB_REF_NAME}-unsigned.apk"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-android
+          path: out/*
+          if-no-files-found: error
+
+  connector:
+    name: Browser connector (Chromium and Firefox)
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+      - run: npm install --global pnpm@9.15.4
+      - run: pnpm install --frozen-lockfile --filter "@recueil/connector..."
+      - run: pnpm --filter @recueil/connector test
+      - run: pnpm --filter @recueil/connector run build
+      - name: Zip each browser's build
+        run: |
+          mkdir -p out
+          for browser in chrome firefox; do (cd apps/connector/dist/$browser && zip -qr "$GITHUB_WORKSPACE/out/recueil-connector-$browser-${GITHUB_REF_NAME}.zip" .); done
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-connector
+          path: out/*
+          if-no-files-found: error
+
+  draft-release:
+    name: Draft release with checksums and provenance
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [desktop, android, connector]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum * | tee SHA256SUMS
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: 'dist/*'
+      - name: Draft the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --draft --verify-tag \
+            --title "Recueil $GITHUB_REF_NAME" \
+            --notes "Unsigned packages for testing; see docs/platform-roadmap.md for what has been verified on each platform. Check downloads against SHA256SUMS and the build provenance (gh attestation verify)."

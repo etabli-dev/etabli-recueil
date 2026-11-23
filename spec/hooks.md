@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | Draft v0.1 |
+| Status | Plugin API 1.0.0 — a release candidate, frozen at the 1.0 tag; from then on changes follow [docs/upgrades.qmd](../docs/upgrades.qmd) |
 | Date | 2026-08-22 |
 | Phase | Phase 0 deliverable (P8: plugin contract before UI) |
 | Covers | CONCEPT.md §5.13 |

@@ -29,6 +29,41 @@
       "when": 1787397028723,
       "tag": "0003_trash_merge_scope",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1795244991666,
+      "tag": "0004_zotero_sync",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1795254850505,
+      "tag": "0005_enrichment",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1795302685133,
+      "tag": "0006_graph",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1795311279952,
+      "tag": "0007_curated_networks",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1795312951252,
+      "tag": "0008_systematic_review",
+      "breakpoints": true
     }
   ]
 }

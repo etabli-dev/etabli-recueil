@@ -1023,8 +1023,8 @@ export const customFields = sqliteTable(
  * the absence of a row.
  *
  * The `review_id`, `extraction_form_id` and their two scope-key mirrors belong to the
- * systematic-review phase and are added by `0007_sr` (§11), so the slot key here is the Phase 1
- * one: field, item, repeatable group, ordinal.
+ * systematic-review phase (`0008_systematic_review`): the slot key is field, item, review, form
+ * version, repeatable group, ordinal — so one item extracted in two reviews keeps two values (EF2).
  */
 export const fieldValues = sqliteTable(
   'field_values',
@@ -1036,6 +1036,12 @@ export const fieldValues = sqliteTable(
     itemId: text('item_id')
       .notNull()
       .references(() => items.id, { onDelete: 'cascade' }),
+    /** Extraction data (Phase 7): the review the value was extracted in, and under which form version. */
+    reviewId: text('review_id').references((): AnySQLiteColumn => reviews.id, { onDelete: 'cascade' }),
+    extractionFormId: text('extraction_form_id').references((): AnySQLiteColumn => extractionForms.id, { onDelete: 'restrict' }),
+    /** `COALESCE(review_id, '')` and `COALESCE(extraction_form_id, '')`; part of the slot key. */
+    reviewScopeKey: text('review_scope_key').notNull().default(''),
+    formScopeKey: text('form_scope_key').notNull().default(''),
     /** The repeatable group instance: `arm:intervention`, `outcome:mortality_30d`. */
     groupKey: text('group_key'),
     /** `COALESCE(group_key, '')`; see §1.1. */
@@ -1057,9 +1063,14 @@ export const fieldValues = sqliteTable(
     uniqueIndex('ux_field_values_slot').on(
       table.fieldId,
       table.itemId,
+      table.reviewScopeKey,
+      table.formScopeKey,
       table.groupScopeKey,
       table.ordinal,
     ),
+    index('ix_field_values_review').on(table.reviewId, table.itemId).where(sql`review_id is not null`),
+    check('ck_field_values_review_scope_key', sql`"review_scope_key" = coalesce("review_id", '')`),
+    check('ck_field_values_form_scope_key', sql`"form_scope_key" = coalesce("extraction_form_id", '')`),
     index('ix_field_values_item').on(table.itemId, table.fieldId),
     index('ix_field_values_field_text')
       .on(table.fieldId, table.valueText)
@@ -1551,9 +1562,883 @@ export const trash = sqliteTable(
   ],
 );
 
+/* ============================================================================================== */
+/* 7. The zotero.org bridge (ADR-0025)                                                             */
+/* ============================================================================================== */
+
+export const ZOTERO_LIBRARY_TYPES = ['user', 'group'] as const;
+export const ZOTERO_OBJECT_TYPES = ['collection', 'item', 'note', 'attachment'] as const;
+export const ZOTERO_CONFLICT_STATES = [
+  'open',
+  'resolved_zotero',
+  'resolved_recueil',
+  'resolved_manual',
+] as const;
+
+/**
+ * `zotero_sync_libraries` — one row per zotero.org library this library is bridged to.
+ *
+ * `version` is Zotero's library version as of the last completed pull: the `since` of the next
+ * one. It only moves forward, and only after the objects up to it have been applied, so an
+ * interrupted pull repeats rather than skips.
+ */
+export const zoteroSyncLibraries = sqliteTable(
+  'zotero_sync_libraries',
+  {
+    id: text('id').primaryKey(),
+    libraryType: text('library_type', { enum: ZOTERO_LIBRARY_TYPES }).notNull(),
+    /** The numeric user or group id, as text. */
+    libraryId: text('library_id').notNull(),
+    name: text('name'),
+    version: integer('version').notNull().default(0),
+    lastPulledAt: text('last_pulled_at'),
+    lastPushedAt: text('last_pushed_at'),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('ux_zotero_sync_libraries').on(table.libraryType, table.libraryId),
+    oneOf('ck_zotero_sync_libraries_type', 'library_type', ZOTERO_LIBRARY_TYPES),
+    check('ck_zotero_sync_libraries_version', sql`"version" >= 0`),
+  ],
+);
+
+/**
+ * `zotero_sync_links` — which Recueil row a Zotero object is, and what the two last agreed on.
+ *
+ * `base` is the Zotero JSON (`data`) both sides held after the last successful exchange. It is the
+ * common ancestor of the three-way merge: a side has changed a field when its value differs from
+ * the base's. Keeping the whole JSON, not only the fields Recueil models, is what lets a push
+ * return every field Recueil has no column for exactly as Zotero sent it.
+ *
+ * `recueil_id` is polymorphic over `object_type` and so carries no SQL foreign key, like
+ * `field_provenance.entity_id`.
+ */
+export const zoteroSyncLinks = sqliteTable(
+  'zotero_sync_links',
+  {
+    id: text('id').primaryKey(),
+    syncLibraryId: text('sync_library_id')
+      .notNull()
+      .references(() => zoteroSyncLibraries.id, { onDelete: 'cascade' }),
+    objectType: text('object_type', { enum: ZOTERO_OBJECT_TYPES }).notNull(),
+    zoteroKey: text('zotero_key').notNull(),
+    recueilId: text('recueil_id').notNull(),
+    /** The object version Zotero reported with `base`. Sent back as the precondition of a write. */
+    zoteroVersion: integer('zotero_version').notNull().default(0),
+    base: text('base').notNull().default('{}'),
+    /** For attachments: the MD5 of the file both sides hold, if any. */
+    fileMd5: text('file_md5'),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('ux_zotero_sync_links_key').on(
+      table.syncLibraryId,
+      table.objectType,
+      table.zoteroKey,
+    ),
+    uniqueIndex('ux_zotero_sync_links_recueil').on(
+      table.syncLibraryId,
+      table.objectType,
+      table.recueilId,
+    ),
+    index('ix_zotero_sync_links_recueil').on(table.recueilId),
+    oneOf('ck_zotero_sync_links_type', 'object_type', ZOTERO_OBJECT_TYPES),
+    jsonValid('ck_zotero_sync_links_base_json', 'base'),
+  ],
+);
+
+/**
+ * `zotero_sync_conflicts` — a field both sides changed to different values (ADR-0025 §5).
+ *
+ * Under the default policy neither value is written anywhere until the conflict is resolved, so
+ * the row carries all three values and nothing else has to be consulted to decide it.
+ */
+export const zoteroSyncConflicts = sqliteTable(
+  'zotero_sync_conflicts',
+  {
+    id: text('id').primaryKey(),
+    syncLibraryId: text('sync_library_id')
+      .notNull()
+      .references(() => zoteroSyncLibraries.id, { onDelete: 'cascade' }),
+    objectType: text('object_type', { enum: ZOTERO_OBJECT_TYPES }).notNull(),
+    zoteroKey: text('zotero_key').notNull(),
+    recueilId: text('recueil_id'),
+    field: text('field').notNull(),
+    baseValue: text('base_value'),
+    recueilValue: text('recueil_value'),
+    zoteroValue: text('zotero_value'),
+    state: text('state', { enum: ZOTERO_CONFLICT_STATES }).notNull().default('open'),
+    detectedAt: text('detected_at').notNull(),
+    resolvedAt: text('resolved_at'),
+  },
+  (table) => [
+    /** One open conflict per field; a later sync updates it rather than piling up copies. */
+    uniqueIndex('ux_zotero_sync_conflicts_open')
+      .on(table.syncLibraryId, table.objectType, table.zoteroKey, table.field)
+      .where(sql`state = 'open'`),
+    oneOf('ck_zotero_sync_conflicts_type', 'object_type', ZOTERO_OBJECT_TYPES),
+    oneOf('ck_zotero_sync_conflicts_state', 'state', ZOTERO_CONFLICT_STATES),
+  ],
+);
+
+/* ============================================================================================== */
+/* 8. Enrichment, checks and plugins (`spec/data-model.md` §3.9, §6.2, §6.7; Phase 3)              */
+/* ============================================================================================== */
+
+export const PLUGIN_SOURCES = ['builtin', 'npm', 'url', 'local'] as const;
+export const PLUGIN_INSTALL_STATES = ['installed', 'pending_update', 'failed', 'incompatible'] as const;
+export const CHECK_SUBJECT_TYPES = ['item', 'attachment', 'document', 'creator', 'audit_reference', 'library'] as const;
+export const CHECK_STATUSES = ['pass', 'fail', 'warn', 'error', 'skipped'] as const;
+export const CHECK_SEVERITIES = ['info', 'warning', 'error'] as const;
+
+/** §6.7. A row is never deleted while anything it wrote references it (PL1). */
+export const plugins = sqliteTable(
+  'plugins',
+  {
+    id: text('id').primaryKey(),
+    name: text('name').notNull(),
+    version: text('version').notNull(),
+    pluginApiRange: text('plugin_api_range').notNull(),
+    source: text('source', { enum: PLUGIN_SOURCES }).notNull(),
+    sourceRef: text('source_ref'),
+    checksum: text('checksum'),
+    manifest: text('manifest').notNull(),
+    permissions: text('permissions').notNull().default('[]'),
+    hooks: text('hooks').notNull().default('[]'),
+    /** Validated against the manifest's schema. Secrets are names of variables, never values (PL2). */
+    settings: text('settings').notNull().default('{}'),
+    enabled: integer('enabled', { mode: 'boolean' }).notNull().default(false),
+    installState: text('install_state', { enum: PLUGIN_INSTALL_STATES }).notNull().default('installed'),
+    lastError: text('last_error'),
+    installedAt: text('installed_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('ux_plugins_name').on(table.name),
+    oneOf('ck_plugins_source', 'source', PLUGIN_SOURCES),
+    oneOf('ck_plugins_install_state', 'install_state', PLUGIN_INSTALL_STATES),
+    boolean01('ck_plugins_enabled_bool', 'enabled'),
+    jsonValid('ck_plugins_manifest_json', 'manifest'),
+    jsonValid('ck_plugins_permissions_json', 'permissions'),
+    jsonValid('ck_plugins_hooks_json', 'hooks'),
+    jsonValid('ck_plugins_settings_json', 'settings'),
+  ],
+);
+
+/**
+ * §6.2. One current result per check per subject per audit run. `run_scope_key` is the maintained
+ * `COALESCE(audit_run_id, '')`, so the library-wide scope is a plain unique index.
+ */
+export const checkResults = sqliteTable(
+  'check_results',
+  {
+    id: text('id').primaryKey(),
+    checkId: text('check_id').notNull(),
+    checkVersion: text('check_version'),
+    subjectType: text('subject_type', { enum: CHECK_SUBJECT_TYPES }).notNull(),
+    subjectId: text('subject_id').notNull(),
+    itemId: text('item_id').references(() => items.id, { onDelete: 'cascade' }),
+    status: text('status', { enum: CHECK_STATUSES }).notNull(),
+    severity: text('severity', { enum: CHECK_SEVERITIES }).notNull(),
+    message: text('message').notNull(),
+    detail: text('detail').notNull().default('{}'),
+    autoFixable: integer('auto_fixable', { mode: 'boolean' }).notNull().default(false),
+    autoFixPayload: text('auto_fix_payload'),
+    fixedAt: text('fixed_at'),
+    acknowledgedAt: text('acknowledged_at'),
+    acknowledgedByUserId: text('acknowledged_by_user_id').references(() => users.id, { onDelete: 'restrict' }),
+    runId: text('run_id').references(() => jobs.id, { onDelete: 'set null' }),
+    auditRunId: text('audit_run_id'),
+    runScopeKey: text('run_scope_key').notNull().default(''),
+    checkedAt: text('checked_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('ux_check_results_current').on(table.checkId, table.subjectType, table.subjectId, table.runScopeKey),
+    index('ix_check_results_item').on(table.itemId, table.checkId).where(sql`item_id is not null`),
+    index('ix_check_results_open')
+      .on(table.severity, table.checkedAt)
+      .where(sql`status in ('fail', 'warn') and acknowledged_at is null and fixed_at is null`),
+    index('ix_check_results_audit_run').on(table.auditRunId).where(sql`audit_run_id is not null`),
+    oneOf('ck_check_results_subject_type', 'subject_type', CHECK_SUBJECT_TYPES),
+    oneOf('ck_check_results_status', 'status', CHECK_STATUSES),
+    oneOf('ck_check_results_severity', 'severity', CHECK_SEVERITIES),
+    boolean01('ck_check_results_auto_fixable_bool', 'auto_fixable'),
+    jsonValid('ck_check_results_detail_json', 'detail'),
+    jsonValidOrNull('ck_check_results_fix_json', 'auto_fix_payload'),
+  ],
+);
+
+/** §3.9. Observations, never updated (M1). */
+export const itemMetrics = sqliteTable(
+  'item_metrics',
+  {
+    id: text('id').primaryKey(),
+    itemId: text('item_id')
+      .notNull()
+      .references(() => items.id, { onDelete: 'restrict' }),
+    metric: text('metric').notNull(),
+    metricValue: real('metric_value').notNull(),
+    source: text('source').notNull(),
+    observedAt: text('observed_at').notNull(),
+    sourceAsOf: text('source_as_of'),
+    jobId: text('job_id').references(() => jobs.id, { onDelete: 'set null' }),
+  },
+  (table) => [
+    uniqueIndex('ux_item_metrics_observation').on(table.itemId, table.metric, table.source, table.observedAt),
+    index('ix_item_metrics_item_metric').on(table.itemId, table.metric, table.observedAt),
+    index('ix_item_metrics_observed_at').on(table.observedAt),
+  ],
+);
+
+/**
+ * The plugin cache (`CacheApi`, spec/hooks.md §3.1): namespaced per plugin and version, TTL'd.
+ * Derived data — dropping the table loses nothing but upstream requests.
+ */
+export const pluginCache = sqliteTable(
+  'plugin_cache',
+  {
+    pluginName: text('plugin_name').notNull(),
+    pluginVersion: text('plugin_version').notNull(),
+    cacheKey: text('cache_key').notNull(),
+    value: text('value').notNull(),
+    expiresAt: text('expires_at').notNull(),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.pluginName, table.cacheKey] }),
+    index('ix_plugin_cache_expires').on(table.expiresAt),
+    jsonValid('ck_plugin_cache_value_json', 'value'),
+  ],
+);
+
+/* ============================================================================================== */
+/* 9. Vocabulary and graph (`spec/data-model.md` §5.3–5.8; Phase 5)                                 */
+/* ============================================================================================== */
+
+export const SHADOW_DISCOVERED_VIA = ['reference_list', 'cited_by', 'deep_dive', 'search', 'import'] as const;
+export const SHADOW_PROMOTION = ['none', 'queued', 'promoted', 'rejected'] as const;
+export const GRAPH_NODE_TYPES = ['item', 'shadow_work', 'creator', 'venue', 'term', 'institution', 'funder'] as const;
+export const EDGE_DERIVATIONS = ['asserted', 'derived'] as const;
+export const EDGE_NORMALISATIONS = ['none', 'association_strength', 'salton', 'jaccard', 'fractional', 'inclusion'] as const;
+export const EVIDENCE_KINDS = ['citation_context', 'reference_string', 'api_record'] as const;
+
+/** §5.3. */
+export const terms = sqliteTable(
+  'terms',
+  {
+    id: text('id').primaryKey(),
+    scheme: text('scheme').notNull(),
+    code: text('code'),
+    label: text('label').notNull(),
+    normalisedLabel: text('normalised_label').notNull(),
+    parentId: text('parent_id').references((): AnySQLiteColumn => terms.id, { onDelete: 'restrict' }),
+    preferredTermId: text('preferred_term_id').references((): AnySQLiteColumn => terms.id, { onDelete: 'restrict' }),
+    treeNumbers: text('tree_numbers'),
+    depth: integer('depth'),
+    externalUri: text('external_uri'),
+    scopeNote: text('scope_note'),
+    isActive: integer('is_active', { mode: 'boolean' }).notNull().default(true),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('ux_terms_scheme_code').on(table.scheme, table.code).where(sql`code is not null`),
+    uniqueIndex('ux_terms_scheme_label').on(table.scheme, table.normalisedLabel),
+    index('ix_terms_parent_id').on(table.parentId),
+    index('ix_terms_preferred_term_id').on(table.preferredTermId).where(sql`preferred_term_id is not null`),
+    index('ix_terms_normalised_label').on(table.normalisedLabel),
+    check('ck_terms_preferred_not_self', sql`"preferred_term_id" is null or "preferred_term_id" <> "id"`),
+    boolean01('ck_terms_is_active_bool', 'is_active'),
+    jsonValidOrNull('ck_terms_tree_numbers_json', 'tree_numbers'),
+  ],
+);
+
+/** §5.4. */
+export const itemTerms = sqliteTable(
+  'item_terms',
+  {
+    itemId: text('item_id')
+      .notNull()
+      .references(() => items.id, { onDelete: 'cascade' }),
+    termId: text('term_id')
+      .notNull()
+      .references(() => terms.id, { onDelete: 'restrict' }),
+    qualifierKey: text('qualifier_key').notNull().default(''),
+    source: text('source').notNull(),
+    weight: real('weight'),
+    position: integer('position'),
+    isMajorTopic: integer('is_major_topic', { mode: 'boolean' }).notNull().default(false),
+    qualifierTermId: text('qualifier_term_id').references(() => terms.id, { onDelete: 'restrict' }),
+    confidence: real('confidence'),
+    addedAt: text('added_at').notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.itemId, table.termId, table.qualifierKey] }),
+    index('ix_item_terms_term_id').on(table.termId, table.itemId),
+    index('ix_item_terms_source').on(table.source),
+    boolean01('ck_item_terms_major_bool', 'is_major_topic'),
+  ],
+);
+
+/** §5.5. External works the graph needs and the library has not chosen (SW1: never in item queries). */
+export const shadowWorks = sqliteTable(
+  'shadow_works',
+  {
+    id: text('id').primaryKey(),
+    source: text('source').notNull(),
+    sourceId: text('source_id').notNull(),
+    doi: text('doi'),
+    pmid: text('pmid'),
+    arxivId: text('arxiv_id'),
+    openalexId: text('openalex_id'),
+    title: text('title'),
+    normalisedTitle: text('normalised_title'),
+    containerTitle: text('container_title'),
+    issuedYear: integer('issued_year'),
+    firstAuthorFamily: text('first_author_family'),
+    authors: text('authors').notNull().default('[]'),
+    rawRecord: text('raw_record'),
+    rawReferenceString: text('raw_reference_string'),
+    citedByCount: integer('cited_by_count'),
+    discoveredVia: text('discovered_via', { enum: SHADOW_DISCOVERED_VIA }).notNull(),
+    discoveredFromItemId: text('discovered_from_item_id').references(() => items.id, { onDelete: 'set null' }),
+    discoveredInJobId: text('discovered_in_job_id').references(() => jobs.id, { onDelete: 'set null' }),
+    firstSeenAt: text('first_seen_at').notNull(),
+    lastSeenAt: text('last_seen_at').notNull(),
+    seenCount: integer('seen_count').notNull().default(1),
+    promotionStatus: text('promotion_status', { enum: SHADOW_PROMOTION }).notNull().default('none'),
+    promotedItemId: text('promoted_item_id').references(() => items.id, { onDelete: 'set null' }),
+    promotedAt: text('promoted_at'),
+    matchedItemId: text('matched_item_id').references(() => items.id, { onDelete: 'set null' }),
+  },
+  (table) => [
+    uniqueIndex('ux_shadow_works_source').on(table.source, table.sourceId),
+    uniqueIndex('ux_shadow_works_doi').on(table.doi).where(sql`doi is not null`),
+    index('ix_shadow_works_match').on(table.normalisedTitle, table.issuedYear),
+    index('ix_shadow_works_matched_item').on(table.matchedItemId).where(sql`matched_item_id is not null`),
+    index('ix_shadow_works_seen_count').on(table.seenCount),
+    index('ix_shadow_works_discovered_from').on(table.discoveredFromItemId).where(sql`discovered_from_item_id is not null`),
+    oneOf('ck_shadow_works_discovered_via', 'discovered_via', SHADOW_DISCOVERED_VIA),
+    oneOf('ck_shadow_works_promotion_status', 'promotion_status', SHADOW_PROMOTION),
+    check('ck_shadow_works_promotion', sql`("promotion_status" = 'promoted') = ("promoted_item_id" is not null)`),
+    jsonValid('ck_shadow_works_authors_json', 'authors'),
+    jsonValidOrNull('ck_shadow_works_raw_json', 'raw_record'),
+  ],
+);
+
+/** §5.6. One node per underlying entity (GN1); derived, rebuildable (GN2). */
+export const graphNodes = sqliteTable(
+  'graph_nodes',
+  {
+    id: text('id').primaryKey(),
+    nodeType: text('node_type', { enum: GRAPH_NODE_TYPES }).notNull(),
+    itemId: text('item_id').references(() => items.id, { onDelete: 'cascade' }),
+    shadowWorkId: text('shadow_work_id').references(() => shadowWorks.id, { onDelete: 'cascade' }),
+    creatorId: text('creator_id').references(() => creators.id, { onDelete: 'cascade' }),
+    termId: text('term_id').references(() => terms.id, { onDelete: 'cascade' }),
+    externalScheme: text('external_scheme'),
+    externalId: text('external_id'),
+    label: text('label').notNull(),
+    externalIds: text('external_ids').notNull().default('{}'),
+    firstSeenAt: text('first_seen_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('ux_graph_nodes_item').on(table.itemId).where(sql`item_id is not null`),
+    uniqueIndex('ux_graph_nodes_shadow_work').on(table.shadowWorkId).where(sql`shadow_work_id is not null`),
+    uniqueIndex('ux_graph_nodes_creator').on(table.creatorId).where(sql`creator_id is not null`),
+    uniqueIndex('ux_graph_nodes_term').on(table.termId).where(sql`term_id is not null`),
+    uniqueIndex('ux_graph_nodes_external')
+      .on(table.nodeType, table.externalScheme, table.externalId)
+      .where(sql`external_id is not null`),
+    index('ix_graph_nodes_type_label').on(table.nodeType, table.label),
+    oneOf('ck_graph_nodes_type', 'node_type', GRAPH_NODE_TYPES),
+    check(
+      'ck_graph_nodes_ref',
+      sql`(("item_id" is not null) + ("shadow_work_id" is not null) + ("creator_id" is not null) + ("term_id" is not null) + ("external_id" is not null)) = 1
+        and ("node_type" <> 'item' or "item_id" is not null)
+        and ("node_type" <> 'shadow_work' or "shadow_work_id" is not null)
+        and ("node_type" <> 'creator' or "creator_id" is not null)
+        and ("node_type" <> 'term' or "term_id" is not null)
+        and ("node_type" not in ('venue', 'institution', 'funder') or ("external_scheme" is not null and "external_id" is not null))`,
+    ),
+    jsonValid('ck_graph_nodes_external_ids_json', 'external_ids'),
+  ],
+);
+
+/** §5.7. Asserted citations are kept per source (GE3); derived edges belong to a run (GE2). */
+export const graphEdges = sqliteTable(
+  'graph_edges',
+  {
+    id: text('id').primaryKey(),
+    edgeType: text('edge_type').notNull(),
+    sourceNodeId: text('source_node_id')
+      .notNull()
+      .references(() => graphNodes.id, { onDelete: 'cascade' }),
+    targetNodeId: text('target_node_id')
+      .notNull()
+      .references(() => graphNodes.id, { onDelete: 'cascade' }),
+    directed: integer('directed', { mode: 'boolean' }).notNull(),
+    weight: real('weight').notNull().default(1),
+    normalisedWeight: real('normalised_weight'),
+    normalisation: text('normalisation', { enum: EDGE_NORMALISATIONS }),
+    occurrences: integer('occurrences'),
+    scheme: text('scheme'),
+    schemeKey: text('scheme_key').notNull().default(''),
+    provenanceSource: text('provenance_source').notNull(),
+    provenanceFetchedAt: text('provenance_fetched_at').notNull(),
+    confidence: real('confidence'),
+    derivation: text('derivation', { enum: EDGE_DERIVATIONS }).notNull(),
+    runId: text('run_id'),
+    runKey: text('run_key').notNull().default(''),
+    paramsDigest: text('params_digest'),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('ux_graph_edges_identity').on(
+      table.edgeType,
+      table.sourceNodeId,
+      table.targetNodeId,
+      table.provenanceSource,
+      table.schemeKey,
+      table.runKey,
+    ),
+    index('ix_graph_edges_source').on(table.sourceNodeId, table.edgeType),
+    index('ix_graph_edges_target').on(table.targetNodeId, table.edgeType),
+    index('ix_graph_edges_type_run').on(table.edgeType, table.runId),
+    index('ix_graph_edges_asserted').on(table.edgeType).where(sql`derivation = 'asserted'`),
+    check('ck_graph_edges_no_self', sql`"source_node_id" <> "target_node_id"`),
+    check('ck_graph_edges_derived_run', sql`"derivation" <> 'derived' or "run_id" is not null`),
+    check('ck_graph_edges_undirected_order', sql`"directed" = 1 or "source_node_id" < "target_node_id"`),
+    check('ck_graph_edges_confidence', sql`"confidence" is null or ("confidence" >= 0 and "confidence" <= 1)`),
+    oneOf('ck_graph_edges_derivation', 'derivation', EDGE_DERIVATIONS),
+    oneOfOrNull('ck_graph_edges_normalisation', 'normalisation', EDGE_NORMALISATIONS),
+    boolean01('ck_graph_edges_directed_bool', 'directed'),
+  ],
+);
+
+/** §5.8. */
+export const edgeEvidence = sqliteTable(
+  'edge_evidence',
+  {
+    id: text('id').primaryKey(),
+    edgeId: text('edge_id')
+      .notNull()
+      .references(() => graphEdges.id, { onDelete: 'cascade' }),
+    kind: text('kind', { enum: EVIDENCE_KINDS }).notNull(),
+    documentId: text('document_id').references(() => documents.id, { onDelete: 'set null' }),
+    pageIndex: integer('page_index'),
+    charStart: integer('char_start'),
+    charEnd: integer('char_end'),
+    section: text('section'),
+    textExcerpt: text('text_excerpt'),
+    intent: text('intent'),
+    intentConfidence: real('intent_confidence'),
+    model: text('model'),
+    extractedAt: text('extracted_at').notNull(),
+  },
+  (table) => [
+    index('ix_edge_evidence_edge_id').on(table.edgeId),
+    index('ix_edge_evidence_intent').on(table.intent).where(sql`intent is not null`),
+    index('ix_edge_evidence_document_id').on(table.documentId).where(sql`document_id is not null`),
+    oneOf('ck_edge_evidence_kind', 'kind', EVIDENCE_KINDS),
+  ],
+);
+
+/* ============================================================================================== */
+/* 10. Curated networks (`spec/data-model.md` §7; Phase 6)                                          */
+/* ============================================================================================== */
+
+/**
+ * §7.1. The head (`current_version_id`) carries no SQL foreign key: the two tables reference each
+ * other, and SQLite cannot create a mutual reference in one migration. The service sets it in the
+ * same transaction as the version it points at.
+ */
+export const curatedNetworks = sqliteTable(
+  'curated_networks',
+  {
+    id: text('id').primaryKey(),
+    publicId: text('public_id').notNull(),
+    name: text('name').notNull(),
+    description: text('description'),
+    ownerUserId: text('owner_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    /** FK → `reviews(id)` arrives with Phase 7's table. */
+    reviewId: text('review_id'),
+    currentVersionId: text('current_version_id'),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+    trashedAt: text('trashed_at'),
+  },
+  (table) => [uniqueIndex('ux_curated_networks_public_id').on(table.publicId), index('ix_curated_networks_owner').on(table.ownerUserId)],
+);
+
+/** §7.2. A frozen version is immutable (CN1) and reads its snapshot (CN3). */
+export const curatedNetworkVersions = sqliteTable(
+  'curated_network_versions',
+  {
+    id: text('id').primaryKey(),
+    networkId: text('network_id')
+      .notNull()
+      .references(() => curatedNetworks.id, { onDelete: 'cascade' }),
+    version: integer('version').notNull(),
+    parentVersionId: text('parent_version_id').references((): AnySQLiteColumn => curatedNetworkVersions.id, { onDelete: 'set null' }),
+    document: text('document').notNull(),
+    isFrozen: integer('is_frozen', { mode: 'boolean' }).notNull().default(false),
+    frozenAt: text('frozen_at'),
+    frozenSnapshot: text('frozen_snapshot'),
+    message: text('message'),
+    createdByUserId: text('created_by_user_id').references(() => users.id, { onDelete: 'restrict' }),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('ux_curated_network_versions_number').on(table.networkId, table.version),
+    check('ck_curated_network_versions_frozen', sql`("is_frozen" = 1) = ("frozen_snapshot" is not null)`),
+    check('ck_curated_network_versions_version', sql`"version" >= 1`),
+    boolean01('ck_curated_network_versions_frozen_bool', 'is_frozen'),
+    jsonValid('ck_curated_network_versions_document_json', 'document'),
+    jsonValidOrNull('ck_curated_network_versions_snapshot_json', 'frozen_snapshot'),
+  ],
+);
+
+
+/* ============================================================================================== */
+/* 11. Systematic review (`spec/data-model.md` §8, `spec/systematic-review.md`; Phase 7)          */
+/* ============================================================================================== */
+
+export const REVIEW_STATUSES = ['draft', 'searching', 'screening', 'full_text', 'extraction', 'analysis', 'complete', 'archived'] as const;
+export const REVIEW_CONFLICT_POLICIES = ['discuss', 'third_screener', 'inclusive'] as const;
+export const REVIEW_RECORD_STAGES = ['identified', 'deduplicated', 'title_abstract', 'full_text', 'included', 'excluded'] as const;
+export const REVIEW_DEDUP_STATUSES = ['unique', 'duplicate', 'merged_master'] as const;
+export const SCREENING_STATUSES = ['pending', 'included', 'excluded', 'maybe', 'conflict'] as const;
+export const RETRIEVAL_STATUSES = ['not_attempted', 'sought', 'retrieved', 'not_retrieved'] as const;
+export const EXTRACTION_STATUSES = ['not_started', 'in_progress', 'complete', 'not_applicable'] as const;
+export const SCREENING_STAGES = ['title_abstract', 'full_text'] as const;
+export const SCREENING_DECISIONS = ['include', 'exclude', 'maybe'] as const;
+export const EXTRACTION_FORM_STATUSES = ['draft', 'active', 'locked'] as const;
+export const EXTRACTION_TEMPLATES = ['rct', 'observational', 'diagnostic', 'qualitative', 'custom'] as const;
+export const PRISMA_STAGE_KEYS = [
+  'records_identified_databases',
+  'records_identified_registers',
+  'records_identified_other',
+  'records_removed_duplicates',
+  'records_removed_automation',
+  'records_removed_other',
+  'records_screened',
+  'records_excluded',
+  'reports_sought',
+  'reports_not_retrieved',
+  'reports_assessed',
+  'reports_excluded',
+  'studies_included',
+  'reports_of_included_studies',
+] as const;
+export const PRISMA_COMPUTED_BY = ['live', 'frozen'] as const;
+
+/** §8.1. */
+export const reviews = sqliteTable(
+  'reviews',
+  {
+    id: text('id').primaryKey(),
+    publicId: text('public_id').notNull(),
+    title: text('title').notNull(),
+    question: text('question'),
+    protocol: text('protocol').notNull().default('{}'),
+    registrationId: text('registration_id'),
+    registrationUrl: text('registration_url'),
+    status: text('status', { enum: REVIEW_STATUSES }).notNull().default('draft'),
+    screenerCount: integer('screener_count').notNull().default(1),
+    blindMode: integer('blind_mode', { mode: 'boolean' }).notNull().default(false),
+    conflictPolicy: text('conflict_policy', { enum: REVIEW_CONFLICT_POLICIES }),
+    /** Ordered `{code, label, stage}`: PRISMA reports reasons in a fixed order. */
+    exclusionReasons: text('exclusion_reasons').notNull().default('[]'),
+    automationDisclosure: integer('automation_disclosure', { mode: 'boolean' }).notNull().default(false),
+    ownerUserId: text('owner_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+    trashedAt: text('trashed_at'),
+  },
+  (table) => [
+    uniqueIndex('ux_reviews_public_id').on(table.publicId),
+    oneOf('ck_reviews_status', 'status', REVIEW_STATUSES),
+    oneOfOrNull('ck_reviews_conflict_policy', 'conflict_policy', REVIEW_CONFLICT_POLICIES),
+    check('ck_reviews_screener_count', sql`"screener_count" in (1, 2)`),
+    boolean01('ck_reviews_blind_mode_bool', 'blind_mode'),
+    boolean01('ck_reviews_automation_disclosure_bool', 'automation_disclosure'),
+    jsonValid('ck_reviews_protocol_json', 'protocol'),
+    jsonValid('ck_reviews_exclusion_reasons_json', 'exclusion_reasons'),
+  ],
+);
+
+/** §8.2. SR1: `records_returned` is what the database said; SR2: no delete once records cite it. */
+export const searchRuns = sqliteTable(
+  'search_runs',
+  {
+    id: text('id').primaryKey(),
+    reviewId: text('review_id')
+      .notNull()
+      .references(() => reviews.id, { onDelete: 'cascade' }),
+    sourceDatabase: text('source_database').notNull(),
+    interface: text('interface'),
+    queryString: text('query_string').notNull(),
+    queryTranslated: text('query_translated'),
+    filters: text('filters').notNull().default('{}'),
+    dateLimitFrom: text('date_limit_from'),
+    dateLimitTo: text('date_limit_to'),
+    executedAt: text('executed_at').notNull(),
+    executedByUserId: text('executed_by_user_id').references(() => users.id, { onDelete: 'restrict' }),
+    recordsReturned: integer('records_returned'),
+    recordsImported: integer('records_imported'),
+    duplicatesRemoved: integer('duplicates_removed'),
+    sourceFileDocumentId: text('source_file_document_id').references(() => documents.id, { onDelete: 'restrict' }),
+    importJobId: text('import_job_id').references(() => jobs.id, { onDelete: 'set null' }),
+    rerunOfSearchRunId: text('rerun_of_search_run_id').references((): AnySQLiteColumn => searchRuns.id, { onDelete: 'restrict' }),
+    notes: text('notes'),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => [index('ix_search_runs_review').on(table.reviewId, table.executedAt), jsonValid('ck_search_runs_filters_json', 'filters')],
+);
+
+/** §8.3. The unit PRISMA counts. RR2: the screening columns are caches of `screening_decisions`. */
+export const reviewRecords = sqliteTable(
+  'review_records',
+  {
+    id: text('id').primaryKey(),
+    reviewId: text('review_id')
+      .notNull()
+      .references(() => reviews.id, { onDelete: 'cascade' }),
+    itemId: text('item_id')
+      .notNull()
+      .references(() => items.id, { onDelete: 'restrict' }),
+    stage: text('stage', { enum: REVIEW_RECORD_STAGES }).notNull().default('identified'),
+    dedupStatus: text('dedup_status', { enum: REVIEW_DEDUP_STATUSES }).notNull().default('unique'),
+    duplicateOfId: text('duplicate_of_id').references((): AnySQLiteColumn => reviewRecords.id, { onDelete: 'restrict' }),
+    screeningStatus: text('screening_status', { enum: SCREENING_STATUSES }).notNull().default('pending'),
+    exclusionReasonCode: text('exclusion_reason_code'),
+    retrievalStatus: text('retrieval_status', { enum: RETRIEVAL_STATUSES }).notNull().default('not_attempted'),
+    retrievalNote: text('retrieval_note'),
+    fullTextDocumentId: text('full_text_document_id').references(() => documents.id, { onDelete: 'set null' }),
+    extractionStatus: text('extraction_status', { enum: EXTRACTION_STATUSES }).notNull().default('not_started'),
+    isSnowballed: integer('is_snowballed', { mode: 'boolean' }).notNull().default(false),
+    snowballFromItemId: text('snowball_from_item_id').references(() => items.id, { onDelete: 'restrict' }),
+    studyGroupKey: text('study_group_key'),
+    addedAt: text('added_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('ux_review_records_review_item').on(table.reviewId, table.itemId),
+    index('ix_review_records_worklist').on(table.reviewId, table.screeningStatus, table.addedAt),
+    index('ix_review_records_item').on(table.itemId),
+    index('ix_review_records_stage').on(table.reviewId, table.stage),
+    index('ix_review_records_study_group').on(table.reviewId, table.studyGroupKey).where(sql`study_group_key is not null`),
+    check('ck_review_records_duplicate', sql`("dedup_status" = 'duplicate') = ("duplicate_of_id" is not null)`),
+    oneOf('ck_review_records_stage', 'stage', REVIEW_RECORD_STAGES),
+    oneOf('ck_review_records_dedup_status', 'dedup_status', REVIEW_DEDUP_STATUSES),
+    oneOf('ck_review_records_screening_status', 'screening_status', SCREENING_STATUSES),
+    oneOf('ck_review_records_retrieval_status', 'retrieval_status', RETRIEVAL_STATUSES),
+    oneOf('ck_review_records_extraction_status', 'extraction_status', EXTRACTION_STATUSES),
+    boolean01('ck_review_records_is_snowballed_bool', 'is_snowballed'),
+  ],
+);
+
+/** §8.4. Which searches found a record; exactly one primary source per record. */
+export const reviewRecordSources = sqliteTable(
+  'review_record_sources',
+  {
+    reviewRecordId: text('review_record_id')
+      .notNull()
+      .references(() => reviewRecords.id, { onDelete: 'cascade' }),
+    searchRunId: text('search_run_id')
+      .notNull()
+      .references(() => searchRuns.id, { onDelete: 'restrict' }),
+    externalRecordId: text('external_record_id'),
+    rawRecord: text('raw_record'),
+    isPrimarySource: integer('is_primary_source', { mode: 'boolean' }).notNull().default(false),
+    importedAt: text('imported_at').notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.reviewRecordId, table.searchRunId] }),
+    uniqueIndex('ux_review_record_sources_primary').on(table.reviewRecordId).where(sql`is_primary_source = 1`),
+    index('ix_review_record_sources_run').on(table.searchRunId),
+    boolean01('ck_review_record_sources_primary_bool', 'is_primary_source'),
+    jsonValidOrNull('ck_review_record_sources_raw_json', 'raw_record'),
+  ],
+);
+
+/** §8.5. Append-only (SD1); `tool_assisted` comes from the actor, never the client (SD2). */
+export const screeningDecisions = sqliteTable(
+  'screening_decisions',
+  {
+    id: text('id').primaryKey(),
+    reviewId: text('review_id')
+      .notNull()
+      .references(() => reviews.id, { onDelete: 'cascade' }),
+    reviewRecordId: text('review_record_id')
+      .notNull()
+      .references(() => reviewRecords.id, { onDelete: 'cascade' }),
+    stage: text('stage', { enum: SCREENING_STAGES }).notNull(),
+    screenerUserId: text('screener_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    decision: text('decision', { enum: SCREENING_DECISIONS }).notNull(),
+    exclusionReasonCode: text('exclusion_reason_code'),
+    exclusionReasonNote: text('exclusion_reason_note'),
+    decidedAt: text('decided_at').notNull(),
+    durationMs: integer('duration_ms'),
+    isCurrent: integer('is_current', { mode: 'boolean' }).notNull().default(true),
+    supersedesId: text('supersedes_id').references((): AnySQLiteColumn => screeningDecisions.id, { onDelete: 'set null' }),
+    supersededById: text('superseded_by_id').references((): AnySQLiteColumn => screeningDecisions.id, { onDelete: 'set null' }),
+    toolAssisted: integer('tool_assisted', { mode: 'boolean' }).notNull().default(false),
+    toolDetail: text('tool_detail'),
+    isConflictResolution: integer('is_conflict_resolution', { mode: 'boolean' }).notNull().default(false),
+    resolvesConflictBetween: text('resolves_conflict_between'),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('ux_screening_decisions_current').on(table.reviewRecordId, table.stage, table.screenerUserId).where(sql`is_current = 1`),
+    index('ix_screening_decisions_record').on(table.reviewRecordId, table.stage),
+    index('ix_screening_decisions_review_current').on(table.reviewId, table.stage, table.decision).where(sql`is_current = 1`),
+    index('ix_screening_decisions_screener').on(table.screenerUserId, table.decidedAt),
+    check('ck_screening_full_text_reason', sql`not ("stage" = 'full_text' and "decision" = 'exclude' and "exclusion_reason_code" is null)`),
+    oneOf('ck_screening_decisions_stage', 'stage', SCREENING_STAGES),
+    oneOf('ck_screening_decisions_decision', 'decision', SCREENING_DECISIONS),
+    boolean01('ck_screening_decisions_is_current_bool', 'is_current'),
+    boolean01('ck_screening_decisions_tool_assisted_bool', 'tool_assisted'),
+    boolean01('ck_screening_decisions_conflict_bool', 'is_conflict_resolution'),
+    jsonValidOrNull('ck_screening_decisions_tool_detail_json', 'tool_detail'),
+    jsonValidOrNull('ck_screening_decisions_resolves_json', 'resolves_conflict_between'),
+  ],
+);
+
+/** §8.6. A form references custom fields (EF1); locked after the first complete extraction (EF2). */
+export const extractionForms = sqliteTable(
+  'extraction_forms',
+  {
+    id: text('id').primaryKey(),
+    reviewId: text('review_id')
+      .notNull()
+      .references(() => reviews.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    version: integer('version').notNull().default(1),
+    template: text('template', { enum: EXTRACTION_TEMPLATES }),
+    schemaJson: text('schema_json').notNull(),
+    repeatableGroups: text('repeatable_groups').notNull().default('[]'),
+    status: text('status', { enum: EXTRACTION_FORM_STATUSES }).notNull().default('draft'),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('ux_extraction_forms_version').on(table.reviewId, table.name, table.version),
+    check('ck_extraction_forms_version', sql`"version" >= 1`),
+    oneOf('ck_extraction_forms_status', 'status', EXTRACTION_FORM_STATUSES),
+    oneOfOrNull('ck_extraction_forms_template', 'template', EXTRACTION_TEMPLATES),
+    jsonValid('ck_extraction_forms_schema_json', 'schema_json'),
+    jsonValid('ck_extraction_forms_groups_json', 'repeatable_groups'),
+  ],
+);
+
+/** §8.7. The instrument is copied in, so a later revision cannot rewrite old judgements. */
+export const robAssessments = sqliteTable(
+  'rob_assessments',
+  {
+    id: text('id').primaryKey(),
+    reviewId: text('review_id')
+      .notNull()
+      .references(() => reviews.id, { onDelete: 'cascade' }),
+    reviewRecordId: text('review_record_id')
+      .notNull()
+      .references(() => reviewRecords.id, { onDelete: 'cascade' }),
+    tool: text('tool').notNull(),
+    toolVersion: text('tool_version'),
+    instrument: text('instrument').notNull(),
+    signallingAnswers: text('signalling_answers').notNull().default('{}'),
+    domainJudgements: text('domain_judgements').notNull().default('{}'),
+    overallJudgement: text('overall_judgement'),
+    outcomeLabel: text('outcome_label'),
+    /** `COALESCE(outcome_label, '')`. */
+    outcomeKey: text('outcome_key').notNull().default(''),
+    armLabel: text('arm_label'),
+    assessorUserId: text('assessor_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    assessedAt: text('assessed_at').notNull(),
+    isCurrent: integer('is_current', { mode: 'boolean' }).notNull().default(true),
+    supersededById: text('superseded_by_id').references((): AnySQLiteColumn => robAssessments.id, { onDelete: 'set null' }),
+    notes: text('notes'),
+  },
+  (table) => [
+    uniqueIndex('ux_rob_assessments_current').on(table.reviewRecordId, table.tool, table.outcomeKey, table.assessorUserId).where(sql`is_current = 1`),
+    index('ix_rob_assessments_review').on(table.reviewId, table.tool),
+    check('ck_rob_assessments_outcome_key', sql`"outcome_key" = coalesce("outcome_label", '')`),
+    boolean01('ck_rob_assessments_is_current_bool', 'is_current'),
+    jsonValid('ck_rob_assessments_instrument_json', 'instrument'),
+    jsonValid('ck_rob_assessments_answers_json', 'signalling_answers'),
+    jsonValid('ck_rob_assessments_domains_json', 'domain_judgements'),
+  ],
+);
+
+/** §8.8. Frozen PRISMA snapshots; a snapshot is never recomputed (PC1). */
+export const prismaCounts = sqliteTable(
+  'prisma_counts',
+  {
+    id: text('id').primaryKey(),
+    reviewId: text('review_id')
+      .notNull()
+      .references(() => reviews.id, { onDelete: 'cascade' }),
+    snapshotAt: text('snapshot_at').notNull(),
+    snapshotLabel: text('snapshot_label'),
+    stageKey: text('stage_key', { enum: PRISMA_STAGE_KEYS }).notNull(),
+    sourceLabel: text('source_label'),
+    sourceScopeKey: text('source_scope_key').notNull().default(''),
+    searchRunId: text('search_run_id').references(() => searchRuns.id, { onDelete: 'set null' }),
+    exclusionReasonCode: text('exclusion_reason_code'),
+    reasonScopeKey: text('reason_scope_key').notNull().default(''),
+    countValue: integer('count_value').notNull(),
+    computedBy: text('computed_by', { enum: PRISMA_COMPUTED_BY }).notNull(),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('ux_prisma_counts_cell').on(table.reviewId, table.snapshotAt, table.stageKey, table.sourceScopeKey, table.reasonScopeKey),
+    check('ck_prisma_counts_source_scope', sql`"source_scope_key" = coalesce("source_label", '')`),
+    check('ck_prisma_counts_reason_scope', sql`"reason_scope_key" = coalesce("exclusion_reason_code", '')`),
+    check('ck_prisma_counts_count', sql`"count_value" >= 0`),
+    oneOf('ck_prisma_counts_stage_key', 'stage_key', PRISMA_STAGE_KEYS),
+    oneOf('ck_prisma_counts_computed_by', 'computed_by', PRISMA_COMPUTED_BY),
+  ],
+);
+
+export type ReviewRow = typeof reviews.$inferSelect;
+export type SearchRunRow = typeof searchRuns.$inferSelect;
+export type ReviewRecordRow = typeof reviewRecords.$inferSelect;
+export type ReviewRecordSourceRow = typeof reviewRecordSources.$inferSelect;
+export type ScreeningDecisionRow = typeof screeningDecisions.$inferSelect;
+export type ExtractionFormRow = typeof extractionForms.$inferSelect;
+export type RobAssessmentRow = typeof robAssessments.$inferSelect;
+export type PrismaCountRow = typeof prismaCounts.$inferSelect;
+
 /* -------------------------------------------------------------------------------------------- */
 /* Row types                                                                                       */
 /* -------------------------------------------------------------------------------------------- */
+
+export type CuratedNetworkRow = typeof curatedNetworks.$inferSelect;
+export type CuratedNetworkVersionRow = typeof curatedNetworkVersions.$inferSelect;
+export type TermRow = typeof terms.$inferSelect;
+export type ItemTermRow = typeof itemTerms.$inferSelect;
+export type ShadowWorkRow = typeof shadowWorks.$inferSelect;
+export type GraphNodeRow = typeof graphNodes.$inferSelect;
+export type GraphEdgeRow = typeof graphEdges.$inferSelect;
+export type EdgeEvidenceRow = typeof edgeEvidence.$inferSelect;
+export type PluginRow = typeof plugins.$inferSelect;
+export type CheckResultRow = typeof checkResults.$inferSelect;
+export type ItemMetricRow = typeof itemMetrics.$inferSelect;
+export type ZoteroSyncLibraryRow = typeof zoteroSyncLibraries.$inferSelect;
+export type ZoteroSyncLinkRow = typeof zoteroSyncLinks.$inferSelect;
+export type ZoteroSyncConflictRow = typeof zoteroSyncConflicts.$inferSelect;
 
 export type UserRow = typeof users.$inferSelect;
 export type ApiTokenRow = typeof apiTokens.$inferSelect;

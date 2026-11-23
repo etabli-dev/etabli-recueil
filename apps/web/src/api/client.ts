@@ -23,6 +23,9 @@
  * correct in both and there is no environment-dependent origin to get wrong.
  */
 import type {
+  Annotation,
+  AnnotationCreate,
+  AnnotationUpdate,
   Attachment,
   Collection,
   CustomField,
@@ -169,6 +172,78 @@ const buildQueryString = (query: RequestOptions['query']): string => {
   const rendered = params.toString();
   return rendered === '' ? '' : `?${rendered}`;
 };
+
+/** `GET /graph/network` as JSON. */
+export interface GraphNetwork {
+  nodes: { id: string; label: string; type: string; year: number | null; venue: string | null; doi: string | null; citedBy: number | null; inLibrary: boolean }[];
+  edges: { source: string; target: string; type: string; directed: boolean; weight: number; provenance: string }[];
+  generatedAt: string;
+  description: string;
+}
+
+/** `GET /reviews/{id}` (CONCEPT §5.10). */
+export interface ReviewWire {
+  id: string;
+  title: string;
+  question: string | null;
+  status: string;
+  exclusionReasons: { code: string; label: string; stage: 'title_abstract' | 'full_text' | 'any' }[];
+  automationDisclosure: boolean;
+}
+
+export interface ScreeningDecisionWire {
+  id: string;
+  stage: string;
+  decision: 'include' | 'exclude' | 'maybe';
+  exclusionReasonCode: string | null;
+  decidedAt: string;
+}
+
+/** One record in a review's worklist. */
+export interface ReviewRecordWire {
+  id: string;
+  itemId: string;
+  stage: string;
+  screeningStatus: string;
+  retrievalStatus: string;
+  title: string | null;
+  abstract: string | null;
+  year: number | null;
+  venue: string | null;
+  doi: string | null;
+  authors: string[];
+  sources: string[];
+  titleAbstract: ScreeningDecisionWire | null;
+  fullText: ScreeningDecisionWire | null;
+}
+
+export interface PrismaWire {
+  cells: { stageKey: string; count: number; sourceLabel: string | null; exclusionReasonCode: string | null }[];
+}
+
+/** `GET /curated-networks/{id}`. */
+export interface CuratedNetworkWire {
+  id: string;
+  name: string;
+  version: number;
+  isFrozen: boolean;
+  document: {
+    schema: string;
+    nodes: { id: string; kind: 'item' | 'free' | 'group'; itemId?: string; label?: string }[];
+    edges: { id: string; source: string; target: string; kind: string; edgeType?: string; weight?: number }[];
+    layout: { algorithm: string; positions: Record<string, { x: number; y: number; pinned?: boolean }> };
+    style: Record<string, unknown>;
+    annotations: unknown[];
+  };
+  items: Record<string, { title: string | null; year: number | null; firstAuthor: string | null; state: string }>;
+}
+
+/** `GET /graph/coverage`. */
+export interface GraphCoverage {
+  items: number;
+  withReferences: number;
+  bySource: { source: string; items: number; edges: number; lastFetchedAt: string | null }[];
+}
 
 export class RecueilClient {
   private readonly baseUrl: string;
@@ -337,6 +412,113 @@ export class RecueilClient {
 
   documentContentUrl(documentId: string): string {
     return this.url(`/documents/${encodeURIComponent(documentId)}/content`);
+  }
+
+  /* Graph (CONCEPT §5.8) -------------------------------------------------------------------- */
+
+  getNetwork(network: string, signal?: AbortSignal): Promise<GraphNetwork> {
+    return this.api<GraphNetwork>('/graph/network', { query: { network, format: 'json' }, signal });
+  }
+
+  getGraphCoverage(signal?: AbortSignal): Promise<GraphCoverage> {
+    return this.api<GraphCoverage>('/graph/coverage', { signal });
+  }
+
+  /** A book item from an ISBN alone; enrichment fills in the rest (Phase 8 capture). */
+  createItemFromIsbn(isbn: string): Promise<{ id: string }> {
+    return this.api<{ id: string }>('/items', { method: 'POST', body: { itemType: 'book', bibliographic: { isbn } } });
+  }
+
+  /* Systematic reviews (CONCEPT §5.10) --------------------------------------------------- */
+
+  listReviews(signal?: AbortSignal): Promise<{ data: ReviewWire[] }> {
+    return this.api('/reviews', { signal });
+  }
+
+  reviewWorklist(id: string, stage: 'title_abstract' | 'full_text', status: 'pending' | 'decided' | 'all', signal?: AbortSignal): Promise<{ total: number; pending: number; data: ReviewRecordWire[] }> {
+    return this.api(`/reviews/${encodeURIComponent(id)}/records`, { query: { stage, status, limit: '100' }, signal });
+  }
+
+  decideReviewRecord(id: string, recordId: string, body: { stage: string; decision: string; reasonCode?: string; durationMs?: number }): Promise<ReviewRecordWire> {
+    return this.api(`/reviews/${encodeURIComponent(id)}/records/${encodeURIComponent(recordId)}/decisions`, { method: 'POST', body });
+  }
+
+  undoReviewDecision(id: string, recordId: string, stage: string): Promise<ReviewRecordWire> {
+    return this.api(`/reviews/${encodeURIComponent(id)}/records/${encodeURIComponent(recordId)}/undo`, { method: 'POST', body: { stage } });
+  }
+
+  setReviewRetrieval(id: string, recordId: string, status: string, note?: string): Promise<ReviewRecordWire> {
+    return this.api(`/reviews/${encodeURIComponent(id)}/records/${encodeURIComponent(recordId)}/retrieval`, { method: 'PUT', body: { status, ...(note === undefined ? {} : { note }) } });
+  }
+
+  reviewPrisma(id: string, signal?: AbortSignal): Promise<PrismaWire> {
+    return this.api(`/reviews/${encodeURIComponent(id)}/prisma`, { signal });
+  }
+
+  reviewExportUrl(id: string, what: 'prisma.csv' | 'prisma.svg' | 'included.csv' | 'audit.csv' | 'extraction.csv'): string {
+    return this.url(`/reviews/${encodeURIComponent(id)}/${what}`);
+  }
+
+  /* Curated networks (CONCEPT §5.9) ------------------------------------------------------ */
+
+  listCuratedNetworks(signal?: AbortSignal): Promise<{ data: { id: string; name: string; updatedAt: string }[] }> {
+    return this.api('/curated-networks', { signal });
+  }
+
+  getCuratedNetwork(id: string, signal?: AbortSignal): Promise<CuratedNetworkWire> {
+    return this.api<CuratedNetworkWire>(`/curated-networks/${encodeURIComponent(id)}`, { signal });
+  }
+
+  createCuratedNetwork(body: { name: string; document?: unknown; fromGraph?: string }): Promise<CuratedNetworkWire> {
+    return this.api<CuratedNetworkWire>('/curated-networks', { method: 'POST', body });
+  }
+
+  saveCuratedNetwork(id: string, document: unknown, expectedVersion: number, message?: string): Promise<CuratedNetworkWire> {
+    return this.api<CuratedNetworkWire>(`/curated-networks/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: { document, ...(message === undefined ? {} : { message }) },
+      expectedVersion,
+    });
+  }
+
+  freezeCuratedNetwork(id: string): Promise<CuratedNetworkWire> {
+    return this.api<CuratedNetworkWire>(`/curated-networks/${encodeURIComponent(id)}/freeze`, { method: 'POST', body: {} });
+  }
+
+  curatedExportUrl(id: string, format: 'svg' | 'tikz' | 'graphml' | 'gexf', version?: number): string {
+    return this.url(`/curated-networks/${encodeURIComponent(id)}/export`, { format, ...(version === undefined ? {} : { version: String(version) }) });
+  }
+
+  /* Annotations (ADR-0009) ---------------------------------------------------------------- */
+
+  listAnnotations(documentId: string, signal?: AbortSignal): Promise<Page<Annotation>> {
+    return this.api<Page<Annotation>>('/annotations', { query: { documentId }, signal });
+  }
+
+  createAnnotation(body: AnnotationCreate): Promise<Annotation> {
+    return this.api<Annotation>('/annotations', { method: 'POST', body });
+  }
+
+  updateAnnotation(id: string, patch: AnnotationUpdate, expectedVersion?: number): Promise<Annotation> {
+    return this.api<Annotation>(`/annotations/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: patch,
+      ...(expectedVersion === undefined ? {} : { expectedVersion }),
+    });
+  }
+
+  trashAnnotation(id: string): Promise<Annotation> {
+    return this.api<Annotation>(`/annotations/${encodeURIComponent(id)}/trash`, { method: 'POST', body: {} });
+  }
+
+  /** Annotate → note → cite: a note quoting the passage, ending in a Pandoc citation. */
+  noteFromAnnotation(id: string): Promise<Note> {
+    return this.api<Note>(`/annotations/${encodeURIComponent(id)}/note`, { method: 'POST', body: {} });
+  }
+
+  /** The PDF with every annotation embedded, as a download (AN1: the stored file is unchanged). */
+  annotatedPdfUrl(documentId: string): string {
+    return this.url(`/documents/${encodeURIComponent(documentId)}/annotated.pdf`);
   }
 
   listNotes(itemId: string, signal?: AbortSignal): Promise<Page<Note>> {
@@ -548,11 +730,13 @@ export class RecueilClient {
     signal?: AbortSignal,
   ): Promise<IngestUploadResult> {
     const form = new FormData();
-    form.append('file', file, fields.filename);
+    // Fields before the file: the server reads the fields that arrived ahead of the file part and
+    // no others (`@fastify/multipart`), so a field after the file would be silently dropped.
     for (const key of ['sourceKind', 'sourceId', 'title', 'sender', 'subject', 'runLabel'] as const) {
       const value = fields[key];
       if (value !== undefined) form.append(key, value);
     }
+    form.append('file', file, fields.filename);
 
     const url = `${this.baseUrl}${API_BASE_PATH}/ingestion/upload`;
     const headers: Record<string, string> = { accept: `${JSON_CONTENT_TYPE}, application/problem+json` };

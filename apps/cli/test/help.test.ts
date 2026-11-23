@@ -51,6 +51,14 @@ describe('recueil --help', () => {
       'queue',
       'review',
       'rules',
+      'sync',
+      'enrich',
+      'check',
+      'dedup',
+      'plugin',
+      'graph',
+      'network',
+      'sr',
     ]);
     for (const spec of shipped) {
       expect(commandEntry(stdout, spec.name), `\`${spec.name}\` works`).not.toContain('not implemented');

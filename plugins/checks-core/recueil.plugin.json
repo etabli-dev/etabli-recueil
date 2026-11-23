@@ -1,0 +1,154 @@
+{
+  "$schema": "https://github.com/etabli-dev/etabli-recueil/raw/main/spec/plugin-manifest.schema.json",
+  "name": "@recueil/plugin-checks-core",
+  "displayName": "Core checks",
+  "version": "1.0.0",
+  "description": "The thirteen checks of the verification engine: completeness, identifiers, DOI resolution, existence, retractions, published preprints, version duplicates, ORCID, ISSNs, plausibility, open access, citation keys and file integrity.",
+  "author": {
+    "name": "Établi"
+  },
+  "licence": "AGPL-3.0-or-later",
+  "recueilApi": "^1.0.0",
+  "main": "./dist/index.js",
+  "permissions": [
+    "network:outbound",
+    "items:read",
+    "storage:read"
+  ],
+  "permissionNotes": {
+    "network:outbound": "Asks doi.org, Crossref, OpenAlex, arXiv, ORCID and Unpaywall about the works being checked.",
+    "items:read": "Library-wide checks read every item.",
+    "storage:read": "The file check asks whether each attached file is in the store."
+  },
+  "hooks": [
+    {
+      "type": "check",
+      "id": "completeness",
+      "export": "completeness",
+      "priority": 10,
+      "provides": [
+        "completeness"
+      ]
+    },
+    {
+      "type": "check",
+      "id": "identifier-syntax",
+      "export": "identifierSyntax",
+      "priority": 20,
+      "provides": [
+        "identifier-syntax"
+      ]
+    },
+    {
+      "type": "check",
+      "id": "doi-resolves",
+      "export": "doiResolves",
+      "priority": 30,
+      "provides": [
+        "doi-resolves"
+      ]
+    },
+    {
+      "type": "check",
+      "id": "existence",
+      "export": "existence",
+      "priority": 40,
+      "provides": [
+        "existence"
+      ]
+    },
+    {
+      "type": "check",
+      "id": "retraction",
+      "export": "retraction",
+      "priority": 50,
+      "provides": [
+        "retraction"
+      ]
+    },
+    {
+      "type": "check",
+      "id": "preprint-published",
+      "export": "preprintPublished",
+      "priority": 60,
+      "provides": [
+        "preprint-published"
+      ]
+    },
+    {
+      "type": "check",
+      "id": "version-duplicate",
+      "export": "versionDuplicate",
+      "priority": 70,
+      "provides": [
+        "version-duplicate"
+      ]
+    },
+    {
+      "type": "check",
+      "id": "author-consistency",
+      "export": "authorConsistency",
+      "priority": 80,
+      "provides": [
+        "author-consistency"
+      ]
+    },
+    {
+      "type": "check",
+      "id": "venue-issn",
+      "export": "venueIssn",
+      "priority": 90,
+      "provides": [
+        "venue-issn"
+      ]
+    },
+    {
+      "type": "check",
+      "id": "plausibility",
+      "export": "plausibility",
+      "priority": 100,
+      "provides": [
+        "plausibility"
+      ]
+    },
+    {
+      "type": "check",
+      "id": "oa-status",
+      "export": "oaStatus",
+      "priority": 110,
+      "provides": [
+        "oa-status"
+      ]
+    },
+    {
+      "type": "check",
+      "id": "citation-key",
+      "export": "citationKey",
+      "priority": 120,
+      "provides": [
+        "citation-key"
+      ]
+    },
+    {
+      "type": "check",
+      "id": "attachment-integrity",
+      "export": "attachmentIntegrity",
+      "priority": 130,
+      "provides": [
+        "attachment-integrity"
+      ]
+    }
+  ],
+  "settings": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "mailto": {
+        "type": "string",
+        "format": "email",
+        "title": "Contact address",
+        "description": "Sent to Crossref and Unpaywall; the open-access check needs it."
+      }
+    }
+  }
+}

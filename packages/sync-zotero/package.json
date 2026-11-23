@@ -1,0 +1,44 @@
+{
+  "name": "@recueil/sync-zotero",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Two-way sync between a Recueil library and zotero.org libraries through the Zotero Web API v3 (ADR-0025): pull, push, a per-field three-way merge, conflicts, files both ways.",
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc --build tsconfig.build.json",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --build tsconfig.build.json && tsc --noEmit -p tsconfig.json",
+    "test": "tsc --build tsconfig.build.json && vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@recueil/core": "workspace:*",
+    "@recueil/formats": "workspace:*",
+    "@recueil/import-zotero": "workspace:*",
+    "@recueil/schemas": "workspace:*",
+    "drizzle-orm": "^0.45.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.12"
+  }
+}

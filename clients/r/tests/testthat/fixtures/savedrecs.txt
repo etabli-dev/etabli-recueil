@@ -1,0 +1,49 @@
+FN Clarivate Analytics Web of Science
+VR 1.0
+PT J
+AU Lovelace, A
+   Somerville, M
+AF Lovelace, Ada
+   Somerville, Mary
+TI Fracture healing in the elderly
+SO INJURY
+LA English
+DT Article
+DE geriatrics; trauma
+AB Bones heal more slowly with age.
+C1 [Lovelace, Ada] Univ London, London, England
+CR BABBAGE C, 1999, BONE, DOI 10.1000/X
+   HERSCHEL C, 2005, J ORTHOP RES, V23, P101
+NR 2
+TC 7
+PY 2020
+VL 12
+IS 3
+BP 101
+EP 110
+DI 10.1000/a
+UT RECUEIL:ABCD2345
+ER
+
+PT J
+AU Babbage, C
+AF Babbage, Charles
+TI Distal radius fixation outcomes
+SO BONE
+LA English
+DT Article
+DE trauma
+AB Plates and wires compared.
+C1 NA
+CR HERSCHEL C, 2005, J ORTHOP RES, V23, P101
+NR 1
+TC 2
+PY 2019
+VL 4
+BP 1
+EP 9
+DI 10.1000/b
+UT RECUEIL:EFGH6789
+ER
+
+EF

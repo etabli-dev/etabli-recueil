@@ -11,10 +11,14 @@ import { SourcesScreen } from '../sources/sources-screen.js';
 
 export interface SourcesSearch {
   source?: string;
+  /** A folder picked in the desktop shell (`Watch a folder…`), to prefill a new folder source. */
+  folder?: string;
 }
 
-export const validateSourcesSearch = (raw: Record<string, unknown>): SourcesSearch =>
-  typeof raw.source === 'string' && raw.source !== '' ? { source: raw.source } : {};
+export const validateSourcesSearch = (raw: Record<string, unknown>): SourcesSearch => ({
+  ...(typeof raw.source === 'string' && raw.source !== '' ? { source: raw.source } : {}),
+  ...(typeof raw.folder === 'string' && raw.folder !== '' && raw.folder.length <= 4096 ? { folder: raw.folder } : {}),
+});
 
 export const SourcesRoute = (): JSX.Element => {
   const search = useSearch({ strict: false }) as SourcesSearch;
@@ -27,5 +31,5 @@ export const SourcesRoute = (): JSX.Element => {
     [navigate],
   );
 
-  return <SourcesScreen selectedSourceId={search.source ?? null} onSelect={onSelect} />;
+  return <SourcesScreen selectedSourceId={search.source ?? null} onSelect={onSelect} newFolder={search.folder ?? null} />;
 };

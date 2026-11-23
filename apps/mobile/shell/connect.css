@@ -1,0 +1,29 @@
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, sans-serif;
+}
+main {
+  max-width: 28rem;
+  margin: 0 auto;
+  padding: max(1.5rem, env(safe-area-inset-top)) 1.25rem 1.5rem;
+}
+form {
+  display: grid;
+  gap: 0.9rem;
+}
+label {
+  display: grid;
+  gap: 0.3rem;
+}
+input,
+button {
+  font: inherit;
+  padding: 0.7rem;
+  border-radius: 6px;
+}
+button {
+  min-height: 2.75rem;
+}
+#status[data-kind='error'] {
+  color: #b42318;
+}

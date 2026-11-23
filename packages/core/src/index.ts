@@ -21,7 +21,7 @@ export {
   resolveDatabaseFile,
 } from './db/client.js';
 export type { OpenDatabaseOptions, OpenedDatabase, RecueilDatabase, SqliteConnection } from './db/client.js';
-export { findMigrationsFolder, migrate } from './db/migrate.js';
+export { NewerLibraryError, findMigrationsFolder, migrate } from './db/migrate.js';
 export type { MigrateOptions } from './db/migrate.js';
 
 export * from './storage/index.js';
@@ -43,6 +43,12 @@ import { NoteService } from './services/notes.js';
 import { ProvenanceService } from './services/provenance.js';
 import { SearchService } from './services/search.js';
 import { TagService } from './services/tags.js';
+import { AnnotationService } from './services/annotations.js';
+import { CuratedNetworkService } from './services/curated.js';
+import { GraphService } from './services/graph.js';
+import { ExtractionService } from './services/extraction.js';
+import { ReviewService } from './services/review.js';
+import { ItemMergeService } from './services/merge.js';
 import { TrashService } from './services/trash.js';
 import { ensureLocalUser } from './services/users.js';
 import type { UserRow } from './db/schema.js';
@@ -88,6 +94,18 @@ export interface Recueil {
   search: SearchService;
   /** The bin, across every entity (P5, §6.6). */
   trash: TrashService;
+  /** Reversible item merges (CONCEPT §5.6). */
+  merges: ItemMergeService;
+  /** Reading annotations as records (ADR-0009). */
+  annotations: AnnotationService;
+  /** The bibliometric graph (CONCEPT §5.8). */
+  graph: GraphService;
+  /** Curated networks: versioned publication figures (CONCEPT §5.9). */
+  curated: CuratedNetworkService;
+  /** Systematic reviews: searches, records, screening, PRISMA (CONCEPT §5.10). */
+  reviews: ReviewService;
+  /** Extraction forms and values, and risk-of-bias assessments (CONCEPT §5.10). */
+  extraction: ExtractionService;
   /** The single local account every owned record belongs to in v1. */
   user: UserRow;
   /** An actor for that account, for callers that have no request context of their own. */
@@ -128,6 +146,12 @@ export const createRecueil = (options: CreateRecueilOptions): Recueil => {
   const notes = new NoteService(db, audit, user.id, indexer);
   const customFields = new CustomFieldService(db, audit);
   const creators = new CreatorService(db, audit, indexer);
+  const annotations = new AnnotationService(db, audit, user.id);
+  const graph = new GraphService(db, library);
+  const curated = new CuratedNetworkService(db, creators, user.id);
+  const reviews = new ReviewService(db, audit, library, creators, user.id);
+  const extraction = new ExtractionService(db, audit, customFields, reviews, user.id);
+  const merges = new ItemMergeService(db, audit, { library, tags, collections, creators });
   const trash = new TrashService(db, audit, {
     library,
     collections,
@@ -135,6 +159,7 @@ export const createRecueil = (options: CreateRecueilOptions): Recueil => {
     notes,
     creators,
     documents,
+    annotations,
   });
 
   let closed = false;
@@ -153,6 +178,12 @@ export const createRecueil = (options: CreateRecueilOptions): Recueil => {
     provenance,
     search,
     trash,
+    merges,
+    annotations,
+    graph,
+    curated,
+    reviews,
+    extraction,
     user,
     actor: userActor(user.id),
     close: () => {

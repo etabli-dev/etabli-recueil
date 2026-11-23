@@ -1,0 +1,43 @@
+---
+title: "Upgrades and compatibility"
+---
+
+What stays stable from one Recueil release to the next. **These guarantees take effect at the 1.0
+tag**; before it, any `0.x` release may break any of them, and the release notes say where.
+
+## The library
+
+- **Migrations are forward-only and automatic.** The server applies them on start (`db/migrate.ts`),
+  each in a transaction, and refuses to start on a database newer than itself. A downgrade is a
+  restore from backup, never a reverse migration.
+- **Back up before an upgrade.** `recueil backup` takes a consistent snapshot of the database and
+  the content store; `recueil restore` is tested in CI against the container image.
+- **The content store never changes format** within a major version: files are addressed by
+  SHA-256 and a 1.x server reads every store a 1.0 server wrote.
+
+## The REST API (`/api/v1`)
+
+- Within `v1`, changes are additive: new paths, new optional fields, new enum values in fields
+  documented as open vocabularies. A field is never removed or retyped and a closed vocabulary
+  never shrinks. The contract is `spec/openapi.yaml`, generated from the schemas the server
+  validates with; CI fails when the two disagree.
+- A breaking change is `/api/v2`, served beside `v1` for at least one minor release.
+
+## The plugin API
+
+- Versioned on its own (`PLUGIN_API_VERSION`, now `1.0.0`), as semver over `spec/hooks.md`. A
+  plugin declares the range it supports (`recueilApi`), and the host refuses one it cannot honour.
+- A hook or context method is deprecated for two minor versions before it is removed, and removal
+  is a major version. The SDK's types are generated from `spec/hooks.md` and checked in CI, so the
+  document and the code cannot drift.
+
+## The command line and the files it writes
+
+- Commands, flags and exit codes documented in the [CLI reference](cli.qmd) keep their meaning
+  within a major version; output meant for scripts is the `--json` form.
+- Export formats (BibTeX, RIS, CSL-JSON, the analytics tables, the review exports) keep their
+  columns; new columns are added at the end.
+
+## The apps
+
+The desktop and mobile apps follow the server's major version: a 1.x app talks to any 1.x server.

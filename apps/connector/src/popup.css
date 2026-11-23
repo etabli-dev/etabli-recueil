@@ -1,0 +1,14 @@
+body {
+  font: 14px/1.4 system-ui, sans-serif;
+  min-width: 18rem;
+  margin: 0;
+}
+main {
+  padding: 0.75rem 1rem;
+}
+#status[data-kind='error'] {
+  color: #b42318;
+}
+#status[data-kind='ok'] {
+  color: #1f6b3a;
+}

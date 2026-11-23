@@ -27,6 +27,7 @@ import { newId, newPublicId } from '../ids.js';
 import { normalise } from '../normalise.js';
 import { nowTimestamp } from '../time.js';
 import type { Actor } from './actor.js';
+import { parseSavedSearch } from './saved-search.js';
 import type { AuditService } from './audit.js';
 import { diffFields } from './audit.js';
 import type { Page } from './cursor.js';
@@ -113,6 +114,8 @@ export class CollectionService {
     if (kind === 'manual' && input.query !== undefined && input.query !== null) {
       throw new ValidationError('A manual collection has a list, not a query (§4.1).');
     }
+    // A saved search that would not run is refused when it is saved, not when it is opened.
+    if (kind === 'smart' && input.query != null) parseSavedSearch(input.query);
 
     const ownerUserId = input.ownerUserId ?? actor.userId ?? this.defaultOwnerUserId;
 
@@ -286,6 +289,7 @@ export class CollectionService {
         if (current.kind === 'smart' && patch.query === null) {
           throw new ValidationError('A smart collection cannot lose its query; delete it instead.');
         }
+        if (current.kind === 'smart' && patch.query !== null) parseSavedSearch(patch.query);
       }
 
       const now = nowTimestamp();

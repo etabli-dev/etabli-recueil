@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Recueil</string>
+    <string name="title_activity_main">Recueil</string>
+    <string name="package_name">dev.etabli.recueil</string>
+    <string name="custom_url_scheme">dev.etabli.recueil</string>
+</resources>

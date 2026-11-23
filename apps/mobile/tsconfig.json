@@ -1,0 +1,20 @@
+{
+  "//": [
+    "The shell pages are bundled by Vite, not emitted by tsc, so this departs from",
+    "tsconfig.base.json where apps/web does: bundler resolution and the DOM library. The",
+    "strictness is inherited unchanged (ADR-0002)."
+  ],
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "types": ["node"],
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true
+  },
+  "include": ["shell/**/*.ts", "test/**/*.ts", "vite.config.ts", "vitest.config.ts"]
+}

@@ -21,8 +21,33 @@ export interface HostConnection {
   readonly token?: string;
 }
 
+/** A file a native capability produced: a scan, a photo, something shared into the app. */
+export interface HostFile {
+  readonly blob: Blob;
+  readonly filename: string;
+  readonly note?: string;
+}
+
+/**
+ * What a native shell can do that a browser cannot (Phase 8). Every member is optional: the web
+ * client offers what the host has and falls back to a file input for the rest.
+ */
+export interface HostCapabilities {
+  /** The platform's document scanner (VisionKit, ML Kit): edge detection, several pages, one PDF. */
+  scanDocument?(): Promise<HostFile[]>;
+  /** A barcode, for an ISBN; null when the person cancelled. */
+  scanBarcode?(): Promise<string | null>;
+  /** Files shared into the app from another one; the callback runs for each share, including one that launched the app. */
+  onShared?(listener: (files: HostFile[]) => void): () => void;
+  /** Whether the device is online; the capture queue flushes when this turns true. */
+  onNetworkChange?(listener: (online: boolean) => void): () => void;
+  /** `ios`, `android`, `desktop`, for wording only. */
+  readonly platform?: string;
+}
+
 export interface RecueilHost {
   connection(): Promise<HostConnection>;
+  readonly capabilities?: HostCapabilities;
 }
 
 /** The host, if one has been installed in `scope`. Anything that is not shaped like one is ignored. */
