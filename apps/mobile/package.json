@@ -32,9 +32,9 @@
     "@capacitor/cli": "8.6.2",
     "@recueil/web": "workspace:*",
     "@types/node": "^22.20.5",
-    "jsdom": "^30.0.1",
+    "jsdom": "^31.0.1",
     "typescript": "^5.9.3",
     "vite": "^8.3.8",
-    "vitest": "^4.1.12"
+    "vitest": "^5.1.1"
   }
 }
