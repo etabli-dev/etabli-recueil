@@ -180,7 +180,7 @@ Signed-off-by: Jane Hacker <jane@example.org>
 
 using your real name (a pseudonym you are known by is acceptable; an anonymous handle is not) and an
 address that reaches you. By adding that line you state that you have the right to submit the work
-under the project's licence, as set out in the DCO text.
+under that written agreement, as set out in the DCO text.
 
 To sign off a series of commits you have already made: `git rebase --signoff <base>`, then
 force-push your branch.
