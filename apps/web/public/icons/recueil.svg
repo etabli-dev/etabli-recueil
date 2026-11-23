@@ -1,12 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Recueil">
-  <title>Recueil</title>
-  <rect width="512" height="512" rx="96" fill="#16181d"/>
-  <!-- Three sheets gathered: the one-liner is "gathers documents from anywhere". -->
-  <g fill="none" stroke="#7fb3f0" stroke-width="20" stroke-linejoin="round">
-    <rect x="120" y="96"  width="220" height="150" rx="12" transform="rotate(-8 230 171)"/>
-    <rect x="150" y="180" width="220" height="150" rx="12" transform="rotate(4 260 255)"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-label="Recueil">
+  <!-- Établi Recueil icon. Coder design system: #28A745 tile, white glyph, one-line glyph ≈70% of the tile, stroke 44 @1024 (aligned to the suite icon, Nov 2026). -->
+  <defs><clipPath id="tile"><rect width="1024" height="1024" rx="192"/></clipPath></defs>
+  <rect width="1024" height="1024" rx="192" fill="#28A745"/>
+  <g clip-path="url(#tile)"><g transform="translate(512,512) scale(1.25912) translate(-520.00,-465.00)">
+  <g stroke-width="34.945" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 260 500 V 276 A 36 36 0 0 1 296 240 H 624 A 36 36 0 0 1 660 276 V 350 H 744 A 36 36 0 0 1 780 386 V 654 A 36 36 0 0 1 744 690 H 396 A 36 36 0 0 1 360 654 V 386 A 36 36 0 0 1 396 350 H 660" fill="none" stroke="#FFFFFF"/>
+    <line x1="430" y1="470" x2="700" y2="470" fill="none" stroke="#FFFFFF"/>
+    <line x1="430" y1="570" x2="610" y2="570" fill="none" stroke="#FFFFFF"/>
   </g>
-  <rect x="172" y="266" width="220" height="150" rx="12" fill="#7fb3f0"/>
-  <text x="282" y="376" font-family="Georgia, 'Times New Roman', serif" font-size="120" font-weight="700"
-        text-anchor="middle" fill="#16181d">R</text>
+  </g></g>
 </svg>
