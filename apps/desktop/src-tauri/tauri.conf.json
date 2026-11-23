@@ -49,7 +49,7 @@
     "longDescription": "Recueil gathers documents from anywhere, keeps a content-addressed library with a bibliographic facet, verifies references and exposes the library to R, Python and LLMs. This desktop application is a client of a Recueil server.",
     "publisher": "R. Heller",
     "copyright": "Copyright 2026 R. Heller",
-    "license": "AGPL-3.0-or-later",
+    "license": "LicenseRef-Proprietary",
     "licenseFile": "../../../LICENSE",
     "homepage": "https://github.com/etabli-dev/etabli-recueil",
     "icon": [

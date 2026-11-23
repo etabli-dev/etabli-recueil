@@ -5,7 +5,7 @@
 | Status | Draft v0.1 |
 | Date | 2026-08-22 |
 | Name | *Recueil* (working title; alternatives in §9, decision in ADR-019) |
-| License | AGPL-3.0 (ADR-005) |
+| License | Proprietary, all rights reserved (ADR-026; was AGPL-3.0, ADR-005) |
 | Scope | Self-hosted, API-first document and reference manager with built-in reference verification, bibliometrics and systematic-review workflow |
 
 ---
@@ -14,7 +14,7 @@
 
 Recueil is a self-hosted server that gathers documents from anywhere (browser, mail, scanner, WebDAV, camera), keeps a content-addressed library with a bibliographic facet, verifies and enriches references against the open scholarly graph, and exposes the whole library to R, Python and LLMs as data. Systematic reviews and bibliometric mapping are native workflows, not exports.
 
-**Positioning:** Zotero's capture ecosystem + Paperless-ngx's ingestion model + bibliometrix/VOSviewer's analysis layer + Covidence/Rayyan's screening workflow, in one AGPL server with thin cross-platform clients.
+**Positioning:** Zotero's capture ecosystem + Paperless-ngx's ingestion model + bibliometrix/VOSviewer's analysis layer + Covidence/Rayyan's screening workflow, in one server with thin cross-platform clients.
 
 **Tagline:** Gather. Verify. Map.
 
@@ -451,7 +451,7 @@ Word/LibreOffice/Docs integration via Zotero's integration protocol · multi-rev
 All repositories live in the `etabli` GitHub organisation from the first commit (org slug to confirm).
 
 ```
-etabli/recueil               monorepo, AGPL-3.0
+etabli/recueil               monorepo, all rights reserved
   apps/server/               Fastify app, job runner, plugin host
   apps/web/                  React SPA
   apps/desktop/              Tauri 2 (server as sidecar)

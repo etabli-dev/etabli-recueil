@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "The in-process plugin host (ADR-0012) and the engines it serves: enrichment through resolvers, the checks engine and the deduplication engine (CONCEPT \u00a75.4\u20135.6, \u00a75.13).",
-  "license": "AGPL-3.0-or-later",
+  "license": "UNLICENSED",
   "type": "module",
   "exports": {
     ".": {

@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "The ingestion and deduplication rule engine: one declarative, versioned rule format in YAML or JSON, a linear-time regular-expression engine, deterministic precedence, an explicable trace and a dry run that changes nothing.",
-  "license": "AGPL-3.0-or-later",
+  "license": "UNLICENSED",
   "type": "module",
   "sideEffects": false,
   "exports": {

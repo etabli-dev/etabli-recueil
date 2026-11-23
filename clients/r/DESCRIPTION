@@ -8,7 +8,7 @@ Description: Reads a 'Recueil' library over its REST API as data frames: items, 
     the 'bibliometrix' analyses run on it unmodified. Exports networks for 'VOSviewer'
     and 'Gephi'. For systematic reviews, returns the 'PRISMA2020' counts, the risk-of-bias
     table 'robvis' reads and extraction data in the shape 'metafor' takes.
-License: AGPL (>= 3)
+License: file LICENSE
 Encoding: UTF-8
 Imports:
     httr2 (>= 1.0.0),

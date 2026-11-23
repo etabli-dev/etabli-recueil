@@ -24,7 +24,7 @@ the open-decision backlog in CONCEPT.md §10.
 | [0002](0002-typescript-monorepo.md) | TypeScript monorepo | Accepted | Phase 0 |
 | [0003](0003-sqlite-by-default-postgres-optional.md) | SQLite by default, Postgres optional | Accepted | Phase 0 |
 | [0004](0004-content-hash-identity.md) | Content-hash identity | Accepted | Phase 0 |
-| [0005](0005-agpl-30-or-later.md) | AGPL-3.0-or-later | Accepted | Phase 0 |
+| [0005](0005-agpl-30-or-later.md) | AGPL-3.0-or-later | Superseded (by ADR-0026) | Phase 0 |
 | [0006](0006-zotero-connector-protocol-compatibility.md) | Zotero connector protocol compatibility | Accepted | Phase 0 |
 | [0007](0007-tauri-2-for-desktop-and-mobile-shells.md) | Tauri 2 for desktop and mobile shells | Accepted | Phase 0 |
 | [0008](0008-parquet-and-duckdb-analytics-layer.md) | Parquet and DuckDB analytics layer | Accepted | Phase 0 |
@@ -45,6 +45,7 @@ the open-decision backlog in CONCEPT.md §10.
 | [0023](0023-desktop-shell-connects-before-it-bundles.md) | The desktop shell connects to a server before it bundles one | Proposed | Phase 2 (governs Phase 4) |
 | [0024](0024-capacitor-for-the-mobile-shell.md) | Capacitor for the mobile shell | Accepted | Phase 2 (governs Phase 8) |
 | [0025](0025-two-way-zotero-sync.md) | Two-way sync with a zotero.org library | Accepted | Step Z, before Phase 3 |
+| [0026](0026-proprietary-licence.md) | Proprietary licence, all rights reserved | Accepted | Step Z, before Phase 3 |
 
 ## Adding a record
 

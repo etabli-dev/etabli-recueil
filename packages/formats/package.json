@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "Citation keys and bibliographic serialisation: BibTeX, BibLaTeX, RIS and CSL-JSON, in both directions, as pure functions over the shared contract.",
-  "license": "AGPL-3.0-or-later",
+  "license": "UNLICENSED",
   "type": "module",
   "sideEffects": false,
   "exports": {

@@ -41,4 +41,4 @@ Note alternatives you rejected and anything a reviewer would otherwise have to r
 - [ ] Commit subjects are imperative and under 72 characters; bodies explain why
 - [ ] **No AI attribution anywhere** — no `Co-Authored-By` for a tool, no "Generated with", no assistant signature in commits, comments, files or this description
 - [ ] Every commit is signed off (`git commit -s`), certifying the DCO
-- [ ] I have read the [Code of Conduct](https://github.com/etabli-dev/etabli-recueil/blob/main/CODE_OF_CONDUCT.md) and my contribution is licensed AGPL-3.0-or-later
+- [ ] I have read the [Code of Conduct](https://github.com/etabli-dev/etabli-recueil/blob/main/CODE_OF_CONDUCT.md) and I have a written contribution agreement with the copyright holder (see CONTRIBUTING.md)

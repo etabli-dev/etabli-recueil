@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "The Recueil web client: a keyboard-first three-pane library, a composable item pane and a PDF.js reader, served as a static SPA against the REST contract.",
-  "license": "AGPL-3.0-or-later",
+  "license": "UNLICENSED",
   "type": "module",
   "engines": {
     "node": ">=22"

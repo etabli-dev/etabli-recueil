@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "Two-way sync between a Recueil library and zotero.org libraries through the Zotero Web API v3 (ADR-0025): pull, push, a per-field three-way merge, conflicts, files both ways.",
-  "license": "AGPL-3.0-or-later",
+  "license": "UNLICENSED",
   "type": "module",
   "exports": {
     ".": {

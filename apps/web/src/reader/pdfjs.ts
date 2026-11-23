@@ -4,7 +4,7 @@
  * The worker is imported through Vite's `?url` suffix so that it is emitted as its own asset with a
  * hashed name and no CDN is involved — the whole application has to work on a machine with no
  * outbound network, which is the point of self-hosting (CONCEPT.md §5.15). PDF.js is Apache-2.0 and
- * so compatible with AGPL-3.0 (§5.16).
+ * a permissive licence that permits use in proprietary software (§5.16).
  *
  * Isolated in its own module so that everything else in `src/reader` can be imported — and tested —
  * without pulling three megabytes of PDF engine in with it.

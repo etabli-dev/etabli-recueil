@@ -173,7 +173,7 @@ for multi-user.
 
 ## Openness
 
-The repository is public and AGPL from the first commit, but the project is developed as a tool for
+The repository is public (proprietary, all rights reserved, since 22 November 2026), but the project is developed as a tool for
 its author through **M3** and opens properly at **M4** ([ADR-0014](adr.qmd)). Until then there is no
 support commitment and no roadmap promise. Bug reports, reproductions and corrections to the
 specification are welcome now; large unsolicited pull requests are likely to be declined.

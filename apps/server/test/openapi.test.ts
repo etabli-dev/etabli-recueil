@@ -67,7 +67,7 @@ describe('GET /openapi.json', () => {
       expect(document.info).toBeTypeOf('object');
       expect(document.info.title).toBe('Recueil API');
       expect(typeof document.info.version).toBe('string');
-      expect(document.info.license.identifier).toBe('AGPL-3.0-or-later');
+      expect(document.info.license.identifier).toBe('LicenseRef-Proprietary');
       expect(document.paths).toBeTypeOf('object');
 
       // Every path is a path template, and every operation on it declares responses.
@@ -187,7 +187,7 @@ describe('GET /api/v1/system/info', () => {
       expect(info.apiBasePath).toBe('/api/v1');
       expect(info.openapi).toEqual({ version: '3.1.0', url: '/openapi.json' });
       expect(info.storageBackend).toBe('local');
-      expect(info.licence).toBe('AGPL-3.0-or-later');
+      expect(info.licence).toBe('LicenseRef-Proprietary');
       expect(info.runtime.node).toBe(process.versions.node);
     } finally {
       await h.close();

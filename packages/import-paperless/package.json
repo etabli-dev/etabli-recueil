@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "The Paperless-ngx migrator: reads documents, tags, correspondents, document types, custom fields, notes and originals from the Paperless-ngx REST API, maps them onto the Recueil Office facet, hashes every original, and produces the verification report the M2 exit criterion names.",
-  "license": "AGPL-3.0-or-later",
+  "license": "UNLICENSED",
   "type": "module",
   "exports": {
     ".": {

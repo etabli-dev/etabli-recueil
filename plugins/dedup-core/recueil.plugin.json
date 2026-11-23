@@ -5,7 +5,7 @@
   "version": "1.0.0",
   "description": "Finds duplicate items: an exact match on DOI, PMID, PMCID, arXiv id or ISBN, and a fuzzy match on title, year and first author that is only ever proposed for review.",
   "author": { "name": "Établi" },
-  "licence": "AGPL-3.0-or-later",
+  "licence": "LicenseRef-Proprietary",
   "recueilApi": "^1.0.0",
   "main": "./dist/index.js",
   "permissions": [],

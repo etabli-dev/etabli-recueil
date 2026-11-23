@@ -103,7 +103,7 @@ docker build -f deploy/Dockerfile --target runtime \
 
 `.dockerignore` excludes local dependencies, generated outputs, Git metadata and local environment/key files. Lockfiles, package manifests, source, migrations, build scripts and fixtures remain build inputs. The image resolves the CLI launcher from its package manifest and copies its production dependency tree; neither pnpm nor workspace symlinks are required to run the deployed CLI.
 
-The tag-triggered [release workflow](../.github/workflows/release.yml) prepares multi-architecture images and provenance/SBOM outputs. Its existence is not evidence that a particular image or attestation has been published. Do not substitute an assumed registry tag for the verified local build. Deployment of modified AGPL software must retain the applicable source-delivery notices and source access.
+The tag-triggered [release workflow](../.github/workflows/release.yml) prepares multi-architecture images and provenance/SBOM outputs. Its existence is not evidence that a particular image or attestation has been published. Do not substitute an assumed registry tag for the verified local build. Recueil is proprietary (all rights reserved); deploying it requires a licence from the copyright holder. Bundled third-party components keep their own licence notices.
 
 ## Run the container regression check
 

@@ -292,7 +292,7 @@ Zenodo DOI follows with the first archived release).
   version = {0.1.0},
   year    = {2026},
   url     = {https://github.com/etabli-dev/etabli-recueil},
-  license = {AGPL-3.0-or-later}
+  license = {All rights reserved}
 }
 ```
 
@@ -301,4 +301,6 @@ https://github.com/etabli-dev/etabli-recueil
 
 ## Licence
 
-AGPL-3.0-or-later — see [`LICENSE`](LICENSE).
+Proprietary, all rights reserved — see [`LICENSE`](LICENSE). Third-party components keep their
+own licences (see `THIRD_PARTY*` and `NOTICE`). Versions published before 22 November 2026 remain
+available under AGPL-3.0-or-later ([ADR-0026](spec/adr/0026-proprietary-licence.md)).

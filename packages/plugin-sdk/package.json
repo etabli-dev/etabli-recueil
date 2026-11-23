@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "description": "The typed plugin authoring surface: the hook interfaces, context objects, error hierarchy and test helpers of plugin API 1.0.0 (spec/plugin-api.md, spec/hooks.md).",
-  "license": "AGPL-3.0-or-later",
+  "license": "UNLICENSED",
   "type": "module",
   "exports": {
     ".": {

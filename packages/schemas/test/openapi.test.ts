@@ -40,7 +40,7 @@ describe('the generated document', () => {
   it('carries the info block the specification requires', () => {
     expect(document.info.title).toBe('Recueil API');
     expect(typeof document.info.version).toBe('string');
-    expect(document.info.license?.identifier).toBe('AGPL-3.0-or-later');
+    expect(document.info.license?.identifier).toBe('LicenseRef-Proprietary');
     expect(document.info.description).toContain('P6');
   });
 

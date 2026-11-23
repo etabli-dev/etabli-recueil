@@ -7,7 +7,7 @@
       "displayName": "Core resolvers",
       "description": "Eleven metadata resolvers: Crossref, OpenAlex, PubMed, DataCite, arXiv, Unpaywall and more.",
       "repository": "https://github.com/etabli-dev/etabli-recueil/tree/main/plugins/resolvers-core",
-      "licence": "AGPL-3.0-or-later",
+      "licence": "LicenseRef-Proprietary",
       "recueilApi": "^1.0.0",
       "hooks": [
         "resolver"
@@ -25,7 +25,7 @@
       "displayName": "Core checks",
       "description": "The thirteen checks of the verification engine.",
       "repository": "https://github.com/etabli-dev/etabli-recueil/tree/main/plugins/checks-core",
-      "licence": "AGPL-3.0-or-later",
+      "licence": "LicenseRef-Proprietary",
       "recueilApi": "^1.0.0",
       "hooks": [
         "check"
@@ -45,7 +45,7 @@
       "displayName": "Core duplicate rules",
       "description": "Identifier and fuzzy title rules for record deduplication.",
       "repository": "https://github.com/etabli-dev/etabli-recueil/tree/main/plugins/dedup-core",
-      "licence": "AGPL-3.0-or-later",
+      "licence": "LicenseRef-Proprietary",
       "recueilApi": "^1.0.0",
       "hooks": [
         "dedupRule"

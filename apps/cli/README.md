@@ -365,4 +365,4 @@ implementation the help text still calls unimplemented, are both a CLI that lies
 
 ## Licence
 
-AGPL-3.0-or-later. See [`LICENSE`](../../LICENSE).
+Proprietary, all rights reserved. See [`LICENSE`](../../LICENSE).

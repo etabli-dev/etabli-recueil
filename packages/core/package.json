@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "The Recueil core: the Drizzle data model, the forward-only migrations, the content-addressed store and the library services every client reaches through the API.",
-  "license": "AGPL-3.0-or-later",
+  "license": "UNLICENSED",
   "type": "module",
   "exports": {
     ".": {

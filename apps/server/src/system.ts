@@ -43,7 +43,7 @@ export const SystemInfoSchema = z
     storageBackend: z.enum(['local', 'webdav', 's3']),
     /** Absent unless the operator set `RECUEIL_BASE_URL` (docs/self-hosting.qmd). */
     baseUrl: z.string().max(1024).optional(),
-    licence: z.literal('AGPL-3.0-or-later'),
+    licence: z.literal('LicenseRef-Proprietary'),
   })
   .meta({
     id: 'SystemInfo',
@@ -78,7 +78,7 @@ export const buildSystemInfo = (input: SystemInfoInput): SystemInfo => {
     startedAt: input.startedAt.toISOString(),
     uptimeSeconds: Math.max(0, (Date.now() - input.startedAt.getTime()) / 1000),
     storageBackend: input.recueil.storage.backend,
-    licence: 'AGPL-3.0-or-later',
+    licence: 'LicenseRef-Proprietary',
   };
   if (input.config.baseUrl !== undefined) info.baseUrl = input.config.baseUrl;
   return info;

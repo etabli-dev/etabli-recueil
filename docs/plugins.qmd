@@ -39,7 +39,7 @@ at install and at every activation.
   "name": "recueil-plugin-example-resolver",
   "version": "0.1.0",
   "pluginApi": "^1.0.0",
-  "licence": "AGPL-3.0-or-later",
+  "licence": "LicenseRef-Proprietary",
   "permissions": ["network:crossref.org", "items:read", "items:write"],
   "hooks": ["resolver"],
   "settings": { "$schema": "https://json-schema.org/draft/2020-12/schema" }
@@ -109,8 +109,8 @@ plugins in the monorepo. Community plugins live in their author's repository at 
 release pace. The registry is a JSON index in a GitHub repository with install-from-URL support, and
 is Phase 9 work; until it exists, link your plugin from a discussion thread.
 
-A plugin that links the server in-process is a derivative work of an AGPL-3.0-or-later program, so
-`AGPL-3.0-or-later` is the expected licence for a plugin's own source.
+Recueil is proprietary (all rights reserved). A plugin that links the server in-process needs a
+licence agreement with the copyright holder; first-party plugins are `LicenseRef-Proprietary`.
 
 A plugin that duplicates a first-party one is welcome. Competition between a plugin and the built-in
 behaviour is a sign the hook is doing its job.

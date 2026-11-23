@@ -392,4 +392,4 @@ the same file.
 
 ---
 
-Licence: AGPL-3.0-or-later.
+Licence: proprietary, all rights reserved. See [`LICENSE`](../../LICENSE).
